@@ -278,36 +278,68 @@ def test_a_count_round_deals_the_techniques_of_every_family_evenly():
     assert uneven == {}
 
 
-# The ten heavy full-text encodings, which the eval release's rules (a
-# translation and ascii_art refuse them) left only the cheap partners they were
-# dealt with: of complexity 3, each fits only a unit whose earlier picks leave 3
-# points, and over 4,000 units in three groups at seed 42 the ten are drawn 5
-# times in all under the unit budget and 10 under the group budget, five and
-# two of them never. They wait for a dealing slot of their own, and the test
-# asks for them again once it comes: delete this set with it.
-_AWAITING_THE_HEAVY_SLOT = {
-    "to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse", "to_braille",
-    "to_hex", "to_binary", "to_html_entities", "to_base32", "to_base85"}
-
-
 @pytest.mark.parametrize("section", [{}, {"budget": "group"}], ids=["unit", "group"])
 def test_the_default_attacks_draw_every_technique_of_their_pool(section):
     """No step's picks starve another step's families: the request
     obfuscation once counted its picks as the obfuscation layer's, and 14
     encode and sensitive_words techniques were never drawn. A deprecated
-    technique, or one no simulated input may take, is not asked for, nor,
-    for now, a heavy full-text encoding (``_AWAITING_THE_HEAVY_SLOT``). When
+    technique, or one no simulated input may take, is not asked for. When
     the layers of one rate were locked in or out of phase (commit 590babe),
     some techniques were drawn 2 times at seed 42 and 14 at 43; one plan now
-    holds them all."""
+    holds them all. The eval release's rules left the ten heavy full-text
+    encodings 5 draws in all under the unit budget and 10 under the group
+    budget, five and two of them never, until they got a dealing slot of
+    their own (``sampling.HEAVY_ENCODINGS``)."""
     units = 4000
     drawn, pool = simulate.deal_kind(section, units, groups=3, seed=42)
     table = simulate.shares(drawn, pool)
     texts = simulate.inputs(units, groups=3)["prompt"]
     asked = [fn.__name__ for fn in pool if not getattr(fn, "deprecated", None)
-             and fn.__name__ not in _AWAITING_THE_HEAVY_SLOT
              and any(applies(fn, text, "harmful") for text in texts)]
     assert [name for name in asked if table[name]["count"] == 0] == []
+
+
+# The ten heavy full-text encodings, dealt in a slot of their own beside encode
+# in a budget draw (sampling.HEAVY_ENCODINGS, at the spec's
+# heavy_encoding_weight, 0.2).
+_HEAVY = ("to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
+          "to_braille", "to_hex", "to_binary", "to_html_entities", "to_base32",
+          "to_base85")
+
+
+def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares):
+    """3,000 units in three groups at seed 42: 45 draws of the ten, 3 to 6
+    each (44 to 50 over seeds 42 to 46 in 1, 3 or 10 groups, at least 2
+    each). Dealt as encode's members they got 12, two of them never; dealt
+    as a family of their own (a weight of 1), about 200."""
+    counts = [default_shares[name]["count"] for name in _HEAVY]
+    assert 36 <= sum(counts) <= 60  # noqa: PLR2004
+    assert min(counts) >= 3  # noqa: PLR2004
+
+
+@pytest.mark.parametrize("seed", [1, 42, 123])
+def test_no_group_of_the_default_attacks_goes_without_a_heavy_encoding_or_ascii_art(
+        seed):
+    """Every group of 100 units, in one, three and ten groups, draws a heavy
+    full-text encoding and ASCII art: at least 2 and 4 times over seeds 1 to
+    3, 7, 42 to 46 and 123. Dealt as encode's members, the heavy encodings
+    were missing from 1 to 9 groups in 29 of those 30 plans. ASCII art
+    refuses many families (the hacking and manipulation techniques, a
+    translation, the wrappers, wording, word art, the payload split, the
+    heavy encodings), so it is drawn on the units left with none of them."""
+    per_group = 100
+    for groups in (1, 3, 10):
+        rows, _ = simulate.plan_kind(
+            {}, simulate.inputs(per_group * groups, groups), seed=seed)
+        by_group: dict[str, Counter] = {}
+        for row in rows:
+            by_group.setdefault(row["category"], Counter()).update(row["combination"])
+        assert len(by_group) == groups
+        without = {category: [what for what, drawn in (
+            ("heavy", sum(counts[name] for name in _HEAVY)),
+            ("ascii_art", counts["to_ascii_art"])) if not drawn]
+            for category, counts in by_group.items()}
+        assert {category: what for category, what in without.items() if what} == {}
 
 
 def test_no_family_of_the_default_attacks_thins_out_in_a_group():
@@ -474,8 +506,13 @@ _BUDGETS = [
 # undealt draws). The manipulation layer applying last, around the finished
 # question, moved it once more, by order alone: the same techniques are drawn,
 # and a draw that holds a manipulation technique beside a later step names it
-# last (48 of the 240 dealt units, 19 of the 200 undealt draws).
-_PINNED_DRAWS = "4b5617f1ee9641ddc935cd315fe5b6c49a940d2fb8451fcc31bb5acc5aa9e556"
+# last (48 of the 240 dealt units, 19 of the 200 undealt draws). The heavy
+# full-text encodings' dealing slot moved it again: a budget draw's
+# obfuscations deal them under a name of their own beside encode, so the
+# group's family counts and the names the dealer breaks a tie among change
+# from the first obfuscation pick on (219 of the 240 dealt units; the 200
+# undealt draws ask no dealer and do not move).
+_PINNED_DRAWS = "93982088b48668f879bb867db3cdaf1665975b1561731774159496f26b5f01ed"
 
 
 def test_the_budget_draws_are_the_pinned_ones():
@@ -605,7 +642,7 @@ def test_a_unit_without_a_request_takes_no_request_obfuscation(dealt):
             allow_request_obfuscation=True,
             sampling_probs={"requests": 0.5, "request_obfuscation": 1.0})
         if dealer is not None:
-            JP._observe(dealer, combined)
+            JP._observe(dealer, combined, heavy_apart=True)
         held.append((any(fn.layer == "requests" for fn in combined.techniques),
                      combined.request_obfuscation is not None))
     assert [request for request, obfuscated in held if obfuscated] == [True] * sum(

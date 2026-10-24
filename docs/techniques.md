@@ -149,7 +149,13 @@ complexity 3). The ten `to_sensitive_words_encode_*`
 carry one too: `heavy` for base64, unicode and ascii, `light` for the rest. Of
 these ten, the `heavy` ones stay allowed with `fsh` and `dap`, which the plain
 `heavy` `encode` techniques are not; the `light` ones, like the plain `light`
-ones, may be the request obfuscation, which no `heavy` one is.
+ones, may be the request obfuscation, which no `heavy` one is. A budget round
+deals the ten plain `heavy` ones, the full-text encodings, in a slot of their
+own beside `encode`, at the spec's `heavy_encoding_weight` (0.2) times
+`encode`'s weight, about a fifth of a family's draws: dealt as `encode`'s
+members they were seldom drawn, since one fits only a unit with 3 points of
+its budget left ([internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)).
+A count round deals them as `encode`'s members.
 
 Seventeen of them are tagged `needs_latin`: the ciphers `to_rot13`,
 `to_rot18`, `to_rot47`, `to_caesar_cipher`, `to_atbash`, the three
@@ -491,12 +497,12 @@ planned units; for 1,000 inputs of one category and entry type, planned
 with the packaged attack kind and seed 42:
 
 ```text
-Model calls: 847 of 1000 planned units call a model, 2003 to 7717 calls (translation 480 to 2880, from the spec's calls).
+Model calls: 855 of 1000 planned units call a model, 1997 to 7669 calls (translation 480 to 2880, from the spec's calls).
 ```
 
-Other seeds (43 to 46) give 849 to 857 units, 1,995 to 2,003 calls at the
-low end, 7,683 to 7,745 at the high end and a translation share of 480 to 482
-and 2,880 to 2,892.
+Other seeds (43 to 46) give 848 to 853 units, 1,986 to 1,994 calls at the
+low end, 7,610 to 7,732 at the high end and a translation share of 478 to 480
+and 2,868 to 2,880.
 
 The translation share goes to the translation model (a machine
 translation's judge, one call a round, to the generation model).

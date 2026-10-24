@@ -140,7 +140,9 @@ def read_spec(path: Path) -> dict:
     its ``layers.allow`` names them
     (:func:`redact.jailbreak.augmentation.resolve`). ``decode_hint_rate``
     (absent is 0) is the share of hinted encodings written with a hint
-    (:func:`decode_hint_rate`).
+    (:func:`decode_hint_rate`). ``heavy_encoding_weight`` (absent is none)
+    is the weight the heavy full-text encodings are dealt at beside the
+    ``encode`` family in a budget draw (:func:`heavy_encoding_weight`).
 
     What :func:`tag` does not read off a technique is checked here: each
     family's keys (:data:`FAMILY_KEYS`) and ``layer``, the spec's
@@ -155,8 +157,9 @@ def read_spec(path: Path) -> dict:
             of layers of ``layer_order``; a ``layer_rates`` entry is not a
             number from 0 to 1 for a layer or ``request_obfuscation``;
             ``request_obfuscation_refuses`` names a family the spec lacks or
-            gives something else than a list of families; or
-            ``decode_hint_rate`` is not a number from 0 to 1.
+            gives something else than a list of families;
+            ``decode_hint_rate`` is not a number from 0 to 1; or
+            ``heavy_encoding_weight`` is not a number above 0 and at most 1.
     """
     spec = json.loads(Path(path).read_text(encoding="utf-8"))
     layers, off = spec["layer_order"], spec.get("layers_off_by_default", [])
@@ -170,6 +173,13 @@ def read_spec(path: Path) -> dict:
             f"combination_spec.json: decode_hint_rate must be a number from 0 "
             f"to 1, the share of hinted encodings written with a hint, got "
             f"{rate!r}.")
+    heavy = spec.get("heavy_encoding_weight", 1)
+    if not (_is_rate(heavy) and heavy > 0):
+        raise ValueError(
+            f"combination_spec.json: heavy_encoding_weight must be a number "
+            f"above 0 and at most 1, the weight the heavy full-text encodings "
+            f"are dealt at beside the encode family in a budget draw, got "
+            f"{heavy!r}; leave it out to deal them as encode's members.")
     _check_families(spec["families"], layers)
     _check_request_obfuscation_refuses(spec)
     for key, rate in spec.get("layer_rates", {}).items():
@@ -290,6 +300,15 @@ def decode_hint_rate() -> float:
     encoding (``obfuscation/decode_hints.json``) writes its text with a hint
     to decode it; 0 when the spec gives none."""
     return load_spec().get("decode_hint_rate", 0)
+
+
+def heavy_encoding_weight() -> float | None:
+    """The spec's ``heavy_encoding_weight``: the weight, times the ``encode``
+    family's, that a budget draw's obfuscations deal the heavy full-text
+    encodings at, under a name of their own beside the family
+    (:data:`redact.jailbreak.sampling.HEAVY_ENCODINGS`); ``None`` when the
+    spec gives none, and they are dealt as encode's members."""
+    return load_spec().get("heavy_encoding_weight")
 
 
 def data_rows(file: str, folder: Path = _CONFIGS) -> list[dict]:

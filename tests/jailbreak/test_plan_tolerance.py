@@ -319,6 +319,26 @@ def test_the_rules_id_moves_with_the_layer_order(monkeypatch):
     assert JP.rules_id(pool) != before
 
 
+@pytest.mark.parametrize("weight", [0.5, None], ids=["another", "none"])
+def test_the_rules_id_moves_with_the_heavy_encodings_weight(monkeypatch, weight):
+    """A budget draw deals the heavy full-text encodings at the spec's
+    ``heavy_encoding_weight`` (the eval release gave them the slot): a plan
+    kept from before it, or made at another weight, has another rules id, so
+    its resume warns."""
+    import redact.jailbreak.plan as JP
+
+    pool = [registry(all_techniques())["to_base64"]]
+    before = JP.rules_id(pool)
+    spec = T.load_spec()
+    assert spec["heavy_encoding_weight"] == 0.2  # noqa: PLR2004
+    changed = {key: value for key, value in spec.items()
+               if key != "heavy_encoding_weight"}
+    if weight is not None:
+        changed["heavy_encoding_weight"] = weight
+    monkeypatch.setattr(JP, "load_spec", lambda: changed)
+    assert JP.rules_id(pool) != before
+
+
 def test_a_resume_under_the_plan_s_version_and_rules_is_quiet(
         tmp_path, monkeypatch, caplog):
     out = tmp_path / "jb.csv"

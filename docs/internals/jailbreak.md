@@ -35,12 +35,12 @@ the technique names are in [techniques.md](../techniques.md).
 
 | Module | Holds |
 |---|---|
-| `technique.py` | The technique contract, `load_spec` and `read_spec` (the spec, its generators expanded), `data_rows`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds`, `FIRST_VERSION`, `version_key`, `decode_hint_rate` (the spec's share of hinted encodings written with a hint) |
+| `technique.py` | The technique contract, `load_spec` and `read_spec` (the spec, its generators expanded), `data_rows`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds`, `FIRST_VERSION`, `version_key`, `decode_hint_rate` (the spec's share of hinted encodings written with a hint), `heavy_encoding_weight` (the spec's weight of the heavy full-text encodings' slot) |
 | `rewrite/`, `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` and `smalltalk.py` each hold both families of their pair), each with a getter; `get_all_rewrite_functions` (16), `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage; `all_techniques` joins the rewrite layer last, so the others keep their registry order. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)`; the fake turns (`manipulation/fake_turns.py`) need none. `hacking/persona_templates.py` checks its persona frames at import (`check_pools`): a frame is its technique's own text, and only the mechanics are its `variant_pool` |
 | `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation`, `uses_check` (whether a pool holds a technique the check model checks), `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates`, `after_request_obfuscation` (what may still join once a pick is the request obfuscation) |
-| `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family` |
+| `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family`, `deal_key` (the name a dealer counts a technique under), `REQUEST_SCOPE`, `HEAVY_ENCODINGS` |
 | `plan.py` | `plan_run`, `assign_combination` (with the opt-in group budget: `_allowance`, `UNIT_HEADROOM`), `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written through `dataset/planfile.py`, its `spec_version` dating the pool and its `rules` the rules it was drawn by, `rules_id`), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
 | `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination` |
 | `units.py` | `pending_units`, `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
@@ -380,7 +380,7 @@ order.
   translation, was drawn 8 to 51 times in 900 units by the seed (commit
   `590babe`, seeds 1, 2, 42 and 43, three groups); with the jitter they meet
   on about a quarter of the units (49% to 55% of the hacking units, seeds 1,
-  2 and 42 to 46) and it is drawn 62 to 65 times.
+  2 and 42 to 46) and it is drawn 59 to 64 times.
 - **Families.** Among the eligible families, the dealer picks the one with
   the lowest count over its weight (`family_weights`, 1 by default), ties
   broken by the unit's rng. The request obfuscation's families are counted
@@ -391,6 +391,27 @@ order.
   those the layer's families dealt most, and the layer drew them only when
   no other family fitted: 14 techniques went undrawn in 3,000 units (before
   commit `ec8bb42`, seed 42, three groups; none does since).
+- **The heavy encodings' slot.** In a budget draw's obfuscations (phase 4)
+  the dealer deals the ten heavy full-text encodings (first family
+  `encode`, `encode_weight` heavy; not the three heavy
+  `to_sensitive_words_encode_*`, which are `sensitive_words` techniques)
+  under a name of their own, `HEAVY_ENCODINGS` (`"encode:heavy"`), beside
+  `encode`, at the spec's `heavy_encoding_weight` (0.2) times encode's
+  weight (`plan_run` adds it to the dealer's weights). `deal_key(fn,
+  heavy_apart=)` gives the name, read by `_pick_by_family` and `_observe`;
+  `assign_combination` passes `heavy_apart` for a budget draw only. Dealt
+  as encode's members, a heavy one fitted only a unit with 3 points left,
+  and the light members kept encode's count high, so encode was seldom the
+  family dealt on such a unit: after the eval release's rules the ten were
+  drawn 8 to 16 times in 3,000 units of the default attacks (three groups,
+  seeds 42 to 46). With the slot they are drawn 44 to 50 times (seeds 42 to
+  46, in one, three or ten groups), about a fifth of a family's draws, and
+  `encode`'s draws per unit go from 0.242 to 0.255 (seed 42, three groups).
+  A count draw (`exact_techniques`: the eval type, the natural kind, the
+  first two escalation rounds) and a draw without a dealer deal them as
+  encode's members, as before, so their draws do not move. The slot is not
+  a family: `family_weights` cannot name it, and weighting `encode` scales
+  it too.
 - **Techniques.** Within that family, the dealer picks the eligible member
   the group has dealt least (`Dealer.pick_member`, its own `members`
   counter, apart from the families' `counts` the generation axes also
@@ -400,8 +421,9 @@ order.
   `sensitive_words`): a member of complexity 3 fits only a unit whose
   earlier picks leave 3 points, and `fsh` and `dap` refuse the heavy
   `encode` members, so over 3,000 units of the default attacks (three groups)
-  each heavy `encode` member is drawn 0 to 3 times at seed 42 (0 to 3 over
-  seeds 42 to 46) against 30 to 31 for one of complexity 2 (30 to 33). That
+  each heavy `encode` member is drawn 3 to 6 times at seed 42 (3 to 6 over
+  seeds 42 to 46), even with its slot, against 30 to 32 for one of
+  complexity 2 (30 to 33). That
   skew is intended. A direct `sample_combination` call without a dealer picks both
   uniformly, as the registry fixture's seeds pin. A fresh plan with the
   same seed draws differently from one made before member dealing; a kept
@@ -414,7 +436,8 @@ order.
   fitting technique, is logged as a WARNING naming the coverage file.
 
 After each unit, `assign_combination` has `_observe` count the kept draw's
-families (the request obfuscation's under `REQUEST_SCOPE`), techniques,
+families (the request obfuscation's under `REQUEST_SCOPE`, a budget draw's
+heavy full-text encodings under `HEAVY_ENCODINGS`), techniques,
 layers, request obfuscation and complexity in the group's dealer. Each group has its own dealer; nothing is
 counted across groups.
 
@@ -462,11 +485,11 @@ budget.
   `max_complexity`, and a round naming either key.
 - Measured with `simulate.compare_budgets` over 3,000 units of the default
   attacks (three groups, seed 42; in brackets the range over seeds 42 to 46),
-  it keeps the mean at `max_complexity` (5.63 to 6.00), lets some units reach
-  the ceiling (800 of 3,000 above 6, 760 to 800, none above 9) and evens out
+  it keeps the mean at `max_complexity` (5.64 to 6.00), lets some units reach
+  the ceiling (780 of 3,000 above 6, 745 to 780, none above 9) and evens out
   the cheap members of `encode` and `sensitive_words`, and draws more
-  techniques of complexity 3 or more (1,544 against 1,431, the heavy `encode`
-  members 0 to 2 times each, 0 to 3, against 0 to 3, 0 to 3); the extra
+  techniques of complexity 3 or more (1,578 against 1,451, the heavy `encode`
+  members 4 to 6 times each, 3 to 6, against 3 to 6, 3 to 6); the extra
   allowance goes to the obfuscations.
   The table is in [configuration.md](../configuration.md#the-group-budget).
 

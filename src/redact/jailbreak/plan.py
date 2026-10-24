@@ -24,8 +24,14 @@ from redact.dataset.planfile import coverage_path, plan_record, write_plan
 
 from .chain import combine_techniques
 from .pool import TRANSLATION
-from .sampling import DEFAULT_MAX_COMPLEXITY, REQUEST_SCOPE, sample_combination
-from .technique import FIRST_VERSION, LATIN, applies, load_spec
+from .sampling import (
+    DEFAULT_MAX_COMPLEXITY,
+    HEAVY_ENCODINGS,
+    REQUEST_SCOPE,
+    deal_key,
+    sample_combination,
+)
+from .technique import FIRST_VERSION, LATIN, applies, heavy_encoding_weight, load_spec
 
 logger = logging.getLogger(__name__)
 
@@ -38,19 +44,22 @@ _SHORT = 2
 UNIT_HEADROOM = 3
 
 
-def _observe(dealer: Dealer, combined: Callable) -> None:
+def _observe(dealer: Dealer, combined: Callable, *, heavy_apart: bool = False) -> None:
     """Count in ``dealer`` what one unit's draw ``combined`` holds: each
     technique's first family, the technique itself (a member of that family)
     and its layer, the request obfuscation when it has one, and the
     complexity it spent, the request obfuscation's included. The request
     obfuscation's family is counted under :data:`REQUEST_SCOPE`, as phase 5
-    deals it, so it does not count against the obfuscation layer's."""
+    deals it, so it does not count against the obfuscation layer's. With
+    ``heavy_apart`` (a budget draw), a heavy full-text encoding is counted
+    under :data:`HEAVY_ENCODINGS`, as phase 4 deals it
+    (:func:`~redact.jailbreak.sampling.deal_key`)."""
     request_obfuscation = getattr(combined, "request_obfuscation", None)
     for fn in getattr(combined, "techniques", []):
-        families = getattr(fn, "families", None) or []
-        if families:
-            scope = REQUEST_SCOPE if fn is request_obfuscation else ""
-            dealer.counts[scope + families[0]] += 1
+        scope = REQUEST_SCOPE if fn is request_obfuscation else ""
+        key = deal_key(fn, heavy_apart=heavy_apart and not scope)
+        if key:
+            dealer.counts[scope + key] += 1
         dealer.members[fn.__name__] += 1
         layer = getattr(fn, "layer", None)
         if layer is not None:
@@ -101,7 +110,9 @@ def assign_combination(
     kept draw is counted in ``dealer`` (its families, techniques, layers,
     request obfuscation and complexity), so the group's next unit is dealt
     after it. ``sample_kwargs`` go to :func:`sample_combination`. An empty
-    list is the identity.
+    list is the identity. A budget draw's heavy full-text encodings are
+    counted under :data:`~redact.jailbreak.sampling.HEAVY_ENCODINGS`, as its
+    obfuscations deal them; a count draw's as encode's.
 
     With ``budget`` ``"group"`` and a ``dealer``, every draw of a budget
     round may spend the unit's allowance (:func:`_allowance`, with
@@ -109,8 +120,8 @@ def assign_combination(
     ``budget`` ``None`` or ``"unit"``, no dealer, or a count draw
     (``exact_techniques``, which has no budget) leaves the draw as it was.
     """
-    if (budget == "group" and dealer is not None
-            and sample_kwargs.get("exact_techniques") is None):
+    by_budget = sample_kwargs.get("exact_techniques") is None
+    if budget == "group" and dealer is not None and by_budget:
         mean = sample_kwargs.get("max_complexity", DEFAULT_MAX_COMPLEXITY)
         sample_kwargs["max_complexity"] = _allowance(dealer, mean, max_unit_complexity)
     used_set = {tuple(c) for c in used}
@@ -125,7 +136,7 @@ def assign_combination(
     if kept is None:
         return []
     if dealer is not None:
-        _observe(dealer, kept)
+        _observe(dealer, kept, heavy_apart=by_budget)
     return _names(kept)
 
 
@@ -206,7 +217,10 @@ def plan_run(
     (``family_weights``, equal by default) and each technique of a family as
     often as the others the unit may take, evenly across the group and
     independent of the input order; a row's ``settings`` record the weights
-    when given. A round whose settings say ``budget`` ``"group"`` banks the
+    when given. In a budget round the heavy full-text encodings are dealt
+    beside ``encode`` at the spec's ``heavy_encoding_weight`` times
+    encode's weight (:data:`~redact.jailbreak.sampling.HEAVY_ENCODINGS`).
+    A round whose settings say ``budget`` ``"group"`` banks the
     complexity over the group (:func:`assign_combination`): a unit may spend
     what the units before it left of ``max_complexity``, up to
     ``max_unit_complexity``, and the group's mean stays at or below
@@ -236,9 +250,13 @@ def plan_run(
     used_by_row: dict[int, list[tuple]] = defaultdict(list)
     recorded = {"family_weights": dict(family_weights)} if family_weights else {}
     # The request obfuscation's families are dealt under REQUEST_SCOPE and
-    # take the weights of the same families.
+    # take the weights of the same families. A budget round's heavy
+    # full-text encodings are dealt under HEAVY_ENCODINGS, at the spec's
+    # weight times encode's.
     weights = dict(family_weights or {})
     weights.update({REQUEST_SCOPE + name: w for name, w in weights.items()})
+    if heavy_encoding_weight() is not None:
+        weights[HEAVY_ENCODINGS] = heavy_encoding_weight() * weights.get("encode", 1.0)
 
     # Yielded to the manifest one at a time: the plan is never held whole.
     def units():
@@ -366,7 +384,8 @@ def rules_id(pool: list[Callable]) -> str:
     manipulation layer last in the eval release), ``layer_max_picks`` and
     ``layer_rates``, the obfuscations it keeps from the manipulation layer,
     the families a request obfuscation may draw and the families it keeps
-    out of a combination; the ``layer``, ``within_layer_order`` and
+    out of a combination, the ``heavy_encoding_weight`` a budget draw deals
+    the heavy full-text encodings at; the ``layer``, ``within_layer_order`` and
     ``cross_incompatible_with`` of each family of the pool; and each pool
     technique's ``families``, ``complexity``, ``cross_incompatible_with``,
     ``encode_weight``, ``needs_latin`` and ``script``, as its tags hold
@@ -387,6 +406,7 @@ def rules_id(pool: list[Callable]) -> str:
             "request_obfuscation_allowed_families", []),
         "request_obfuscation_refuses": _without_comments(
             spec.get("request_obfuscation_refuses", {})),
+        "heavy_encoding_weight": spec.get("heavy_encoding_weight"),
         "families": {
             name: {key: spec["families"].get(name, {}).get(key) for key in (
                 "layer", "within_layer_order", "cross_incompatible_with")}
