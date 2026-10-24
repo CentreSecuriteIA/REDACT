@@ -127,6 +127,32 @@ def _run(techniques, call=_no_call, **kwargs) -> tuple[str, str]:
                                 rng_seed=_SEED, **kwargs), call)
 
 
+def _source_prompt_read(**given) -> str:
+    """What a step after another reads as ``source_prompt`` in a chain run
+    on the probe, the chain given ``given``."""
+    read = []
+
+    def shout(prompt):
+        return prompt.upper(), ""
+
+    def reads(prompt, source_prompt=None):
+        read.append(source_prompt)
+        return prompt, ""
+
+    drive_sync(run_chain([shout, reads], _PROBE, **given), _no_call)
+    return read[0]
+
+
+@pytest.mark.parametrize(("given", "read"), [
+    ({}, _PROBE), ({"source_prompt": None}, _PROBE),
+    ({"source_prompt": "another input"}, "another input"),
+], ids=["left out", "given as None", "given"])
+def test_a_chain_s_source_prompt_is_its_input_unless_the_caller_gives_one(given, read):
+    """``None`` is not given: the step reads the clean input, not the text
+    the steps before it wrote."""
+    assert _source_prompt_read(**given) == read
+
+
 def test_the_manipulation_layer_applies_after_the_obfuscations_and_the_request():
     assert _families_in_order([
         "to_fsh_random_short", "to_use_past_tense", "to_json", "to_rot13"]) == [

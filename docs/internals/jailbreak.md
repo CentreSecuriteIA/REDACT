@@ -161,7 +161,7 @@ tagged with an internals id. Each technique gets
 `rng = random.Random(stable_seed(seed, label, input_id, iteration, name))`,
 the label being `jailbreak` or `variation`, so the two kinds draw apart, and,
 when it takes it, `source_prompt`: the text the chain started from (the
-unit's input) unless the caller gives one. The selected `fsh` and `dap`
+unit's input) unless the caller gives one (`None` is none). The selected `fsh` and `dap`
 variants, which apply last, pick their examples' subcategory on it, not on
 the encoded, translated or wrapped question they then insert; in a kept plan
 where they run first it is the text they read before, unless a rewrite step

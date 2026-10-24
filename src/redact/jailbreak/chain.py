@@ -73,7 +73,8 @@ def run_chain(
     capture under ``{internals_root}/{technique}``. Each technique gets the
     ``kwargs`` it takes (``gen_model``, ``translate_model``, ``check_model``,
     ``benign_data``, ``prompt_dir``, and ``source_prompt``: ``text``, the
-    input the chain starts from, unless the caller gives one) and, with
+    input the chain starts from, unless the caller gives one other than
+    ``None``) and, with
     ``rng_seed``, an ``rng`` of its own:
     ``random.Random(stable_seed(*rng_seed, technique.__name__))``. The
     ``source_prompt`` is for a technique that reads the clean input rather
@@ -87,7 +88,8 @@ def run_chain(
     a step that empties the text (an empty model reply, a render with nothing
     drawn) is a rejection.
     """
-    kwargs.setdefault("source_prompt", text)
+    if kwargs.get("source_prompt") is None:
+        kwargs["source_prompt"] = text
     result = text
     info_parts: list[str] = []
     for technique in techniques:
