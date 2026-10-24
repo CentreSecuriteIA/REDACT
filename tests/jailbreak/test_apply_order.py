@@ -159,6 +159,31 @@ def test_the_manipulation_layer_applies_after_the_obfuscations_and_the_request()
         "encode", "structural", "temporal", "fsh"]
 
 
+@pytest.mark.parametrize("picked_first", ["manipulation", "structural"])
+@pytest.mark.parametrize("manipulation", ["to_fsh_random_short", "to_dap_random_short"])
+def test_a_count_draw_applies_its_manipulation_technique_last(
+        monkeypatch, manipulation, picked_first):
+    """The eval type draws by count (``sample_exact_combination``), which
+    sorts its picks into the layer order whichever it picked first."""
+    import random
+
+    import redact.jailbreak.sampling as S
+
+    pool = [BY_NAME[manipulation], BY_NAME["to_json"]]
+    if picked_first == "structural":
+        pool.reverse()
+    picked = []
+
+    def first(rng, candidates, dealer=None, **kwargs):
+        picked.append(candidates[0].__name__)
+        return candidates[0]
+
+    monkeypatch.setattr(S, "_pick_by_family", first)
+    combined = S.sample_exact_combination(random.Random(0), pool, 2)
+    assert picked == [fn.__name__ for fn in pool]
+    assert [fn.__name__ for fn in combined.techniques] == ["to_json", manipulation]
+
+
 def test_a_fresh_plan_applies_its_manipulation_technique_last():
     rows, pool = simulate.plan_kind({}, simulate.inputs(300, groups=3))
     by = registry(pool)

@@ -730,7 +730,7 @@ def test_a_latin_only_encoding_refuses_a_translation_into_another_script(first, 
     assert not _joins(first, then)
 
 
-def test_every_latin_only_technique_is_refused_beside_every_translation_into_another_script():
+def test_each_latin_only_technique_is_refused_beside_a_non_latin_translation():
     """``needs_latin`` marks what would change nothing in a text of another
     script, and no rule reads it: the family rules do the work, a translation
     refusing ``encode`` (the Latin-only ciphers and their sensitive-word

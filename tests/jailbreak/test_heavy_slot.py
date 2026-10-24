@@ -9,6 +9,7 @@ escalation rounds) deals them as encode's members, as before.
 """
 
 import json
+import random
 from collections import Counter
 
 import pytest
@@ -21,7 +22,7 @@ from redact.dataset.dealing import Dealer
 from redact.jailbreak.augmentation import resolve
 from redact.jailbreak.plan import assign_combination
 from redact.jailbreak.pool import all_techniques
-from redact.jailbreak.sampling import HEAVY_ENCODINGS, deal_key
+from redact.jailbreak.sampling import HEAVY_ENCODINGS, deal_key, sample_combination
 from redact.jailbreak.technique import heavy_encoding_weight, load_spec, read_spec
 from tests.jailbreak import simulate
 
@@ -180,6 +181,30 @@ def test_a_count_draw_counts_the_heavy_encodings_as_encode_s():
     dealer, drawn = _dealt(300, exact_techniques=2)
     assert sum(drawn[name] for name in HEAVY) > 0
     assert HEAVY_ENCODINGS not in dealer.counts
+
+
+def _undealt_draws() -> list[list[str]]:
+    """200 budget draws without a dealer, as a direct call makes them, under
+    the default budget and a larger one."""
+    budgets = ({}, {"max_complexity": 9, "max_obfuscations": 3})
+    return [[fn.__name__ for fn in sample_combination(
+                random.Random(seed), all_techniques(), **budget).techniques]
+            for seed in range(100) for budget in budgets]
+
+
+def test_a_draw_without_a_dealer_is_the_same_at_any_weight_and_without_the_slot(
+        monkeypatch):
+    """It deals nothing, so the heavy encodings stay encode's members: the
+    spec's weight, or its absence, moves none of its draws (the budget
+    digest pins them too)."""
+    drawn = _undealt_draws()
+    assert any(name in HEAVY for names in drawn for name in names)
+    _at_weight(monkeypatch, 1)
+    assert _undealt_draws() == drawn
+    spec = {key: value for key, value in load_spec().items()
+            if key != "heavy_encoding_weight"}
+    monkeypatch.setattr(T, "load_spec", lambda: spec)
+    assert _undealt_draws() == drawn
 
 
 def _eval_draws() -> list[list[str]]:

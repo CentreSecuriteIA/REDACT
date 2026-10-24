@@ -317,7 +317,7 @@ def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares
     assert min(counts) >= 3  # noqa: PLR2004
 
 
-@pytest.mark.parametrize("seed", [1, 42, 123])
+@pytest.mark.parametrize("seed", [1, 2, 3, 7, 42, 43, 44, 45, 46, 123])
 def test_no_group_of_the_default_attacks_goes_without_a_heavy_encoding_or_ascii_art(
         seed):
     """Every group of 100 units, in one, three and ten groups, draws a heavy
