@@ -23,13 +23,14 @@ classifiers = [
 ]
 # openai 1.55.3 and anthropic 0.40 are the oldest that build a client beside
 # httpx 0.28, which dropped the proxies argument older SDKs pass (checked in a
-# fresh venv, with tests/llms passing at both). anthropic 2.x sends API
-# version 2026-10-21, on which the backend sends no temperature.
+# fresh venv, with tests/llms passing at both). anthropic is held below 2:
+# 2.x sends API version 2026-10-21, on which the backend can send no
+# temperature, so the checks would lose their 0.15.
 dependencies = [
     "pandas>=2.0",
     "python-dotenv>=1.0",
     "openai>=1.55.3",
-    "anthropic>=0.40",
+    "anthropic>=0.40,<2",
     "pyfiglet>=0.8",
     "filelock>=3.11",
 ]

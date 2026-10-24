@@ -131,6 +131,19 @@ Access is granted on request, on each dataset's page.
 - [constitution-input-dataset](https://huggingface.co/datasets/centrepourlasecuriteia/constitution-input-dataset)
 - [constitution-input-augmented-dataset](https://huggingface.co/datasets/centrepourlasecuriteia/constitution-input-augmented-dataset)
 
+## Citation
+
+If you use REDACT, please cite it ([CITATION.cff](CITATION.cff)):
+
+```bibtex
+@software{redact_2026,
+  title={REDACT: Red-team Dataset Automation \& Construction Toolkit},
+  author={Waibl, Leonhard and Michalak, Felix and Mariaccia, Hadrien},
+  year={2026},
+  url={https://github.com/CentreSecuriteIA/REDACT}
+}
+```
+
 ## License
 
 MIT License. See [LICENSE](LICENSE).

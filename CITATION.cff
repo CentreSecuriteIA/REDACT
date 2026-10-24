@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use REDACT, please cite it as below."
+title: "REDACT: Red-team Dataset Automation & Construction Toolkit"
+type: software
+authors:
+  - family-names: Waibl
+    given-names: Leonhard
+  - family-names: Michalak
+    given-names: Felix
+  - family-names: Mariaccia
+    given-names: Hadrien
+year: 2026
+license: MIT
+repository-code: "https://github.com/CentreSecuriteIA/REDACT"
+preferred-citation:
+  type: software
+  title: "REDACT: Red-team Dataset Automation & Construction Toolkit"
+  authors:
+    - family-names: Waibl
+      given-names: Leonhard
+    - family-names: Michalak
+      given-names: Felix
+    - family-names: Mariaccia
+      given-names: Hadrien
+  year: 2026
+  url: "https://github.com/CentreSecuriteIA/REDACT"

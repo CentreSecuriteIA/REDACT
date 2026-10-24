@@ -1,0 +1,7 @@
+Gemma is provided under and subject to the Gemma Terms of Use found at
+ai.google.dev/gemma/terms
+
+The files in this folder (config.json, generation_config.json) are copied from
+the TranslateGemma 27B checkpoint (google/translategemma-27b-it, as served by
+Infomaniak-AI/vllm-translategemma-27b-it). REDACT reads them in place of the
+checkpoint's own files; no model weights ship with REDACT.
