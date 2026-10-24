@@ -229,7 +229,19 @@ def plan_run(
     manifest first, and a coverage table after it; with ``verbose``, one line
     then says what the plan costs in model calls (:func:`log_model_calls`).
     Returns ``manifest_path``.
+
+    Raises:
+        ValueError: ``family_weights`` names
+            :data:`~redact.jailbreak.sampling.HEAVY_ENCODINGS`, which is no
+            family (a kind's section refuses it too): its weight is the
+            spec's times encode's.
     """
+    if HEAVY_ENCODINGS in (family_weights or {}):
+        raise ValueError(
+            f"family_weights names {HEAVY_ENCODINGS!r}, the heavy full-text "
+            "encodings' slot, which is no family: a budget draw deals it at the "
+            "spec's heavy_encoding_weight times encode's weight, so weight "
+            "encode to move it.")
     base_kwargs = dict(sample_kwargs or {})
     if layer_rates is not None:
         base_kwargs = {"sampling_probs": dict(layer_rates), **base_kwargs}

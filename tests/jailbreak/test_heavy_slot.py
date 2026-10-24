@@ -138,6 +138,17 @@ def test_family_weights_cannot_name_the_slot():
                 "adversarial")
 
 
+def test_a_plan_made_directly_cannot_weight_the_slot(tmp_path):
+    """``plan_run``, called without the section, raises rather than replace
+    the weight with the spec's, before it writes anything."""
+    manifest = tmp_path / "jb.manifest.jsonl"
+    with pytest.raises(ValueError, match="family_weights names 'encode:heavy', the "
+                                         "heavy full-text encodings' slot"):
+        JP.plan_run(simulate.inputs(4), all_techniques(), manifest_path=manifest,
+                    family_weights={"encode": 2, HEAVY_ENCODINGS: 1}, verbose=False)
+    assert list(tmp_path.iterdir()) == []
+
+
 # --- budget draws and count draws ------------------------------------------------
 
 def _dealt(n: int, **settings) -> tuple[Dealer, Counter]:

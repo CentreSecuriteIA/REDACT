@@ -414,8 +414,9 @@ order.
   A count draw (`exact_techniques`: the eval type, the natural kind, the
   first two escalation rounds) and a draw without a dealer deal them as
   encode's members, as before, so their draws do not move. The slot is not
-  a family: `family_weights` cannot name it, and weighting `encode` scales
-  it too.
+  a family: `family_weights` cannot name it (`plan_run` called directly
+  raises too, rather than replace the weight), and weighting `encode`
+  scales it too.
 - **Techniques.** Within that family, the dealer picks the eligible member
   the group has dealt least (`Dealer.pick_member`, its own `members`
   counter, apart from the families' `counts` the generation axes also
