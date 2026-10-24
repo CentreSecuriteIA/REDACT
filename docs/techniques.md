@@ -357,7 +357,9 @@ technique is picked first. A technique may not join a combination when:
   know which technique of a combination is the request obfuscation). A
   translation drawn as an ordinary obfuscation runs before those steps and
   joins them, and an encoding is kept from any translation by the family
-  rule above;
+  rule above. Together the family rules (ten of the other thirteen
+  obfuscation families) and this table (the last three) make a translation
+  drawn as the request obfuscation the unit's only obfuscation;
 - in budget mode, its complexity is above what is left of `max_complexity`
   (under the opt-in [group budget](configuration.md#the-group-budget), of the
   unit's allowance: `max_complexity` plus what the group's earlier units left

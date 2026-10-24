@@ -287,7 +287,10 @@ obfuscation is phase 5 and runs before phase 4):
   `suffixes`, `structural` and `neutral_container` families out of its
   combination, and the sampler narrows phase 4's pool by it
   (`rules.after_request_obfuscation`). A translation drawn in phase 4 runs
-  before those steps and is not limited.
+  before those steps and is not limited. The translation family already
+  refuses ten of the other thirteen obfuscation families, so with this table
+  a translation drawn as the request obfuscation is the unit's only
+  obfuscation, and the `max_obfuscations` slots it leaves go unused.
 - **Phase 4, `obfuscation`**: one pick after another, from what the budget
   leaves, until `max_obfuscations`, less the request obfuscation's slot, or
   until no technique fits.

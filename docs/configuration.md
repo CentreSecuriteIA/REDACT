@@ -752,7 +752,8 @@ a run you already have, and what you will see; each point has its note below.
   drawn as the request obfuscation and a dealing slot change the training
   attacks only: `sensitive_words` and
   `tokenbreak` refuse each other, the request obfuscation, when it
-  translates, keeps a suffix, a wrapper and a container out of the unit,
+  translates, keeps a suffix, a wrapper and a container out of the unit
+  (which makes the translation the unit's only obfuscation),
   and a budget round deals the ten heavy full-text encodings in a slot of
   their own at the spec's `heavy_encoding_weight`, 0.2, a quota rather than a
   floor (about 45 draws of the ten in 3,000 units of the escalation's last
@@ -1502,7 +1503,17 @@ still joins them. In 3,000 units of the default attack kind in three groups,
 obfuscation; before the rule 68 to 79 of them held a suffix, 130 to 151 a
 structural wrapper and 115 to 128 a neutral container, and none does now;
 the obfuscations per unit are 1.47 (1.47 to 1.48) with the step on, against
-1.58 (1.57 to 1.59) with it off and 1.57 before this rule. The eval type
+1.58 (1.57 to 1.59) with it off and 1.57 before this rule. So a translation
+drawn as the request obfuscation is the unit's only obfuscation: the
+translation family already refused ten of the other thirteen obfuscation
+families (`ascii_art`, `encode`, `sensitive_words`, `tokenbreak`, `word_art`,
+`wording`, `typos`, `casual_writing`, `noise` and `payload_split`), this table
+refuses the last three, and the slots `max_obfuscations` leaves go unused. Of
+3,000 units of the default attack kind (seed 42, three groups), 499 take a
+translation as the request obfuscation and 333 of them held another
+obfuscation before the rule; in round 4 of the escalation
+(`max_obfuscations` 3) 700 do, 647 of them holding two others before and 53
+one, and none holds any now. The eval type
 draws no phase-5 step, so its pairs and draws, and the budget
 draws the digest pins (phase 5 off in both), do not move. The WARNING of
 a kept plan, which counts the pending units whose combination today's rules
