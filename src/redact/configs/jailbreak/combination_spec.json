@@ -92,7 +92,7 @@
       "cross_incompatible_with": []
     },
     "payload_split": {
-      "description": "The prompt cut into two to four parts, each named by a letter, with a request to join them in order (a cut at word boundaries, or one a model makes where the meaning allows)",
+      "description": "The prompt cut into two to four parts, each named by a letter, with a request to join them in order (a cut at word boundaries, or one a model makes where the meaning allows). Its refusal of fake_turns (an invented turn is a conversation already) is kept as it was: the manipulation layer now applies last and the parts sit inside the turn, so that reason no longer holds, and the manipulation block refuses the pair too",
       "layer": "obfuscation",
       "dimension": "encoding",
       "within_layer_order": 65,
@@ -106,7 +106,7 @@
       "cross_incompatible_with": []
     },
     "structural": {
-      "description": "JSON/XML/Markdown structural wrapping as outer frame",
+      "description": "JSON/XML/Markdown structural wrapping as the outer frame of the obfuscations (the manipulation layer, applied last, puts its examples or turns around the wrapped question)",
       "layer": "obfuscation",
       "dimension": "container",
       "within_layer_order": 80,
@@ -121,7 +121,7 @@
       "cross_incompatible_with": ["structural", "ascii_art"]
     },
     "ascii_art": {
-      "description": "Full-text ASCII art conversion (the outermost obfuscation, incompatible with structural and hacking/manipulation due to output size)",
+      "description": "Full-text ASCII art conversion (the outermost obfuscation, incompatible with structural and the hacking techniques, whose longer text the font draws past its cap). Its refusal of fsh and dap is kept as it was, written when the font drew their examples too: the manipulation layer now applies last and the font draws the question alone, so that reason no longer holds, and the manipulation block refuses the pair too",
       "layer": "obfuscation",
       "dimension": "encoding",
       "within_layer_order": 90,
@@ -190,7 +190,7 @@
       "cross_incompatible_with": ["continuation", "indirect", "framing", "persona", "cognitive"]
     },
     "fake_turns": {
-      "description": "Invented turns of the conversation with the prompt: a system turn, an assistant turn or an earlier exchange (pure templates; no benign data)",
+      "description": "Invented turns of the conversation with the prompt: a system turn, an assistant turn or an earlier exchange (pure templates; no benign data). Its refusal of structural and neutral_container (an invented turn is a conversation, not a document to wrap) is kept as it was: the manipulation layer now applies last, a wrapper goes around the question alone and the turn stays outside it, so that reason no longer holds",
       "layer": "manipulation",
       "dimension": "example_priming",
       "within_layer_order": 0,
@@ -316,7 +316,7 @@
   },
 
   "manipulation_blocked_obfuscation": {
-    "_comment": "When manipulation (a family of the manipulation layer: fsh, dap, fake_turns) is selected, block these obfuscation families and encode_weight values (except when encode also has sensitive_words family — selective encoding is still fine). The manipulation layer applies last, so an obfuscation changes the question alone, not the examples or turns around it; the block is kept as it was, and lifting it is a change of the eval coverage of its own.",
+    "_comment": "When manipulation (a family of the manipulation layer: fsh, dap, fake_turns) is selected, block these obfuscation families and encode_weight values (except when encode also has sensitive_words family — selective encoding is still fine). The manipulation layer applies last, so an obfuscation changes the question alone, not the examples or turns around it; the block is kept as it was, and lifting it is a change of the eval coverage of its own. Three older refusals are kept the same way, their reasons gone with the order (the families' descriptions say which): fake_turns with structural and neutral_container (lifting it would add 27 pairs of the default attack kind and none of the eval pool, which holds no fake_turns), and ascii_art with fsh and dap and payload_split with fake_turns, each also refused by this block, so a lift takes both rules (no pair of the eval pool holds ascii_art with fsh or dap; lifting both would admit 8).",
     "families": ["ascii_art", "translation", "payload_split", "word_art", "wording"],
     "encode_weight": "heavy"
   },

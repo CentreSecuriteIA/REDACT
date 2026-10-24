@@ -1002,12 +1002,15 @@ the word art and the three personas, below), and does not draw them until
 it is planned again with `resume=False`. New rules bind a fresh plan:
 `persona_template` refuses `fsh`, `dap`, `ascii_art` and `impersonation`;
 `fake_turns` refuses `continuation`, `indirect`, `framing`, `persona`,
-`cognitive`, `persona_template`, `structural` and `neutral_container`, and
-takes the manipulation layer's block of `translation`, `ascii_art` and the
-heavy encodings; `to_refusal_then_comply`, `to_prefix_injection`,
-`to_dual_answer` and `to_tagged_prefix` refuse `persona_template`; and
-`to_answer_in_encoding` refuses `encode`. A kept plan replays its recorded
-combinations, so a rule changes none of them.
+`cognitive`, `persona_template`, `structural` and `neutral_container` (the
+reason for the last two, that an invented turn is a conversation, not a
+document to wrap, no longer holds since the eval release moved the
+manipulation layer last; they are kept as they were, its fifth change
+below), and takes the manipulation layer's block of `translation`,
+`ascii_art` and the heavy encodings; `to_refusal_then_comply`,
+`to_prefix_injection`, `to_dual_answer` and `to_tagged_prefix` refuse
+`persona_template`; and `to_answer_in_encoding` refuses `encode`. A kept plan
+replays its recorded combinations, so a rule changes none of them.
 
 The natural kind gains one technique, `to_ask_with_urgency`: `asking` is a
 natural family, and an urgent ask is a natural variation, so it takes its
@@ -1561,7 +1564,19 @@ manipulation block (`manipulation_blocked_obfuscation`) is kept as it was
 (lifting it would admit 104 eval pairs, each `fsh` or `dap` technique beside
 a translation or a heavy encoding, a change of the eval coverage of its own),
 and so are the many-shot variants' refusal of `typos`, whose reason (a
-rewrite of the whole many-shot text) is gone. On the default attack kind
+rewrite of the whole many-shot text) is gone. Three more refusals were
+written for the old order, and their reasons are gone too: `fake_turns` with
+`structural` and `neutral_container` (an invented turn was a conversation,
+not a document to wrap; the wrapper now goes around the question alone and
+the turn stays outside it), `ascii_art` with `fsh` and `dap` (the output size
+of a font that drew their examples too) and `payload_split` with
+`fake_turns` (an invented turn was a conversation already). They are kept as
+they were, and lifting them is a decision of its own. `fake_turns` beside the
+nine wrappers would add 27 pairs of the default attack kind and none of the
+eval pool; `ascii_art` with `fsh` and `dap`, and `payload_split` with
+`fake_turns`, are refused by the manipulation block as well, so a lift takes
+both rules, and no pair of the pool's 291 holds `ascii_art` with `fsh` or
+`dap` (lifting both rules would admit 8). On the default attack kind
 (3,000 units in three groups at seed 42, filler English inputs, the model
 steps stubbed, tokens estimated at about four characters a token), the 988
 units with a manipulation technique go from a 99th percentile of 4,059

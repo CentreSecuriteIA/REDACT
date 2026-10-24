@@ -446,7 +446,10 @@ def test_a_fake_turn_refuses_what_fsh_and_dap_refuse_and_a_wrapper_either_way(
         fake, other):
     """The fsh/dap list (continuation, indirect, framing, persona, cognitive),
     the persona templates, and the structural and neutral containers: an
-    invented turn is a conversation, not a document to wrap."""
+    invented turn was a conversation, not a document to wrap. That reason
+    went with the old order (the manipulation layer applies last, so the
+    turn stays outside a wrapper); the refusal is kept as it was, and this
+    test holds it."""
     assert not _joins(fake, other)
     assert not _joins(other, fake)
 

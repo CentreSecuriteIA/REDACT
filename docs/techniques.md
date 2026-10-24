@@ -282,7 +282,8 @@ technique is picked first. A technique may not join a combination when:
   `persona`, `cognitive`; `persona_template` with `fsh`, `dap` and
   `ascii_art`; `payload_split` with `ascii_art`, `encode`, `fake_turns` and
   `word_art` (a font or a cipher would break the parts apart, and an
-  invented turn is a conversation already); `word_art` with `ascii_art`,
+  invented turn was a conversation already: the pair is kept as it was, see
+  below); `word_art` with `ascii_art`,
   `payload_split`, `encode`, `sensitive_words`, `tokenbreak`, `structural`,
   `neutral_container` and `fake_turns` (one disguise of the word, and the art
   is long); `wording` with `sensitive_words`, `tokenbreak`, `word_art`,
@@ -297,8 +298,8 @@ technique is picked first. A technique may not join a combination when:
   set in time twice) and `model_distractors` with `ascii_art`,
   `distractor_prefix` and `distractor_suffix`; `fake_turns`
   with the list of `fsh` and `dap`, `persona_template`, `structural` and
-  `neutral_container` (an invented turn is a conversation, not a document
-  to wrap); `noise`
+  `neutral_container` (an invented turn was a conversation, not a document
+  to wrap: the pair is kept as it was, see below); `noise`
   with `typos` and `casual_writing`, one kind of surface noise per text; and
   `neutral_container` with `structural` (one document around the prompt)
   and `ascii_art` (no font draws a document of that length). So a
@@ -364,6 +365,23 @@ technique is picked first. A technique may not join a combination when:
   (under the opt-in [group budget](configuration.md#the-group-budget), of the
   unit's allowance: `max_complexity` plus what the group's earlier units left
   unspent, up to `max_unit_complexity`).
+
+Three refusals of the list were written for the order in which the
+manipulation layer applied before the obfuscations. Like the manipulation
+block and the many-shot variants' refusal of `typos`, they are kept as they
+were, though their reasons no longer hold now that the layer applies last:
+`fake_turns` with `structural` and `neutral_container` (an invented turn was a
+conversation, not a document to wrap; the wrapper now goes around the
+question alone and the turn stays outside it), `ascii_art` with `fsh` and
+`dap` (the font drew their examples too; it draws the question alone now) and
+`payload_split` with `fake_turns` (an invented turn was a conversation
+already; the parts now sit inside the turn). Lifting them is a decision of
+its own, not made here. `fake_turns` beside the nine wrappers would add 27
+pairs of the default attack kind and none of the eval pool, which holds no
+`fake_turns`. `ascii_art` with `fsh` and `dap`, and `payload_split` with
+`fake_turns`, are each refused by the manipulation block as well, so a lift
+takes both rules; no pair of the eval pool's 291 holds `ascii_art` with `fsh`
+or `dap`, and lifting both rules would admit 8.
 
 `combine_techniques` does not check these rules. It only sorts techniques
 into layer order. [internals/jailbreak.md](internals/jailbreak.md) explains
