@@ -510,7 +510,10 @@ and one copy loads instead, the trace's `load` event says so with `fallback`
 and `planned_copies`), `dataset_type` and `dataset_type_hash` (the content
 id of the type file the run read), with a `config_dir` that folder and
 `config_files` (the files read from it), and for the jailbreak stage
-`spec_version` and the resolved `augmentation` section.
+`spec_version` (the library's), `rules` (the `rules` id each kind's plan
+file records, by kind, `null` for a kind without one: it tells files drawn
+before and after a change of the rules apart while the spec version stays)
+and the resolved `augmentation` section.
 
 ## Telemetry and cost
 

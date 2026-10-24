@@ -2,11 +2,11 @@
 
 Each stage writes ``{stage}.run.json`` under ``{data_dir}/Datasets/``: the
 resolved params, models, how the stage's models were served, row counts,
-spec version, timestamp, the files the stage read its inputs from
-(``sources``), and the dataset type with its file's hash; with a
-``config_dir``, the folder and the config files read from it
-(``config_files``); the jailbreak stage's also holds the resolved
-augmentation section.
+timestamp, the files the stage read its inputs from (``sources``), and the
+dataset type with its file's hash; with a ``config_dir``, the folder and
+the config files read from it (``config_files``); the jailbreak stage's
+also holds the spec version, the ``rules`` id of each kind's plan and the
+resolved augmentation section.
 
 Usage::
 
@@ -42,7 +42,7 @@ from redact.recipe import (
     resolve_role,
     serving_of,
 )
-from redact.stages import STAGES, RunContext
+from redact.stages import STAGES, RunContext, jailbreak_rules
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +61,11 @@ def write_record(
     counts: dict | None = None,
     sources: list | None = None,
     spec_version: str | None = None,
+    rules: dict | None = None,
     extra: dict | None = None,
 ) -> Path:
-    """Write a stage's run record and return its path."""
+    """Write a stage's run record and return its path. ``rules`` is the
+    jailbreak stage's: the ``rules`` id of each kind's plan, by kind."""
     record = {
         "stage": stage,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -74,6 +76,8 @@ def write_record(
     }
     if spec_version:
         record["spec_version"] = spec_version
+    if rules is not None:
+        record["rules"] = rules
     if extra:
         record.update(extra)
 
@@ -558,6 +562,7 @@ def run_pipeline(
                     models=ctx.models, counts=counts,
                     sources=[str(p) for p in stage.sources(ctx) if p.exists()],
                     spec_version=load_spec().get("version", "") if jailbreaks else None,
+                    rules=jailbreak_rules(ctx) if jailbreaks else None,
                     extra={"serving": {role: served[role] for role, _ in stage.roles},
                            **noted,
                            **({"augmentation": ctx.augmentations} if jailbreaks
