@@ -2336,9 +2336,10 @@ def test_translation_is_not_planned_when_the_recipe_excludes_it(augmentations):
 def test_translation_is_not_planned_for_the_deprecated_flat_form_either():
     from redact.driver import _stage_models
 
+    flat = {"include_translation": False}
     with pytest.deprecated_call():
-        assert _stage_models(_models(), ["jailbreaks"], {"include_translation": False}) \
-            == ["venice-uncensored"]
+        planned = _stage_models(_models(), ["jailbreaks"], flat)
+    assert planned == ["venice-uncensored"]
 
 
 def test_a_paraphraser_pool_plans_every_model_in_it(local_models):
@@ -2816,7 +2817,8 @@ def test_served_lists_a_pool_and_names_no_model_for_a_role_no_stage_calls(
     extra = local_models("_rc_served_para", roles=["paraphraser"])
     models = _models(gen="no-such-model", paraphraser="distribution")
     served = _served(models, ["paraphrase", "jailbreaks"],
-                     {"adversarial": {"translation": False}}, {extra: {"copies": 2}}, [])
+                     {"adversarial": {"translation": False}},
+                     {extra: {"copies": 2}}, [])
     assert served == {
         "paraphraser": [
             # No plan: the recipe's count, or none for one left to the plan.

@@ -240,7 +240,8 @@ class TestOpenAIGenerate:
         messages = [{"role": "user", "content": "hi"}]
         backend.generate([messages], temperature=0.15)
         aio.run(backend.agenerate(messages, temperature=0.15))
-        assert "temperature" not in mock_openai_client.chat.completions.create.call_args[1]
+        sent = mock_openai_client.chat.completions.create.call_args[1]
+        assert "temperature" not in sent
         assert "temperature" not in sdk.chat.completions.create.await_args[1]
         assert [event["temperature"] for event in events] == [None, None]
 

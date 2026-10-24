@@ -489,8 +489,9 @@ class TestCutReplies:
                     _reply(gen, True)
                     _reply(gen, True)
                 telemetry.uninstall()
-        assert [r.getMessage() for r in caplog.records
-                if r.name.startswith("redact.llms")] == [first_cut_warning("gen", 64)] * 2
+        warned = [r.getMessage() for r in caplog.records
+                  if r.name.startswith("redact.llms")]
+        assert warned == [first_cut_warning("gen", 64)] * 2
 
     def test_the_call_event_says_the_reply_was_cut(self):
         seen = []

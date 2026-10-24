@@ -396,8 +396,9 @@ def generate_outputs(
     Resume: each input gets a stable id (its ``sample_id`` when present, else
     the content id of its ``sample``, or ``prompt``), and each unit is
     ``(input_id, iteration)``. Completed units are recorded in a sidecar
-    ``*.state.jsonl`` ledger beside the output CSV. On a re-run (``resume=True``) units already
-    in the ledger are skipped, so a crash loses only the rows still in
+    ``*.state.jsonl`` ledger beside the output CSV. On a re-run
+    (``resume=True``) units already in the ledger are skipped, so a crash
+    loses only the rows still in
     progress, and the modes and specs are dealt as before:
     ``output_responses.plan.json`` stops a resume with another ``seed``,
     ``outputs_per_input``, other ``modes`` or other axes' weights.

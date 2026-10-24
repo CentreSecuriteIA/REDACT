@@ -1641,8 +1641,10 @@ class TestBusOrder:
                            vram_gb=1.0, device_map="cuda:0")
         torch_started(True)
         monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible)
-        with caplog.at_level(logging.WARNING, logger=placement.logger.name), _kv(0.0),              patch.object(measure, "card_sizes_gib", return_value=[24.0]),              patch.object(measure, "detect_gpus",
-                          side_effect=lambda visible=False: ("G", 1 if visible else machine)):
+        with (caplog.at_level(logging.WARNING, logger=placement.logger.name), _kv(0.0),
+              patch.object(measure, "card_sizes_gib", return_value=[24.0]),
+              patch.object(measure, "detect_gpus", side_effect=lambda visible=False:
+                           ("G", 1 if visible else machine))):
             residency.plan_residency([intro])
         lines = [r.getMessage() for r in caplog.records
                  if "CUDA_DEVICE_ORDER" in r.getMessage()]

@@ -219,7 +219,8 @@ class TestAnthropicGenerate:
         from redact.llms.backends import AnthropicBackend
 
         AnthropicBackend.clear_cache()
-        backend = AnthropicBackend("claude-new", api_key="k", supports_temperature=False)
+        backend = AnthropicBackend(
+            "claude-new", api_key="k", supports_temperature=False)
         backend.generate([[{"role": "user", "content": "hi"}]], temperature=0.15)
         call_kwargs = backend._client.messages.create.call_args[1]
         assert "temperature" not in call_kwargs and "extra_body" not in call_kwargs
@@ -245,7 +246,8 @@ class TestAnthropicGenerate:
 
     def test_api_version_2023_06_01_takes_one(self, anthropic_backend):
         anthropic_backend._client.default_headers = {"anthropic-version": "2023-06-01"}
-        anthropic_backend.generate([[{"role": "user", "content": "hi"}]], temperature=0.15)
+        anthropic_backend.generate(
+            [[{"role": "user", "content": "hi"}]], temperature=0.15)
         call_kwargs = anthropic_backend._client.messages.create.call_args[1]
         assert call_kwargs["extra_body"] == {"temperature": 0.15}
 
