@@ -205,6 +205,13 @@ def _plan_phases(
             "plan, so every local engine loads unplanned, at 0.9 of a whole "
             "card: a second engine on the same card will not start.",
             type(exc).__name__, exc, exc_info=exc)
+        # A plan applied before the error would still hold: drop it, so that
+        # every engine does load unplanned, as the message says.
+        with contextlib.suppress(Exception):
+            from .llms.backends import vllm
+
+            vllm.set_planned_utilization({})
+            vllm.set_planned_devices({})
         return []
     return phases
 
@@ -321,6 +328,13 @@ def _check_cards(phases: list) -> None:
             f"`kill -9 {' '.join(map(str, pids + parents))}` and check that "
             f"nvidia-smi shows the card empty; otherwise run on other cards "
             f"(CUDA_VISIBLE_DEVICES). Nothing has run yet.")
+
+
+def _engine_ids(engines: dict | None) -> set[tuple]:
+    """``(setup, *key)`` per engine of ``engines``, as
+    :func:`~redact.residency.loaded_engines` returns them: the engine ids a
+    plan's footprints carry (:attr:`~redact.residency.ModelFootprint.engine`)."""
+    return {(setup, *key) for setup, keys in (engines or {}).items() for key in keys}
 
 
 def _enter_phase(
@@ -471,7 +485,8 @@ def run_pipeline(
     over its adversarial kind. No stage reads its rows back: the counts
     are taken from each stage's files, and the inputs are seeded from the
     constitution saved under ``data_dir``. The local engines the run loaded
-    are released when it returns or raises; those loaded before it, such as
+    are released when it returns or raises, after a planning error too;
+    those loaded before it, such as
     a notebook's, stay loaded unless the run calls one and unloads it
     between stages. The way the recipe serves its models holds only until then.
     Before any of them loads, the run stops if another process holds memory
@@ -606,9 +621,9 @@ def run_pipeline(
         # and roll up, also after a failed stage. Nothing here may mask the
         # stage's own error.
         try:
-            if phases:
-                from .llms.backends import vllm
+            from .llms.backends import vllm
 
+            if phases:
                 warm.clear()        # emptied first: the preloader skips the rest
                 # A model still loading is released below, once it is loaded.
                 # Not waited for longer than an exit waits: a load that does
@@ -624,7 +639,11 @@ def run_pipeline(
                             "[residency] the preload of %s has not finished "
                             "%g s after the run's end; ending its load to "
                             "release the cards.", ", ".join(names), vllm.EXIT_WAIT_S)
+            # Without a plan too: after a planning error the stages load
+            # their engines unplanned, and those are the run's as well.
+            if phases or _engine_ids(residency.loaded_engines()) - _engine_ids(before):
                 residency.unload_local(engines=before, wait=vllm._GRACE_S)
+            if phases:
                 vllm.set_planned_utilization({})      # the shares were this run's
                 vllm.set_planned_devices({})          # and so were the cards
             # Roll up tokens, engine time and cost. Also logged at INFO, so

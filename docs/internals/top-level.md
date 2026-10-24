@@ -194,7 +194,9 @@ tied to code, so they come from the package only.
    WARNING whatever `verbose` says, so `--quiet` still shows them; one that
    fits at INFO with `verbose`), `residency.apply_plan`. A planning error is logged at
    ERROR with its traceback, never raised; the message says that every local
-   engine then loads unplanned, at 0.9 of a card.
+   engine then loads unplanned, at 0.9 of a card, and the loader's planned
+   shares and cards are cleared, so a plan applied before the error does
+   not hold.
 6. `_check_cards`: one `nvidia-smi` read (`measure.card_use`) before any
    model loads; a `RuntimeError` naming the cards, processes and PIDs when
    another process holds memory on a card the plan uses, with the vLLM
@@ -219,10 +221,12 @@ tied to code, so they come from the package only.
    `telemetry.stage` logs the stage's replies cut at the token limit, per
    model.
 9. `finally`: clear the run's serving. When the run has a plan: join the
-   preload threads for at most `vllm.EXIT_WAIT_S` (60 s) in all, unload the
+   preload threads for at most `vllm.EXIT_WAIT_S` (60 s) in all. Unload the
    engines the run loaded (`residency.unload_local(engines=before,
    wait=vllm._GRACE_S)`, 10 s, which ends a load still running; engines
-   loaded before the run stay), and clear the planned shares and cards.
+   loaded before the run stay), with a plan, or without one when an engine
+   is loaded that was not before (a planning error). With a plan, clear the
+   planned shares and cards.
    Then `telemetry.summary()`, and `telemetry.uninstall()`: a front called
    after the run, as from a notebook, records into neither its trace nor
    its roll-up.

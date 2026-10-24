@@ -220,8 +220,9 @@ flat schema instead (below). [stages/build.md](stages/build.md)
 
 In a `finally` block the driver clears the run's serving choices. When the
 run has local models it waits at most 60 seconds for a preload still
-running, unloads the engines the run loaded (those loaded before it, such as
-a notebook's, stay), and clears the planned shares and cards. It then rolls
+running, unloads the engines the run loaded, also after a planning error
+(those loaded before it, such as a notebook's, stay), and clears the
+planned shares and cards. It then rolls
 up telemetry (tokens, engine time, cost). `run_pipeline`
 returns a summary: `dataset_type`, `data_dir`, `stages` (counts and record
 path per stage), `serving`, `telemetry` (with `cut`, the replies cut at the

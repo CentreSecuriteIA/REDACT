@@ -280,8 +280,10 @@ The driver (`driver.py`):
 5. At the end, also after a failure: wait for the preload threads, at most
    `EXIT_WAIT_S` together, naming at ERROR a preload still loading; unload
    every engine the run loaded, with a 10 s wait, which ends that load (the
-   engines loaded before the run stay, unless a stage unloaded them); clear
-   the planned shares and cards.
+   engines loaded before the run stay, unless a stage unloaded them), also
+   without a plan, after a planning error; clear the planned shares and
+   cards. A planning error clears those itself, so every engine does load
+   unplanned.
 
 With more than one paraphraser, the paraphrase stage plans its own pool of
 them (`plan_residency` with one copy each). When they do not fit together it

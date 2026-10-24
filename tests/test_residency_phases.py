@@ -1186,6 +1186,62 @@ def test_a_stage_keeps_the_engines_loaded_before_the_run_that_no_stage_plans(
     assert engines.shut == [f"org/{gen}"]
 
 
+def test_a_planning_error_still_releases_the_engines_the_run_loaded(
+        local_model, engines, tmp_path, monkeypatch):
+    """Without a plan the stages load their engines unplanned; the run's end
+    releases them all the same, and keeps a notebook's."""
+    import redact.llms.backends.vllm as vllm_module
+
+    gen = local_model("_ph_noplan_gen")
+    users = engines("org/users-own-model")
+    with patch("redact.residency.plan_phases", side_effect=ZeroDivisionError):
+        _run(tmp_path, monkeypatch, ["inputs"], {"gen": gen},
+             generate_inputs=lambda **kw: engines(f"org/{gen}") and None)
+    assert set(vllm_module._engines) == {users}
+    assert engines.shut == [f"org/{gen}"]
+
+
+def test_a_planning_error_drops_a_plan_applied_before_it(local_model):
+    """The second report fails after the first plan reached the loader: the
+    loader holds nothing, so every engine does load unplanned."""
+    import redact.llms.backends.vllm as vllm_module
+    from redact import residency, telemetry
+    from redact.driver import _plan_phases
+    from redact.llms.resources import measure
+    from redact.recipe import _DEFAULT_MODELS
+
+    gen = local_model("_ph_partial_gen")
+    para, check = local_model("_ph_partial_para"), local_model("_ph_partial_check")
+    models = {**_DEFAULT_MODELS, "gen": gen, "paraphraser": para,
+              "paraphrase_check": check}
+    reports, applied = [], []
+    apply = residency.apply_plan
+
+    def report(plan, **kw):
+        reports.append(plan)
+        if len(reports) > 1:
+            raise ZeroDivisionError
+
+    def record(plan, **kw):
+        apply(plan, **kw)
+        applied.append(dict(vllm_module._planned_utilization))
+
+    try:
+        with patch.object(measure, "detect_gpus", return_value=("FakeGPU", 1)), \
+             patch.object(measure, "card_sizes_gib", return_value=[24.0]), \
+             patch.object(residency, "report", side_effect=report), \
+             patch.object(residency, "apply_plan", side_effect=record):
+            assert _plan_phases(models, ["inputs", "paraphrase"], verbose=False) == []
+        left = (dict(vllm_module._planned_utilization),
+                dict(vllm_module._planned_devices))
+    finally:
+        telemetry.uninstall()
+        vllm_module.set_planned_utilization({})
+        vllm_module.set_planned_devices({})
+    assert len(applied) == 1 and applied[0]          # the first plan was applied
+    assert left == ({}, {})
+
+
 def test_a_planned_engine_loaded_already_is_warned_about(
         local_model, monkeypatch, caplog):
     """A notebook loaded gen alone, so with 0.9 of the card. The plan gives
