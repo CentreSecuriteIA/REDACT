@@ -25,6 +25,7 @@ from redact.dataset.planfile import read_plan, write_plan
 from redact.jailbreak.augmentation import resolve
 from redact.jailbreak.plan import combination_of
 from redact.jailbreak.pool import all_techniques, registry, technique_pool
+from redact.jailbreak.rules import compatible
 from redact.stages import generate_jailbreaks
 from tests.conftest import MockBackend
 from tests.jailbreak.test_pipeline_jailbreaks import (
@@ -141,6 +142,7 @@ def test_a_technique_added_after_the_plan_warns_once_and_keeps_the_plan(
     assert "added ['to_reversed'] and retired []" in warning
     assert "does not draw the added techniques" in warning
     assert "resume=False" in warning
+    assert "order it records" not in warning  # the rules are the plan's
     # Every planned unit ran as planned; none drew the new technique.
     assert Manifest.sidecar(out).load() == plan
     assert len(rows) == len(plan)
@@ -484,6 +486,57 @@ def test_a_resume_across_a_rule_change_warns_counts_and_stamps_the_plan_s_versio
     assert f"{refused} of its {len(plan)} pending units" in warning and refused
     assert "+".join(plan[0]["combination"]) in set(rows["technique"])
     assert set(rows["combination_spec_version"].astype(str)) == {"1.2"}
+
+
+#: Combinations as a plan records them, the request obfuscation (if any)
+#: right after the request, and whether today's rules refuse them: a
+#: translation drawn as the request obfuscation keeps out a wrapper
+#: (``request_obfuscation_refuses``), which ``compatible`` alone admits.
+_REQUEST = "to_refusal_then_comply"
+_KEPT = [
+    (["to_json", _REQUEST, "to_french"], True),
+    (["to_adversarial_suffix_punctuation", _REQUEST, "to_french"], True),
+    (["to_french", "to_json", _REQUEST], False),
+    (["to_json", _REQUEST, "to_rot13"], False),
+    ([_REQUEST, "to_french"], False),
+    (["to_json", "to_french"], False),
+    (["to_json", _REQUEST, "to_rot13", "to_fsh_random_short"], False),
+    (["to_fsh_random_short", "to_json", _REQUEST, "to_rot13"], False),
+]
+
+
+@pytest.mark.parametrize(("names", "refused"), _KEPT)
+def test_a_kept_combination_is_refused_by_what_its_request_obfuscation_keeps_out(
+        names, refused):
+    """The request obfuscation is the obfuscation right after the request,
+    in the order of every plan, old and new: phase 4's obfuscations apply
+    before the request, a manipulation technique after the request
+    obfuscation (before the eval release, the manipulation layer applied
+    before the obfuscations, and the request obfuscation was last)."""
+    every = registry(all_techniques())
+    fns = [every[name] for name in names]
+    assert all(fns[i] in compatible(fns[:i], [fns[i]]) for i in range(len(fns)))
+    assert JPipe._refused(names, every) is refused
+
+
+def test_a_resume_counts_the_units_a_request_obfuscation_now_refuses(
+        tmp_path, monkeypatch, caplog):
+    out = tmp_path / "jb.csv"
+    plan = _planned(out, monkeypatch)
+    rows = [{**row, "combination": names}
+            for row, (names, _refused) in zip(plan, _KEPT, strict=False)]
+    Manifest.sidecar(out).write(rows)
+    _rewrite_plan_file(out, rules="before")
+    monkeypatch.setattr(JPipe, "drive_units", lambda units, **kwargs: None)
+    with caplog.at_level("WARNING"):
+        _resume(out)
+    (warning,) = _warnings(caplog)
+    refused = sum(refused for _names, refused in _KEPT[:len(rows)])
+    assert f"{refused} of its {len(rows)} pending units" in warning and refused
+    assert ("applies each combination in the order it records (one drawn before "
+            "the eval release applies its manipulation technique second, not "
+            "last)") in warning
+    assert "resume=False to plan again by today's rules and order" in warning
 
 
 def test_each_kind_s_rows_record_the_version_its_plan_was_drawn_at(

@@ -211,10 +211,14 @@ core, called once per kind:
    rules are not today's, one WARNING (`_warn_since_plan`, given after the
    pass of step 4) names both versions, what was added and retired, whether
    the rules changed or are not recorded, and how many pending units hold a
-   combination `compatible()` now refuses (`_refused`); it says the kept
-   plan does not draw the added techniques and runs those units as planned,
-   and names `resume=False`. The rows of a kept plan record its
-   `spec_version`, not the library's. A manifest without the plan file logs
+   combination `compatible()` now refuses or whose request obfuscation
+   keeps out another of its techniques (`_refused`: the request
+   obfuscation is the obfuscation right after the request, in every plan's
+   order, and `after_request_obfuscation` gives what it keeps out); it says
+   the kept plan does not draw the added techniques and runs those units as
+   planned (and, when the rules changed or are not recorded, that each
+   combination applies in the order it records), and names `resume=False`.
+   The rows of a kept plan record its `spec_version`, not the library's. A manifest without the plan file logs
    a WARNING and runs unchecked, its rows recording the library's version.
    Otherwise the old coverage table, plan file and variants table are
    removed, and `plan_run` writes the plan file, one manifest row per input

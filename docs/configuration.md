@@ -1500,10 +1500,13 @@ structural wrapper and 115 to 128 a neutral container, and none does now;
 the obfuscations per unit are 1.47 (1.47 to 1.48) with the step on, against
 1.58 (1.57 to 1.59) with it off and 1.57 before this rule. The eval type
 draws no phase-5 step, so its pairs and draws, and the budget
-draws the digest pins (phase 5 off in both), do not move. `rules.compatible`
-does not know which technique of a combination is the request obfuscation,
-so the WARNING of a kept plan, which counts the pending units whose
-combination today's rules refuse, leaves this rule out.
+draws the digest pins (phase 5 off in both), do not move. The WARNING of
+a kept plan, which counts the pending units whose combination today's rules
+refuse, counts those this rule refuses too: it takes the obfuscation right
+after the request as the request obfuscation, where the order of every
+plan, before this release and after, puts it. A plan of 3,000 units of the
+default attack kind drawn before this release (seed 42, three groups)
+counts 539, 202 of them by this rule alone.
 
 Together the four rule changes close most pairings the ten heavy full-text
 encodings (complexity 3, which fits only a unit whose earlier picks leave 3
@@ -1599,8 +1602,9 @@ technique second: its pending units write the old text. Its plan file's
 `rules` id, which holds the layer order (and, in a budget plan whose pool
 holds a heavy full-text encoding, the heavy encodings' weight), differs
 from today's, so a
-resume logs one WARNING that the rules a combination is drawn by changed and
-counts the pending units whose combination today's rules refuse. To take the
+resume logs one WARNING that the rules a combination is drawn by changed,
+counts the pending units whose combination today's rules refuse, and says
+that each combination applies in the order the plan records. To take the
 new rules, run the jailbreak stage with `resume=False` (the stage starts
 over); until then the rows of a kept eval plan are not those of a fresh one.
 The rules are the spec's, which a `config_dir` never overlays, so a run on a
