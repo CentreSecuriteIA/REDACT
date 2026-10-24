@@ -1186,6 +1186,60 @@ def test_a_stage_keeps_the_engines_loaded_before_the_run_that_no_stage_plans(
     assert engines.shut == [f"org/{gen}"]
 
 
+def test_an_engine_loaded_before_the_run_leaves_for_the_stages_before_its_own(
+        local_model, engines, tmp_path, monkeypatch):
+    """A notebook loaded the paraphraser. The inputs stage's plan gives gen
+    the card as if it were free, so entering that stage, the first, releases
+    it (the paraphrase stage loads it again); an engine no stage calls
+    stays."""
+    import redact.llms.backends.vllm as vllm_module
+
+    gen = local_model("_ph_early_gen")
+    para, check = local_model("_ph_early_para"), local_model("_ph_early_check")
+    users = engines("org/users-own-model")
+    engines(f"org/{para}")
+    seen = []
+    _run(tmp_path, monkeypatch, ["inputs", "paraphrase"],
+         {"gen": gen, "paraphraser": para, "paraphrase_check": check},
+         generate_inputs=lambda **kw: seen.append(set(vllm_module._engines)))
+    assert seen == [{users}]
+    assert engines.shut == [f"org/{para}"]
+
+
+def test_an_engine_loaded_before_the_run_stays_while_nothing_loads_beside_it(
+        local_model, engines, tmp_path, monkeypatch):
+    """gen is loaded too, so the inputs stage loads nothing and the
+    paraphraser stays for its own stage; gen goes when that stage drops it."""
+    import redact.llms.backends.vllm as vllm_module
+
+    gen = local_model("_ph_idle_gen")
+    para, check = local_model("_ph_idle_para"), local_model("_ph_idle_check")
+    loaded = {engines(f"org/{gen}"), engines(f"org/{para}")}
+    seen = []
+    _run(tmp_path, monkeypatch, ["inputs", "paraphrase"],
+         {"gen": gen, "paraphraser": para, "paraphrase_check": check},
+         generate_inputs=lambda **kw: seen.append(set(vllm_module._engines)))
+    assert seen == [loaded]
+    assert engines.shut == [f"org/{gen}"]
+
+
+def test_an_engine_loaded_before_the_run_stays_when_its_stage_loads_ahead(
+        local_model, engines, tmp_path, monkeypatch):
+    """The paraphrase stage keeps gen and fits on the card, so its models
+    load during the inputs stage under its plan, which counts the
+    paraphraser a notebook loaded: it stays."""
+    import redact.llms.backends.vllm as vllm_module
+
+    gen, para = local_model("_ph_ahead_gen"), local_model("_ph_ahead_para")
+    paraphraser = engines(f"org/{para}")
+    seen = []
+    _run(tmp_path, monkeypatch, ["inputs", "paraphrase"],
+         {"gen": gen, "paraphraser": para, "paraphrase_check": gen},
+         generate_inputs=lambda **kw: seen.append(set(vllm_module._engines)))
+    assert seen == [{paraphraser}]
+    assert engines.shut == []
+
+
 def test_a_planning_error_still_releases_the_engines_the_run_loaded(
         local_model, engines, tmp_path, monkeypatch):
     """Without a plan the stages load their engines unplanned; the run's end

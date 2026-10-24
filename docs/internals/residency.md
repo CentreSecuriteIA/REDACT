@@ -273,10 +273,13 @@ The driver (`driver.py`):
    unplanned card, or 1 GiB or more in use on a planned card with no process
    listed, is a warning.
 4. `_enter_phase`, at each stage: unload the engines the previous phase held
-   and this one does not, keeping those loaded before the run that no stage
-   calls; `apply_plan(phase.plan)`; preload the phase's loadable models,
-   plus the next stage's when its plan is one group and holds everything
-   this one holds.
+   and this one does not, and those loaded before the run that a later
+   stage calls when this phase's plan (with the next one's, when its models
+   load ahead) leaves them out and has an engine still to load
+   (`_strays`), keeping those loaded before the run that no stage calls;
+   `apply_plan(phase.plan)`; preload the phase's loadable models, plus the
+   next stage's when its plan is one group and holds everything this one
+   holds.
 5. At the end, also after a failure: wait for the preload threads, at most
    `EXIT_WAIT_S` together, naming at ERROR a preload still loading; unload
    every engine the run loaded, with a 10 s wait, which ends that load (the
@@ -304,12 +307,13 @@ done:
 - a load that hangs is ended only on the way out or by a second signal; no
   load is timed out mid-run;
 - an engine loaded before the run (a notebook's) that a stage calls counts,
-  for the plan, only from the first stage that calls it. The stages before
-  it are planned as if its memory were free (the plan warns that it is
-  loaded already). The driver does not release it at the first stage, and
-  at a later one only when a model of the previous stage drops out (it then
-  loads again for the stage that calls it), so a model planned beside it
-  before that may fail to load. Release it before the run
-  (`residency.unload_local()`), or let the run load it. The fix, releasing
-  it on entering every such stage or planning around its cards (`pinned`),
-  is GPU-facing and not yet tried on a GPU.
+  for the plan, only from the first stage that calls it. The driver unloads
+  it on entering an earlier stage whose plan leaves it out and loads a model
+  (it then loads again for its stage). Where it stays loaded (the stages
+  that call it, a stage that loads nothing new, or one during which its own
+  stage's models load ahead) it keeps the share and cards it was built
+  with: the plan warns that it is loaded already and does not place around
+  its cards (`pinned`, which only a caller passes), so a model planned
+  beside it may fail to load. Release it before the run
+  (`residency.unload_local()`), or let the run load it. Releasing it on
+  entering a stage is tested offline only, not yet on a GPU.

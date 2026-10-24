@@ -48,17 +48,13 @@ of the run, not a guarantee against running out of memory.
 #     a second signal; the run does not time a load out.
 #   - An engine loaded before the run (a notebook's) that a stage calls is
 #     resident, for the plan, only from the first stage that calls it. The
-#     plans of the stages before hand its memory out again (_survey warns,
-#     and plan.loaded names its share and cards). The driver releases it
-#     only by chance: _enter_phase unloads nothing at the first stage, and
-#     at a later one only when a model of the previous stage drops out (it
-#     then goes with everything outside the stage's plan, and loads again
-#     for the stage that calls it). A model planned beside it before that
-#     may fail to load. Two fixes, both GPU-facing and not yet tried on one:
-#     release it on entering any stage whose plan leaves it out (the
-#     driver; costs one load), or have plan_phases count it resident from
-#     the first stage and pass its cards as pinned (placement takes pinned,
-#     but only tests pass it).
+#     driver unloads it on entering an earlier stage whose plan leaves it
+#     out and loads a model (driver._strays; one more load, tested offline
+#     only). Where it stays loaded it keeps the share and cards it was built
+#     with (_survey warns, and plan.loaded names them), and a model planned
+#     beside it may fail to load. The fix: have plan_phases count it from
+#     its first stage on and pass its cards as pinned (placement takes
+#     pinned, but only tests pass it).
 
 import logging
 

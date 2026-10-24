@@ -209,8 +209,11 @@ tied to code, so they come from the package only.
    copies, the trace's `load` event says so (`fallback`, `planned_copies`).
    The engines loaded before the run that no stage calls are then set
    aside, so no unload between stages releases them.
-8. Per stage: `_enter_phase` (unload, apply the stage's plan, preload this
-   stage's models and the next stage's when they fit), then inside
+8. Per stage: `_enter_phase` (unload what the previous stage held and this
+   one does not, and an engine loaded before the run for a later stage when
+   this stage's plan leaves it out and loads a model, `_strays`; apply the
+   stage's plan; preload this stage's models and the next stage's when they
+   fit), then inside
    `telemetry.stage(name)`: the front with `read_back=False`, `file_counts`
    and the stage's `extra_counts`, then `write_record`: `stage`, `timestamp`
    (UTC, with its offset), the merged `params`, `models` (no comment key), `counts`, `sources`, `serving` (the roles

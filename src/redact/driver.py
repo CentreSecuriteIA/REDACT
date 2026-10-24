@@ -337,6 +337,27 @@ def _engine_ids(engines: dict | None) -> set[tuple]:
     return {(setup, *key) for setup, keys in (engines or {}).items() for key in keys}
 
 
+def _strays(plans: list, kept: dict | None, previous: list = ()) -> set[tuple]:
+    """The loaded engines that ``plans`` leave out, when an engine they hold
+    is still to load.
+
+    Such an engine was loaded before the run, for a later stage: these
+    plans hand its memory out again, so what they load beside it may not
+    fit. Empty when every engine the plans hold is loaded already, since
+    then nothing loads beside it. ``kept`` are engines no unload releases,
+    and the engines of the ``previous`` stage's plans are left out: the
+    models that stage drops are unloaded as such.
+    """
+    from . import residency
+
+    loaded = _engine_ids(residency.loaded_engines())
+    held = {fp.engine for plan in plans for fp in plan.footprints}
+    if held <= loaded:
+        return set()
+    earlier = {fp.engine for plan in previous for fp in plan.footprints}
+    return loaded - held - earlier - _engine_ids(kept)
+
+
 def _enter_phase(
     phases: list, i: int, warm: set[str], verbose: bool = True,
     kept: dict | None = None,
@@ -346,7 +367,11 @@ def _enter_phase(
     Unloads the engines the stage's plan leaves out, hands the loader the
     plan's shares and cards, then starts loading this stage's models in the
     background, and the next stage's too when they fit beside them without
-    an unload. Nothing here aborts the run.
+    an unload. An engine loaded before the run that a later stage calls is
+    unloaded too when this stage's plan (with the next one's, when its
+    models load during this stage) leaves it out and loads anything
+    (:func:`_strays`): it is loaded again for its stage. Nothing here aborts
+    the run.
 
     Args:
         phases: The run's phases, as :func:`_plan_phases` returns them.
@@ -366,23 +391,32 @@ def _enter_phase(
     try:
         phase = phases[i]
         warm &= set(phase.resident)
-        dropped = set(phases[i - 1].resident) - set(phase.resident) if i else ()
-        if dropped:
+        following = phases[i + 1] if i + 1 < len(phases) else None
+        # The next stage's models load during this one when every model of
+        # this one stays for it and they fit together.
+        next_ahead = (following is not None and following.plan.co_resident
+                      and set(phase.resident) <= set(following.resident))
+        holding = list(dict.fromkeys(
+            phase.resident + (following.resident if next_ahead else [])))
+        previous = phases[i - 1] if i else None
+        dropped = set(previous.resident) - set(phase.resident) if previous else set()
+        strays = _strays([phase.plan] + ([following.plan] if next_ahead else []),
+                         kept, [previous.plan] if previous else [])
+        if dropped or strays:
             if verbose:
+                gone = sorted(dropped) + [f"{engine[1]} (not in this stage's plan)"
+                                          for engine in sorted(strays)]
                 logger.info("[residency] stage %s: unloading %s",
-                            phase.stage, ", ".join(sorted(dropped)))
-            residency.unload_local(keep=phase.resident, engines=kept)
+                            phase.stage, ", ".join(gone))
+            residency.unload_local(keep=holding, engines=kept)
         # What loads from here on loads under this stage's plan.
         residency.apply_plan(phase.plan)
         ahead = list(phase.loadable)
-        if i + 1 < len(phases):
-            following = phases[i + 1]
-            if (following.plan.co_resident
-                    and set(phase.resident) <= set(following.resident)):
-                ahead += following.loadable
-                # An engine both stages hold has the same share and cards
-                # in both plans.
-                residency.apply_plan(following.plan, replace=False)
+        if next_ahead:
+            ahead += following.loadable
+            # An engine both stages hold has the same share and cards in
+            # both plans.
+            residency.apply_plan(following.plan, replace=False)
         todo = [m for m in dict.fromkeys(ahead) if m not in warm]
         if todo:
             warm |= set(todo)
@@ -485,10 +519,12 @@ def run_pipeline(
     over its adversarial kind. No stage reads its rows back: the counts
     are taken from each stage's files, and the inputs are seeded from the
     constitution saved under ``data_dir``. The local engines the run loaded
-    are released when it returns or raises, after a planning error too;
-    those loaded before it, such as
-    a notebook's, stay loaded unless the run calls one and unloads it
-    between stages. The way the recipe serves its models holds only until then.
+    are released when it returns or raises, after a planning error too. One
+    loaded before it, such as a notebook's, is not released at its end,
+    though a stage may unload it: one a later stage calls is unloaded on
+    entering a stage whose plan leaves it out and loads a model
+    (:func:`_enter_phase`), and loaded again for its stage. The way the
+    recipe serves its models holds only until then.
     Before any of them loads, the run stops if another process holds memory
     on a card the plan puts one on (:func:`_check_cards`). At the end a
     preload still loading is waited for at most ``EXIT_WAIT_S`` (60 s), then

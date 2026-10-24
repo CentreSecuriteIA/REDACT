@@ -277,10 +277,15 @@ any of its stages plans for it.
 
 A local engine loaded before the run (a notebook that called a local model,
 then `run_pipeline`) counts, for the plan, only from the first stage that
-calls it: the stages before are planned as if its memory were free (the plan
-warns that it is loaded already), and the run does not release it for them.
+calls it. Entering an earlier stage whose plan leaves it out and loads a
+model, the driver unloads it, since that plan hands its memory out; it loads
+again for its stage, which costs one more load. While it stays loaded it
+keeps the share and cards it was built with, not the plan's (the plan warns
+that it is loaded already), so a model planned beside it may fail to load.
 Release it first with `redact.residency.unload_local()`, or let the run load
-it.
+it. One that no stage calls stays through the run. At its end the run
+releases the engines it loaded, after a planning error too, and keeps those
+loaded before it.
 
 In the GPU check of this release, a 24B generator and a 3B checker on one
 A100 80GB give two plans: the 24B alone for `constitution` and `jailbreaks`,
