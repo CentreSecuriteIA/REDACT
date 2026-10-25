@@ -14,7 +14,8 @@ the `allow` and `deny` lists of the
 briefly what each family does. [The catalog](catalog.md), generated from
 the code, gives each technique's tags, model calls, template variants,
 prompts and pools, the techniques it combines with and the rules that
-refuse the others, and a family by family matrix.
+refuse the others, and a family by family matrix. What the model-written
+families did on real models is [measured below](#measured-on-real-models).
 
 The spec also dates each technique: `since` is the spec version that added
 it (`"1.0"` when absent) and `deprecated` the one that retired it. A retired
@@ -1291,6 +1292,48 @@ for `to_markdown`). Continuation is drawn by the eval pool, so its info
 stays as it is until the next eval review.
 After a run, `<kind>.variants.csv` counts the rows that drew each variant
 ([stages/jailbreaks.md](stages/jailbreaks.md#files)).
+
+## Measured on real models
+
+What a run on real models did with the model-written families. One pod run on
+2026-10-25 (an RTX PRO 6000 Blackwell with 96 GB, vLLM 0.31.0; the library at
+spec 1.4; `venice-uncensored-fp8` as the generation and check model and
+`translategemma-27b` as the translator). "Units" are one technique applied to
+one input; "discarded" is a unit the technique rejected (a gate, its check
+model or its judge), and "accepted" one it did not.
+
+| Technique or family | Accepted or discarded | Units | Date | Note |
+|---|---|---|---|---|
+| `code_switching` (10), benign sentences of 5 to 40 words | 179 accepted (59.7%) | 300 | 2026-10-25 | Of 30 each: Russian 29, Portuguese 22, Hindi 21, Chinese 21, German 20, Arabic 18, French 15, Spanish 14, **Japanese 12, Swahili 7**. Of the 121 discards the code gate made 86 (no English left 44, length ratio 25, no second language 10, fully switched 7) and the check model 35. |
+| `code_switching`, inputs of 1 to 4 words | 18 accepted (22.5%) | 80 | 2026-10-25 | A 400-unit test: 1 word 0 of 100 (`too short to mix`), 2 words 8%, 3 words 20%, 4 words 30%, mostly check-model rejections. |
+| `code_switching`, training defaults | 30 of 48 draws discarded (64%) | 48 | 2026-10-25 | 999 inputs of all four entry types. In the natural kind 28 of 61 discarded (46%). |
+| `romanization` (10), benign sentences | 270 accepted (90%) | 300 | 2026-10-25 | GlotLID cannot tell the romanized Indic languages apart: Gujarati 4 of 29 outputs labelled `guj_Latn` (14 `hin_Latn`, 6 `urd_Latn`). The gate accepts any non-English Latin label. |
+| `dialect` (6), benign sentences | 171 accepted (95%) | 180 | 2026-10-25 | Egyptian Arabic: 6 rejected for the label `ars_Arab`, and of 24 accepted only 5 are `arz_Arab` (16 `arb_Arab`). German (Switzerland): 3 of 30 rejected for a sharp s. The region asked for is not checked by anything. |
+| `transliteration` (4), benign sentences | 120 accepted | 120 | 2026-10-25 | Pure: no model. |
+| `persona` (14) and `cognitive` (5), benign sentences | 567 accepted of 760 (the scenario check failed 193, 25.4%) | 760 | 2026-10-25 | Under 50%: radical politician 4 of 40, cult leader 3, cartel leader 15, deformed scientist 16, artist 18. The five `cognitive` techniques 200 of 200. |
+| `to_word_art` | 26 discarded (63%) | 41 | 2026-10-25 | Training defaults, units that reached the technique. |
+| `to_payload_split_semantic` | 12 discarded (75%) | 16 | 2026-10-25 | As above. |
+| `to_word_game` | 13 discarded (65%) | 20 | 2026-10-25 | As above. |
+| `to_pseudonym_substitution` | 10 discarded (53%) | 19 | 2026-10-25 | As above. |
+| `to_yoruba`, long benign texts (1,166 characters) | 4 of 100 units discarded; 26 of 144 forward pieces cut at the reply cap (18%) | 100 | 2026-10-25 | On 200 benign inputs 196 accepted (2.0% discarded; 7.4% at the earlier measurement); the judge rejected 71 of 267 calls (26.6%). `to_amharic`: 2 of 101 pieces cut; Traditional Chinese: 0 of 100. |
+| The benign-pair check (`fsh`, `dap`) | 0 of 872 pairs rejected | 872 | 2026-10-25 | Nothing was regenerated; 7 of 116 units were rejected whole (no reply with 8 pairs in 3 calls). |
+
+Read these with four caveats:
+
+- The sentence tests ran on **benign** inputs (30 sentences of 5 to 40 words
+  and 8 of 1 to 4 words per technique; the long-text tests 100 benign texts);
+  the rows marked training defaults are the 999 inputs of one training run.
+  Harmful inputs may be accepted at other rates.
+- The prompts and templates of these families are **agent-written** and were
+  not tuned on these numbers.
+- **No native speaker has read any of the output.** The gates (script share,
+  GlotLID, a length band, a back-translation and a judge for the
+  translations) and the check model are the whole check.
+- **A dialect's region cannot be checked**: GlotLID tells only the language,
+  so whether the translator wrote Brazilian, Mexican, Canadian, Egyptian or
+  Swiss usage is unverified, and the rates above are those of the gates.
+
+One run and one pair of models: the rates move with the models and the prompts.
 
 ## Reference list coverage
 

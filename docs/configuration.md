@@ -982,6 +982,17 @@ copy the packaged adversarial lists into it
   comparable with those built after; `template_draws.json` pins the new
   texts. Eval pool v2 (the third eval release, above) then widened the
   pool.
+- **One more eval text change: `to_fill_in_blank`.** After eval pool v2, the
+  variant `blank_answer` of `to_fill_in_blank`, which repeated `fill_blank`
+  (9 of its 12 word trigrams were in the other), was written again as a
+  transcript with a blank reply. The pool keeps its eight variants, its info
+  key and its slots. In the eval type's plan (300 inputs, seed 43, three
+  groups) 4 of the 300 round-1 units and 6 of the 300 round-2 units hold the
+  technique, and the text of one unit moves (the one that drew
+  `blank_answer`). The pool, the pairs and the technique names of the pinned
+  draws do not move; `template_draws.json` does for this technique. A test
+  now fails when two variants of a continuation pool share more than half of
+  their word trigrams.
 - **The technique catalog.** [catalog.md](catalog.md) and `docs/catalog.json`
   list every registered technique with its tags, model calls, template
   variants, prompts and pools, the techniques it combines with and the rules
