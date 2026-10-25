@@ -38,7 +38,7 @@ on its own:
 4. **paraphrase**: checked rewordings of the inputs (and, opt-in, the outputs),
    to remove the generating model's fingerprint.
 5. **jailbreaks**: attacks and natural variations of the inputs, drawn from
-   321 techniques in 45 families (the default attacks draw 291 of them, the
+   322 techniques in 46 families (the default attacks draw 292 of them, the
    natural variations 96) and dealt evenly across categories.
 6. **build**: the accepted rows of every stage, merged into
    `complete_dataset.csv` for training, or into three flat files for

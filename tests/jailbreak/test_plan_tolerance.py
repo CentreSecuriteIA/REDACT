@@ -626,9 +626,10 @@ SPEC_1_4_ADDED = {"persona_template": 12, "suffixes": 24, "translation": 1,
 
 #: What spec 1.5 added to the attack pool, by family (the literature-gap
 #: families): a fallacy technique, two policy-framing frames, one
-#: reasoning-injection technique and two code-framing frames so far.
+#: reasoning-injection technique, two code-framing frames and one
+#: bijection-learning cipher.
 SPEC_1_5_ADDED = {"fallacy": 1, "policy_framing": 2, "reasoning_injection": 1,
-                  "code_framing": 2}
+                  "code_framing": 2, "bijection": 1}
 
 
 def _by_family(names: list[str]) -> dict[str, int]:
@@ -656,7 +657,7 @@ def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
         for version in {by_name[name].since for name in added}}
     assert retired == []
     assert {version: len(names) for version, names in by_version.items()} == {
-        "1.3": 36, "1.4": 71, "1.5": 6}
+        "1.3": 36, "1.4": 71, "1.5": 7}
     assert set(_FOUR_TRANSLATIONS) <= set(by_version["1.3"])
     assert _by_family(by_version["1.4"]) == SPEC_1_4_ADDED
     assert _by_family(by_version["1.5"]) == SPEC_1_5_ADDED

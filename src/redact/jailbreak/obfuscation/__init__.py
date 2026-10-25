@@ -3,6 +3,7 @@
 from collections.abc import Callable
 
 from .ascii_art import get_ascii_art_functions
+from .bijection import get_bijection_functions
 from .casual_writing import get_casual_writing_functions
 from .code_switching import get_code_switching_functions
 from .dialect import get_dialect_functions
@@ -43,4 +44,5 @@ def get_all_obfuscation_functions() -> list[Callable]:
         + get_code_switching_functions()
         + get_romanization_functions()
         + get_dialect_functions()
+        + get_bijection_functions()
     )

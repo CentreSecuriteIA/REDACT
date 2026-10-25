@@ -36,7 +36,8 @@ def _pool(fn) -> list[dict]:
 
 
 def test_there_are_two_techniques():
-    assert [fn.__name__ for fn in FUNCTIONS] == ["to_policy_puppetry", "to_skeleton_key"]
+    names = [fn.__name__ for fn in FUNCTIONS]
+    assert names == ["to_policy_puppetry", "to_skeleton_key"]
 
 
 def test_the_pools_are_ones_their_techniques_can_draw():

@@ -13,6 +13,7 @@
   "manipulation/fake_turns_templates.json:fake_history": {"family": "fake_turns", "variants": 8, "floor": 8},
   "manipulation/fake_turns_templates.json:fake_system_turn": {"family": "fake_turns", "variants": 8, "floor": 8},
   "manipulation/reasoning_injection_templates.json:fake_reasoning": {"family": "reasoning_injection", "variants": 9, "floor": 8},
+  "obfuscation/bijection_learning_templates.json:bijection_learning": {"family": "bijection", "variants": 8, "floor": 8},
   "obfuscation/decode_hints.json:to_ascii_ordinal": {"family": "encode", "variants": 4, "floor": 4},
   "obfuscation/decode_hints.json:to_atbash": {"family": "encode", "variants": 4, "floor": 4},
   "obfuscation/decode_hints.json:to_base32": {"family": "encode", "variants": 4, "floor": 4},
