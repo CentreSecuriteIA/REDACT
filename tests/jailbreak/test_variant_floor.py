@@ -72,6 +72,8 @@ FLOORS = {
     "benign_role": 12,
     "smalltalk_prefix": 20,
     "smalltalk_suffix": 20,
+    "unicode_smuggling": 8,
+    "special_tokens": 8,
 }
 
 

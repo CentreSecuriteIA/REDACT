@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 315 active techniques in 5 layers and 41
+The jailbreak stage draws from 328 active techniques in 5 layers and 44
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -77,10 +77,10 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 47 | at most 1 |
-| `obfuscation` | 18 | 166 | no cap |
+| `obfuscation` | 21 | 179 | no cap |
 | `requests` | 13 | 71 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| all | 41 | 315 | |
+| all | 44 | 328 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -118,8 +118,11 @@ that call a model call the generation model.
 | obfuscation | `suffixes` | `surface_noise` | 60 | 28 | no | no | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_fragments`, `to_adversarial_suffix_unicode`, `to_adversarial_suffix_emoji`, `to_adversarial_suffix_gcg_site_example`, `to_adversarial_suffix_gcg_repo_demo_llama2`, `to_adversarial_suffix_gcg_smoothllm_llama2_1`, `to_adversarial_suffix_gcg_smoothllm_llama2_2`, `to_adversarial_suffix_gcg_smoothllm_vicuna_1`, `to_adversarial_suffix_gcg_smoothllm_vicuna_2`, `to_adversarial_suffix_gcg_jbb_llama2_65`, `to_adversarial_suffix_gcg_jbb_llama2_75`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_78`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_86`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_1`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_48`, `to_adversarial_suffix_gcg_jbb_vicuna_2`, `to_adversarial_suffix_gcg_jbb_vicuna_6`, `to_adversarial_suffix_gcg_jbb_vicuna_26`, `to_adversarial_suffix_gcg_jbb_vicuna_32`, `to_adversarial_suffix_gcg_jbb_vicuna_38`, `to_adversarial_suffix_gcg_jbb_vicuna_45`, `to_adversarial_suffix_gcg_jbb_vicuna_54`, `to_adversarial_suffix_gcg_jbb_vicuna_76`, `to_adversarial_suffix_gcg_jbb_vicuna_77`, `to_adversarial_suffix_gcg_jbb_vicuna_90`, `to_adversarial_suffix_gcg_jbb_vicuna_95`, `to_adversarial_suffix_gcg_jbb_vicuna_97` |
 | obfuscation | `payload_split` | `encoding` | 65 | 2 | `to_payload_split_semantic` | no | `to_payload_split`, `to_payload_split_semantic` |
 | obfuscation | `encode` | `encoding` | 70 | 28 | no | no | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_basic`, `to_leetspeak_intermediate`, `to_leetspeak_advanced`, `to_morse`, `to_braille`, `to_reversed_characters`, `to_reversed_words`, `to_reversed_word_order`, `to_lookalike_letters`, `to_zero_width_noise`, `to_hex`, `to_binary`, `to_url_encoding`, `to_html_entities`, `to_base32`, `to_base85`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth`, `to_math_styled`, `to_letter_spacing` |
+| obfuscation | `unicode_smuggling` | `encoding` | 73 | 3 | no | no | `to_variation_selector_smuggling`, `to_invisible_suffix`, `to_unicode_tag_smuggling` |
 | obfuscation | `neutral_container` | `container` | 80 | 6 | no | no | `to_code_comment`, `to_yaml_document`, `to_csv_row`, `to_email_message`, `to_transcript_line`, `to_log_entry` |
 | obfuscation | `structural` | `container` | 80 | 3 | no | no | `to_json`, `to_xml`, `to_markdown` |
+| obfuscation | `special_tokens` | `container` | 82 | 2 | no | no | `to_eos_tokens`, `to_chat_template_abuse` |
+| obfuscation | `char_injection` | `surface_noise` | 85 | 8 | no | no | `to_bidi_override`, `to_upside_down`, `to_deletion_chars_low`, `to_deletion_chars_medium`, `to_deletion_chars_high`, `to_zalgo_low`, `to_zalgo_medium`, `to_zalgo_high` |
 | obfuscation | `ascii_art` | `encoding` | 90 | 1 | no | no | `to_ascii_art` |
 | requests | `answer_format` | `answer_shape` |  | 12 | no | no | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data`, `to_dual_answer`, `to_tagged_prefix`, `to_answer_in_encoding` |
 | requests | `answer_language` | `language` |  | 26 | no | no | `to_ask_answer_in_french`, `to_ask_answer_in_japanese`, `to_ask_answer_in_russian`, `to_ask_answer_in_spanish`, `to_ask_answer_in_german`, `to_ask_answer_in_arabic`, `to_ask_answer_in_turkish`, `to_ask_answer_in_czech`, `to_ask_answer_in_vietnamese`, `to_ask_answer_in_greek`, `to_ask_answer_in_croatian`, `to_ask_answer_in_swahili`, `to_ask_answer_in_thai`, `to_ask_answer_in_khmer`, `to_ask_answer_in_maori`, `to_ask_answer_in_nepali`, `to_ask_answer_in_zulu`, `to_ask_answer_in_scots_gaelic`, `to_ask_answer_in_bengali`, `to_ask_answer_in_javanese`, `to_ask_answer_in_hmong`, `to_ask_answer_in_guarani`, `to_ask_answer_in_chinese`, `to_ask_answer_in_hindi`, `to_ask_answer_in_yoruba`, `to_ask_answer_in_amharic` |
@@ -1161,6 +1164,52 @@ eval pool v2.
   Each font is loaded once per process. Every font that has the glyphs
   draws the text to measure it, so a text costs up to 16 drawings (about
   0.03 s in all at 150 characters, 0.4 s at 2,000).
+- `unicode_smuggling` (3, spec version 1.5, attack only) hides the prompt in
+  code points a reader does not see. `to_variation_selector_smuggling`
+  (Gao 2510.05025) encodes the prompt's UTF-8 bytes as Unicode variation
+  selectors (`U+FE00`-`U+FE0F`, then `U+E0100`-`U+E01EF`) and appends them
+  after a visible benign carrier from the `vs_carrier` pool; the selectors are
+  invisible, so a reader sees only the carrier, and they decode back to the
+  exact prompt. `to_unicode_tag_smuggling` (Hackett 2504.11168) does the same
+  with Unicode tag characters (`U+E0020`-`U+E007E`, the invisible shadows of
+  printable ASCII), after a `tag_carrier` sentence; only printable ASCII has a
+  tag character, so a fresh plan draws it only for an all-printable-ASCII
+  prompt. `to_invisible_suffix` leaves the prompt visible and appends a run of
+  8 to 48 random invisible selectors: the static form, raw-character noise a
+  classifier meets and a reader never sees. All three are pure. As a
+  full-prompt hiding (like the heavy full-text encodings) the family refuses
+  every other obfuscation and the manipulation layer; it still joins the
+  hacking layer and a request. No carrier holds an invisible character of its
+  own, so the trailing invisible run is the payload alone.
+- `char_injection` (8, spec version 1.5, attack only) reorders, flips, deletes
+  or marks characters so a reader still reads the prompt while a classifier
+  reading the raw code points meets something else (Boucher 2106.09898,
+  Hackett 2504.11168). `to_bidi_override` stores the prompt reversed inside a
+  right-to-left override (`U+202E` ... `U+202C`), so the Unicode
+  bidirectional algorithm renders it in order. `to_upside_down` maps each
+  character to its upside-down look-alike and reverses the string.
+  `to_deletion_chars_low/medium/high` inject a junk letter and a backspace
+  control character (`U+0008`) between characters, so a terminal that honours
+  the backspace deletes the junk; the raw text keeps it.
+  `to_zalgo_low/medium/high` stack combining diacritical marks
+  (`U+0300`-`U+036F`) on each visible character. All are pure. The bidi
+  reversal decodes under the bidi algorithm, and the deletion and zalgo
+  injections strip back to the prompt. As a whole-text reorder or injection
+  the family refuses every other obfuscation family; it still joins the
+  hacking, request and manipulation layers.
+- `special_tokens` (2, spec version 1.5, attack only) places model control
+  tokens around the prompt. `to_eos_tokens` appends one model family's
+  end-of-sequence marker(s) after the prompt (BOOST, Yu 2405.20653), so a
+  model may read its own turn as ended; the marker is drawn from the
+  `eos_style` pool. `to_chat_template_abuse` wraps the prompt in another model
+  family's chat-template markup (ChatML, Llama, Gemma, Mistral, Vicuna,
+  Alpaca, Phi), ending with an assistant-turn opener (ChatBug, Jiang
+  2406.12935), from the `chat_template` pool. Both are pure wrappers, so the
+  family refuses the other wrappers (`structural`, `neutral_container`),
+  `ascii_art`, the whole-text hidings and reorderings, and the manipulation
+  layer, whose example turns or invented conversation clash with the injected
+  turn markup; it still joins an encoding, a translation, a hacking frame and
+  a request.
 
 **Requests.** These change how a request is posed, not its text, and call no
 model. Each technique picks one of its named template variants from a JSON

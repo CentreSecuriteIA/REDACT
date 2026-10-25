@@ -29,6 +29,12 @@ from tests.conftest import (
 _PURE_KIND = {"pure_only": True,
               "layers": {"deny": ["rewrite", "hacking", "manipulation", "requests"]}}
 
+#: Pure obfuscation families that refuse every other obfuscation (full-prompt
+#: hidings), so a count round cannot reach a second obfuscation pick beside
+#: one of them in an obfuscation-only pool. A test that asserts an exact count
+#: of two leaves them out of its pool.
+_EXCLUSIVE_OBFUSCATIONS = ["unicode_smuggling", "char_injection"]
+
 
 def _pure(**kind) -> dict:
     """The keywords of a run of pure obfuscations and no variations, ``kind``
@@ -341,8 +347,11 @@ def test_rounds_escalate(tmp_path):
         {"max_complexity": 6, "max_obfuscations": 2},
         {"max_complexity": 9, "max_obfuscations": 3},
     ]
+    # The exact-count rounds below assert a combination of two, so the pool
+    # leaves out the full-prompt hidings that refuse every other obfuscation.
     df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=11,
-                             **_pure(rounds=schedule))
+                             **_pure(rounds=schedule,
+                                     families={"deny": _EXCLUSIVE_OBFUSCATIONS}))
 
     # iterations derived from the number of rounds: 5 samples x 4 rounds.
     plan = Manifest(out.with_name("jb.manifest.jsonl")).load()
