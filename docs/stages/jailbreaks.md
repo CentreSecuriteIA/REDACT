@@ -332,7 +332,12 @@ transliterations, ten romanizations). An
 adversarial plan kept from an earlier spec resumes with the growth WARNING
 naming them; a natural plan names the 24 transliteration, code-switching and
 romanization techniques, and Yoruba and the six dialects only when its
-`translation` switch is on, and the eval type's pool does not change.
+`translation` switch is on, and the eval type's pool did not change with
+spec 1.4. Eval pool v2, an eval review after it, admitted the persona
+templates, the published suffixes, the letter spacing, the guardrail
+address and the transliterations, among others
+([the release note](../configuration.md#release-notes)); a kept eval plan
+raises on resume, naming `pool`, and runs again with `resume=False`.
 
 ## Rejected and failed units
 

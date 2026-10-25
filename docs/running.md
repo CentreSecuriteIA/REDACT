@@ -442,6 +442,21 @@ in its pool, is skipped with a WARNING and cleared the same way.
 - `eval_outputs.csv`'s `label` is now `<entry_type>_<output_label>`, while
   the other eval files keep the entry types ([build](stages/build.md#eval-mode)).
 
+**Eval runs from before eval pool v2.** The eval type's attacks draw 126
+techniques in 22 families, where they drew 36 in 10
+([the release note](configuration.md#release-notes)).
+
+- A kept eval jailbreak plan stops a resume with a `ValueError` naming
+  `['pool']`: the eval section admits families older than the plan. Run the
+  jailbreak stage with `"resume": false`; the other stages and the eval
+  inputs are as they were. Eval files built before are not comparable with
+  those built after.
+- A `config_dir` written by `scaffold_setup` before the change holds a copy
+  of the former `dataset_types/eval.json`, read in place of the packaged
+  one: its eval runs keep the first pool, and nothing warns. Write the
+  folder again with `scaffold_setup(..., overwrite=True)`, delete the file,
+  or copy the packaged adversarial lists into it.
+
 ## What lands on disk
 
 A training run of all six stages, under `<data_dir>`:
