@@ -246,10 +246,12 @@ def _heavy_draws(n: int) -> int:
 
 def test_the_weight_sets_how_often_the_heavy_encodings_are_drawn(monkeypatch):
     """About the weight times a family's draws: of 2,000 units in one group,
-    17 at 0.2 and 34 at 0.4. The sample is 2,000 (it was 1,000, giving 15 and
-    29) since spec 1.5's two exclusive obfuscation families thinned the layer
-    and 1,000 units left too few draws at 0.2 to compare. The ratio holds the
-    weight, not the count."""
+    15 at 0.2 and 28 at 0.4 on the merged spec-1.5 pool. The sample is 2,000
+    (it was 1,000) because spec 1.5's literature-gap obfuscation families
+    (packets A, B and C) thinned the layer's family-first picks, so at 0.2 a
+    1,000-unit sample left too few heavy draws (8) to compare. The ratio holds
+    the weight, not the count; it is independent of the packaged
+    heavy_encoding_weight because this test sets the weight itself."""
     _at_weight(monkeypatch, 0.2)
     fifth = _heavy_draws(2000)
     _at_weight(monkeypatch, 0.4)

@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 335 active techniques in 5 layers and 49
+The jailbreak stage draws from 345 active techniques in 5 layers and 52
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -77,10 +77,10 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 5 | 49 | at most 1 |
-| `obfuscation` | 22 | 180 | no cap |
+| `obfuscation` | 25 | 190 | no cap |
 | `requests` | 15 | 74 | at most 1 |
 | `manipulation` | 4 | 16 | at most 1 |
-| all | 49 | 335 | |
+| all | 52 | 345 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -109,6 +109,9 @@ that call a model call the generation model.
 | obfuscation | `code_switching` | `language` | 12 | 10 | yes | no | `to_code_switch_spanish`, `to_code_switch_french`, `to_code_switch_german`, `to_code_switch_portuguese`, `to_code_switch_swahili`, `to_code_switch_russian`, `to_code_switch_arabic`, `to_code_switch_hindi`, `to_code_switch_chinese`, `to_code_switch_japanese` |
 | obfuscation | `transliteration` | `encoding` | 13 | 4 | no | no | `to_cyrillic_transliteration`, `to_greek_transliteration`, `to_devanagari_transliteration`, `to_arabic_transliteration` |
 | obfuscation | `romanization` | `language` | 14 | 10 | yes | no | `to_romanize_hindi`, `to_romanize_urdu`, `to_romanize_bengali`, `to_romanize_marathi`, `to_romanize_tamil`, `to_romanize_telugu`, `to_romanize_gujarati`, `to_romanize_punjabi`, `to_romanize_nepali`, `to_romanize_arabic` |
+| obfuscation | `semantic_reencoding` | `semantic_form` | 15 | 4 | yes | no | `to_mathprompt`, `to_adversarial_poetry`, `to_stego_paragraph`, `to_infoflood` |
+| obfuscation | `translationese` | `language` | 16 | 1 | yes | no | `to_translationese` |
+| obfuscation | `sociolect` | `language` | 17 | 5 | yes | no | `to_sociolect_african_american_english`, `to_sociolect_singlish`, `to_sociolect_indian_english`, `to_sociolect_jamaican_english`, `to_sociolect_scottish_english` |
 | obfuscation | `typos` | `surface_noise` | 20 | 4 | yes | no | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium`, `to_rewrite_with_typos_high`, `to_rewrite_with_typos_insane` |
 | obfuscation | `casual_writing` | `surface_noise` | 30 | 9 | no | no | `to_lowercase`, `to_uppercase`, `to_no_sentence_capitals`, `to_dropped_spaces`, `to_doubled_spaces`, `to_dropped_punctuation`, `to_doubled_punctuation`, `to_abbreviations`, `to_stripped_accents` |
 | obfuscation | `noise` | `surface_noise` | 35 | 12 | no | no | `to_random_capitals_low`, `to_random_capitals_medium`, `to_random_capitals_high`, `to_scrambled_letters_low`, `to_scrambled_letters_medium`, `to_scrambled_letters_high`, `to_keyboard_typos_low`, `to_keyboard_typos_medium`, `to_keyboard_typos_high`, `to_emoji_sprinkle_low`, `to_emoji_sprinkle_medium`, `to_emoji_sprinkle_high` |
@@ -935,6 +938,55 @@ family, not in the eval pool.
   `jailbreak/romanize_check`), with the same retry as code switching. Spec
   `check` `meaning`, 2 to 4 calls. None of the four families is checked by
   a native speaker: the gates and the check model are the whole check.
+- `semantic_reencoding` (4, spec 1.5) has the generation model re-express the
+  request's meaning in another symbolic or literary form, each with a code
+  gate for its form and then the check model reading the re-encoding against
+  the original (spec `check` `reencode`, 2 to 4 calls; a rejection is fed back
+  and the re-encoding written again, twice in all):
+  `to_mathprompt` writes it as a symbolic or word mathematics problem
+  (MathPrompt, Bethany 2409.11445; the gate counts math-notation signals),
+  `to_adversarial_poetry` as verse (Bisconti 2511.15304; the gate wants at
+  least four lines, most of them short), `to_stego_paragraph` hides it as a
+  word-acrostic in a benign paragraph (StegoAttack, Geng 2505.16765; the gate
+  verifies in code that the first word of each sentence is, in order and
+  case-folded, the corresponding word of the request, and the number of
+  sentences matches, so the acrostic is exact; it is drawn only for a request
+  of 3 to 40 words, one sentence per word, and its check reads the paragraph
+  for natural, harmless prose rather than for the request, which is hidden),
+  and `to_infoflood` restates it with an overload of context and jargon
+  (InfoFlood, Yadav 2506.12274; the gate is a length-ratio band, 1.8 to 12
+  times the original). Attack only. **Whether the verse is good verse, or the
+  overload convincing, cannot be verified here**: the gates check the form and
+  the check model checks that the request survives; no human has read any of
+  it.
+- `translationese` (1, `to_translationese`, spec 1.5, after Ifebi 2607.10112)
+  round-trips the prompt through a pivot language on the translation model,
+  English to the pivot and back, so the English reads as machine-translated. It
+  reuses the translation machinery: on a machine translator each piece is
+  translated out and back and each leg checked as a translation is (the pivot's
+  GlotLID labels and length band on the way out, English and a band on the way
+  back), the English output must differ from the original, and the generation
+  model judges the original against the joined output; a chat translator does
+  the two legs by name. The pivot is drawn from five shipped translation
+  languages (French, German, Russian, Spanish, Chinese) with the unit's rng, so
+  a replayed plan draws the same one. Spec `check` `translate`, 3 to 16 calls.
+  Like translation and dialect it runs on the translation model and a kind's
+  translation switch gates it; unlike dialect it is an ordinary family for the
+  allow lists, never auto-added, so the eval type does not draw it. Attack only.
+- `sociolect` (5, `to_sociolect_<slug>`, spec 1.5, after Haq 2604.21152) has the
+  generation model rewrite the prompt in an English sociolect or variety, one
+  technique per row of `sociolect_varieties.json`: African American English,
+  Singlish, Indian English, Jamaican English, Scottish English. A code gate
+  checks the reply is not empty, is not the original unchanged, and is within a
+  length band, then the check model reads it for meaning
+  (`jailbreak/sociolect`, `jailbreak/sociolect_check`), with the same retry as
+  the language-mix families. Spec `check` `meaning`, 2 to 4 calls. It runs on
+  the generation model, so no translation switch gates it. Attack only.
+  **The varieties exist to measure a classifier's robustness to dialect cues,
+  not to caricature their speakers**, and their fidelity cannot be verified
+  here: GlotLID reads only the language (English), not the variety, the check
+  model is told to grade meaning and not authenticity, and no native speaker
+  has read any of the prompts or any output.
 - `typos` is a rewrite by the model, at one of four densities, with the
   level's description in the prompt, then a check: the stage's `check`
   model (the `gen` model unless the recipe names one) reads the rewrite

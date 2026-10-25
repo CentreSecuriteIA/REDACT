@@ -26,6 +26,7 @@ from redact.jailbreak.pool import (
     DIALECT,
     MODEL_CHECKS,
     TRANSLATION,
+    TRANSLATIONESE,
     all_techniques,
     technique_pool,
     variant_pools,
@@ -422,9 +423,10 @@ def test_the_models_a_technique_uses_follow_its_spec(built):
     for name, entry in built["techniques"].items():
         models = set(entry["models"])
         assert ("check" in models) == (entry["check"] in MODEL_CHECKS), name
-        # The translation model serves the translations and the dialects.
+        # The translation model serves the translations, the dialects and the
+        # translationese round trip.
         assert ("translation" in models) == bool(
-            {TRANSLATION, DIALECT} & set(entry["families"])
+            {TRANSLATION, DIALECT, TRANSLATIONESE} & set(entry["families"])
         ), name
         assert ("benign pairs" in models) == entry["requires_benign"], name
         if entry["requires_llm"]:

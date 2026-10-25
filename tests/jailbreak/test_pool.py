@@ -170,7 +170,7 @@ def test_the_default_variation_pool_is_the_96_pinned_natural_techniques():
         "suffixes", "transliteration", "code_switching", "romanization"}
 
 
-def test_the_default_attack_pool_is_305_techniques_in_42_families():
+def test_the_default_attack_pool_is_315_techniques_in_45_families():
     """Every active technique but casual writing and the natural-only
     families: the 24 translations included, now the packaged adversarial
     kind has its translation switch on (the four spec 1.3 ones are Hmong,
@@ -188,25 +188,27 @@ def test_the_default_attack_pool_is_305_techniques_in_42_families():
     code-switching techniques, ten romanizations and six dialects (its
     translation switch on) in, and spec 1.5's literature-gap families: three
     unicode_smuggling, eight char_injection and two special_tokens techniques
-    (packet A), and the fallacy technique, two policy-framing frames, one
+    (packet A), the fallacy technique, two policy-framing frames, one
     reasoning-injection technique, two code-framing frames and one
-    bijection-learning cipher (packet B). Small talk and the benign roles
-    leave it as it was."""
+    bijection-learning cipher (packet B), and the four semantic-reencoding
+    techniques, translationese (its translation switch on) and the five
+    sociolects (packet C). Small talk and the benign roles leave it as it
+    was."""
     pool = technique_pool(resolve(None, "adversarial"))
-    assert len(pool) == 305     # noqa: PLR2004
-    assert len({fn.families[0] for fn in pool}) == 42     # noqa: PLR2004
+    assert len(pool) == 315     # noqa: PLR2004
+    assert len({fn.families[0] for fn in pool}) == 45     # noqa: PLR2004
 
 
 def test_the_rewrite_layer_is_off_by_default_and_layers_allow_adds_its_16_techniques():
     """The spec has the layer off by default, so the default attack pool is
-    the 305 and no other pool holds a rewrite technique; a section that allows
+    the 315 and no other pool holds a rewrite technique; a section that allows
     the layer gains the 16 of its three families, and nothing else leaves or
     joins."""
     default = technique_pool(resolve(None, "adversarial"))
     allowed = technique_pool(resolve(
         {"adversarial": {"layers": {"allow": ["rewrite"]}}}, "adversarial"))
     gained = [fn for fn in allowed if fn not in default]
-    assert (len(default), len(allowed), len(gained)) == (305, 321, 16)   # noqa: PLR2004
+    assert (len(default), len(allowed), len(gained)) == (315, 331, 16)   # noqa: PLR2004
     assert gained == _rewrites(all_techniques())
     assert {fn.families[0] for fn in gained} == {
         "persuasion", "tense_rewrite", "model_distractors"}
@@ -378,7 +380,7 @@ def test_a_check_not_among_the_checks_raises_at_tagging(monkeypatch):
     assert _tag_base64(monkeypatch, check="preserve").check == "preserve"
     with pytest.raises(ValueError, match="'to_base64': check must be one of "
                        r"\['typos', 'scenario', 'word_list', 'translate', "
-                       r"'preserve', 'meaning'\]"):
+                       r"'preserve', 'meaning', 'reencode'\]"):
         _tag_base64(monkeypatch, check="typo")
 
 
@@ -581,8 +583,10 @@ def test_a_pool_of_dialects_alone_plans_the_translation_model():
     from redact.recipe import resolve_role
 
     assert uses_translation(get_dialect_functions())
+    # Spec 1.5's translationese runs on the translation model too.
     assert not uses_translation([fn for fn in all_techniques()
-                                 if not {"translation", "dialect"} & set(fn.families)])
+                                 if not {"translation", "dialect", "translationese"}
+                                 & set(fn.families)])
     translations = [fn.__name__ for fn in get_translation_functions()]
     section = {"adversarial": {"families": {"allow": ["dialect"]},
                                "techniques": {"deny": translations}},

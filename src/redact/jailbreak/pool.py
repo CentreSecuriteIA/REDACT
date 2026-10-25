@@ -30,6 +30,13 @@ TRANSLATION = "translation"
 #: translation it is an ordinary family for the allow lists (not auto-added).
 DIALECT = "dialect"
 
+#: The translationese family (spec 1.5): a pivot round trip on the translation
+#: model, so a kind's ``translation`` switch gates it (off removes it) and it
+#: makes the run plan the translation model (:func:`uses_translation`). Like
+#: dialect it is an ordinary family for the allow lists (never auto-added), so
+#: an allow list draws it only by name; it is adversarial only.
+TRANSLATIONESE = "translationese"
+
 #: The families whose code gate checks the written language with GlotLID: a
 #: code-switch reads word windows, a romanization checks the output is not
 #: plain English. Without GlotLID those checks fall back to pass-through, so a
@@ -142,11 +149,12 @@ def technique_pool(resolved: dict) -> list[Callable]:
         pool = [fn for fn in pool if fn.__name__ in named
                 or allowed.intersection(getattr(fn, "families", ()))]
     # The switch, not the lists, decides the translation family; it also gates
-    # the dialect family, which needs the translation model.
+    # the dialect and translationese families, which need the translation model.
     denied = set(families["deny"]) - {TRANSLATION}
     if not resolved["translation"]:
         denied.add(TRANSLATION)
         denied.add(DIALECT)
+        denied.add(TRANSLATIONESE)
     pool = [fn for fn in pool if fn.__name__ not in techniques["deny"]
             and not denied.intersection(getattr(fn, "families", ()))]
     if resolved["pure_only"]:
@@ -236,19 +244,29 @@ def chain_tags(chain: str, techniques: dict[str, Callable]) -> tuple[str, str]:
     return "+".join(families), "+".join(layers)
 
 
+def translationese_names() -> set[str]:
+    """The names of the translationese family's techniques (spec 1.5). Like
+    the translation and dialect families it runs on the translation model, so
+    a kind's ``translation`` switch gates it (:func:`uses_translation`,
+    ``_switch_off_translation``)."""
+    return {fn.__name__ for fn in all_techniques()
+            if TRANSLATIONESE in getattr(fn, "families", ())}
+
+
 def uses_translation(pool: list[Callable]) -> bool:
     """Whether ``pool`` holds a technique the translation model serves: a
-    translation or a dialect. Any other technique that calls a model, a
-    rewrite among them, calls the generation model."""
-    return any({TRANSLATION, DIALECT} & set(getattr(fn, "families", ()))
+    translation, a dialect or a translationese. Any other technique that calls
+    a model, a rewrite among them, calls the generation model."""
+    return any({TRANSLATION, DIALECT, TRANSLATIONESE} & set(getattr(fn, "families", ()))
                for fn in pool)
 
 
 #: The spec ``check`` values whose check the stage's check model makes: the
-#: typo check, the scenario check, the rewrite's and the meaning check (code
-#: switching, romanization). Translation checks its own work, and a
-#: marked-word list is parsed, not checked by a model.
-MODEL_CHECKS = ("typos", "scenario", "preserve", "meaning")
+#: typo check, the scenario check, the rewrite's, the meaning check (code
+#: switching, romanization) and the re-encode check (semantic reencoding).
+#: Translation checks its own work, and a marked-word list is parsed, not
+#: checked by a model.
+MODEL_CHECKS = ("typos", "scenario", "preserve", "meaning", "reencode")
 
 
 def uses_langid_gate(pool: list[Callable]) -> bool:

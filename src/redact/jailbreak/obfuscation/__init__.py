@@ -13,12 +13,15 @@ from .neutral_container import get_neutral_container_functions
 from .noise import get_noise_functions
 from .payload_split import get_payload_split_functions
 from .romanization import get_romanization_functions
+from .semantic_reencoding import get_semantic_reencoding_functions
 from .sensitive_words import get_sensitive_words_functions
+from .sociolect import get_sociolect_functions
 from .special_tokens import get_special_tokens_functions
 from .structural import get_structural_functions
 from .suffixes import get_suffix_functions
 from .tokenbreak import get_tokenbreak_functions
 from .translation import get_translation_functions
+from .translationese import get_translationese_functions
 from .transliteration import get_transliteration_functions
 from .typos import get_typos_functions
 from .unicode_smuggling import get_unicode_smuggling_functions
@@ -51,4 +54,7 @@ def get_all_obfuscation_functions() -> list[Callable]:
         + get_char_injection_functions()
         + get_special_tokens_functions()
         + get_bijection_functions()
+        + get_semantic_reencoding_functions()
+        + get_translationese_functions()
+        + get_sociolect_functions()
     )

@@ -103,6 +103,36 @@
       "within_layer_order": 13,
       "cross_incompatible_with": ["ascii_art", "encode", "sensitive_words", "tokenbreak", "word_art", "wording", "typos", "casual_writing", "noise", "payload_split", "translation"]
     },
+    "semantic_reencoding": {
+      "description": "A model re-expresses the request's meaning in another symbolic or literary form (a symbolic-math problem, verse, an acrostic hidden in a benign paragraph, or an information-overload restatement), keeping the request recoverable. A whole-text rewrite at the front of the obfuscations; each technique has a code gate for its form (math notation, line/verse statistics, an exact word-acrostic, a length-ratio band) and then the check model reads the rewrite against the original (check reencode). It refuses the same obfuscation families a translation does, translation itself, the language-mix families and the other semantic-reencoding families translationese and sociolect, since re-encoding the meaning over any of them is incoherent. Spec 1.5; adversarial only. See the literature blockers for what cannot be verified here (poetry quality).",
+      "layer": "obfuscation",
+      "dimension": "semantic_form",
+      "kinds": ["adversarial"],
+      "within_layer_order": 15,
+      "check": "reencode",
+      "calls": [2, 4],
+      "cross_incompatible_with": ["ascii_art", "encode", "sensitive_words", "tokenbreak", "word_art", "wording", "typos", "casual_writing", "noise", "payload_split", "translation", "dialect", "code_switching", "transliteration", "romanization"]
+    },
+    "translationese": {
+      "description": "The prompt round-tripped through a pivot language on the translation model (English to the pivot and back), so the English reads as machine-translated. A whole-text rewrite at the front of the obfuscations; it reuses the translation machinery and keeps translation's own checks (check translate): each leg is checked by the pivot's GlotLID labels and length band (English on the way back), the English output must differ from the original and lie in a length band, and the generation model judges the original against the output. Like translation and dialect it runs on the translation model and is gated by a kind's translation switch (uses_translation); unlike dialect it is an ordinary family for the allow lists, never auto-added. It refuses the same obfuscation families a translation does, translation itself, the language-mix families and the other semantic-reencoding families semantic_reencoding and sociolect. Spec 1.5; adversarial only.",
+      "layer": "obfuscation",
+      "dimension": "language",
+      "kinds": ["adversarial"],
+      "within_layer_order": 16,
+      "check": "translate",
+      "calls": [3, 16],
+      "cross_incompatible_with": ["ascii_art", "encode", "sensitive_words", "tokenbreak", "word_art", "wording", "typos", "casual_writing", "noise", "payload_split", "translation", "dialect", "code_switching", "transliteration", "romanization", "semantic_reencoding"]
+    },
+    "sociolect": {
+      "description": "A model rewrites the prompt in an English sociolect or variety (African American English, Singlish, Indian English, Jamaican English, Scottish English), keeping the meaning, one technique per row of sociolect_varieties.json. A whole-text rewrite at the front of the obfuscations, on the generation model (not the translation model, so no switch gates it); a code gate checks the output is not empty, not the original unchanged and within a length band, then the check model reads it for meaning (check meaning). GlotLID reads only the language (English), not the variety, so the variety itself is not verified here and no native speaker has read any of it: the varieties exist to measure classifier robustness to dialect cues, not to caricature (see the literature blockers). It refuses the same obfuscation families a translation does, translation itself, the language-mix families and the other semantic-reencoding families semantic_reencoding and translationese. Spec 1.5; adversarial only.",
+      "layer": "obfuscation",
+      "dimension": "language",
+      "kinds": ["adversarial"],
+      "within_layer_order": 17,
+      "check": "meaning",
+      "calls": [2, 4],
+      "cross_incompatible_with": ["ascii_art", "encode", "sensitive_words", "tokenbreak", "word_art", "wording", "typos", "casual_writing", "noise", "payload_split", "translation", "dialect", "code_switching", "transliteration", "romanization", "semantic_reencoding", "translationese"]
+    },
     "typos": {
       "description": "LLM-rewritten prompt with varying typo density",
       "layer": "obfuscation",
@@ -443,7 +473,8 @@
     "suffixes":        { "file": "obfuscation/suffix_strings.json", "name": "to_adversarial_suffix_{slug}", "complexity": 1, "requires_llm": false, "kinds": ["adversarial"], "cross_incompatible_with": ["ascii_art"] },
     "code_switching":  { "file": "code_switch_languages.json", "name": "to_code_switch_{slug}", "requires_llm": true, "complexity": 2 },
     "romanization":    { "file": "romanization_languages.json", "name": "to_romanize_{slug}", "requires_llm": true, "complexity": 2 },
-    "dialect":         { "file": "dialect_variants.json", "name": "to_dialect_{slug}", "requires_llm": true, "complexity": 2 }
+    "dialect":         { "file": "dialect_variants.json", "name": "to_dialect_{slug}", "requires_llm": true, "complexity": 2 },
+    "sociolect":       { "file": "sociolect_varieties.json", "name": "to_sociolect_{slug}", "requires_llm": true, "complexity": 2 }
   },
 
   "techniques": {
@@ -469,6 +500,12 @@
     "to_chat_template_abuse": {"families": ["special_tokens"], "complexity": 2, "requires_llm": false, "since": "1.5"},
 
     "to_bijection_learning": {"families": ["bijection"], "complexity": 3, "requires_llm": false, "since": "1.5"},
+
+    "to_mathprompt": {"families": ["semantic_reencoding"], "complexity": 2, "requires_llm": true, "since": "1.5"},
+    "to_adversarial_poetry": {"families": ["semantic_reencoding"], "complexity": 2, "requires_llm": true, "since": "1.5"},
+    "to_stego_paragraph": {"families": ["semantic_reencoding"], "complexity": 3, "requires_llm": true, "since": "1.5"},
+    "to_infoflood": {"families": ["semantic_reencoding"], "complexity": 2, "requires_llm": true, "since": "1.5"},
+    "to_translationese": {"families": ["translationese"], "complexity": 2, "requires_llm": true, "since": "1.5"},
 
     "_comment": "encode_weight applies only to encode-family members. 'light' = model-readable after decoding; 'heavy' = opaque, blocked when manipulation is selected unless function also has sensitive_words family. needs_latin marks a technique that changes only Latin text (the Latin-only ciphers and transforms of encode, their sensitive-word forms, and the noise of random capitals, scrambled letters and keyboard typos). No rule reads it: a translation refuses encode and noise outright, and a test asserts that every needs_latin technique is refused beside every translation into another script. Morse and braille are marked too: braille leaves a text of another script as it is, and morse leaves its characters unencoded, spaced out as it spaces its codes; as no rule reads the tag, marking them moved no draw, pair or pin of the eval pool. The ten heavy full-text encodings (base64, unicode_escape, ascii_ordinal, hex, binary, html_entities, base32, base85, morse, braille) each name ascii_art in their own cross_incompatible_with: a code for every character lengthens the text, so its drawing often runs past the cap (a text of unicode escapes is rejected from about 140 characters of input, of ASCII ordinals 230, of morse 250), and both disguise the whole text, so one is enough. The three heavy to_sensitive_words_encode_* encode only the marked words, so ascii_art still joins them, and the light encodings unless their output has a character no font draws.",
 
