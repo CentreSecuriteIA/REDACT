@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 248 active techniques in 5 layers and 37
+The jailbreak stage draws from 258 active techniques in 5 layers and 38
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -72,10 +72,10 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 35 | at most 1 |
-| `obfuscation` | 15 | 114 | no cap |
+| `obfuscation` | 16 | 124 | no cap |
 | `requests` | 12 | 68 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| all | 37 | 248 | |
+| all | 38 | 258 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -99,6 +99,7 @@ that call a model call the generation model.
 | hacking | `persona` | `role_framing` |  | 14 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona`, `to_mercenary_persona`, `to_underground_hacker_persona`, `to_anarchist_philosopher_persona` |
 | hacking | `persona_template` | `role_framing` |  | 11 | no | no | `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template` |
 | obfuscation | `translation` | `language` | 10 | 23 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_chinese`, `to_hindi`, `to_amharic` |
+| obfuscation | `code_switching` | `language` | 12 | 10 | yes | no | `to_code_switch_spanish`, `to_code_switch_french`, `to_code_switch_german`, `to_code_switch_portuguese`, `to_code_switch_swahili`, `to_code_switch_russian`, `to_code_switch_arabic`, `to_code_switch_hindi`, `to_code_switch_chinese`, `to_code_switch_japanese` |
 | obfuscation | `transliteration` | `encoding` | 13 | 4 | no | no | `to_cyrillic_transliteration`, `to_greek_transliteration`, `to_devanagari_transliteration`, `to_arabic_transliteration` |
 | obfuscation | `typos` | `surface_noise` | 20 | 4 | yes | no | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium`, `to_rewrite_with_typos_high`, `to_rewrite_with_typos_insane` |
 | obfuscation | `casual_writing` | `surface_noise` | 30 | 9 | no | no | `to_lowercase`, `to_uppercase`, `to_no_sentence_capitals`, `to_dropped_spaces`, `to_doubled_spaces`, `to_dropped_punctuation`, `to_doubled_punctuation`, `to_abbreviations`, `to_stripped_accents` |

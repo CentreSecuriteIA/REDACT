@@ -65,6 +65,15 @@
       "calls": [2, 12],
       "cross_incompatible_with": ["ascii_art", "encode", "sensitive_words", "tokenbreak", "word_art", "wording", "typos", "casual_writing", "noise", "payload_split"]
     },
+    "code_switching": {
+      "description": "A model rewrites the prompt with some phrases in a second language and the rest in English, keeping the meaning (one technique per language of code_switch_languages.json). A whole-text language rewrite at the front of the obfuscations; a code gate checks the mix (the second language's share of the letters for a non-Latin script, GlotLID over word windows for a Latin one) before the check model reads it for meaning. It refuses the same obfuscation families a translation does, translation itself and the other language-mix families, since a second language rewrite over any of them is incoherent. Admitted to the natural kind in the spec 1.4 language-mix step; adversarial only until then",
+      "layer": "obfuscation",
+      "dimension": "language",
+      "within_layer_order": 12,
+      "check": "meaning",
+      "calls": [2, 4],
+      "cross_incompatible_with": ["ascii_art", "encode", "sensitive_words", "tokenbreak", "word_art", "wording", "typos", "casual_writing", "noise", "payload_split", "translation", "transliteration"]
+    },
     "transliteration": {
       "description": "English written phonetically in another script (Cyrillic, Greek, Devanagari or Arabic) by a fixed letter/digraph table; pure and lossy, not a translation (the words stay English, only the letters change). A whole-text script rewrite at the front of the obfuscations; it refuses the same obfuscation families a translation does, and translation itself, since a translated or otherwise-script-changed text is no longer Latin English to render. Admitted to the natural kind in the spec 1.4 language-mix step (see augmentations.json); adversarial only until then",
       "layer": "obfuscation",
@@ -338,7 +347,8 @@
   "generators": {
     "_comment": "Families whose techniques come one per row of a data file beside this spec. jailbreak/technique.py (read_spec) expands each into technique entries, so every reader sees them under techniques: a row (of file, and with where only one whose column of that name is true) makes the technique name, {slug} its slug, with families [the key], this entry's other keys, and the row's complexity, since and deprecated over them. The family's module builds the functions from the same file, so adding a row adds the technique; import fails while the two disagree.",
     "translation":     { "file": "languages.json", "where": "translation", "name": "to_{slug}", "requires_llm": true },
-    "answer_language": { "file": "languages.json", "where": "answer_language", "name": "to_ask_answer_in_{slug}", "requires_llm": false }
+    "answer_language": { "file": "languages.json", "where": "answer_language", "name": "to_ask_answer_in_{slug}", "requires_llm": false },
+    "code_switching":  { "file": "code_switch_languages.json", "name": "to_code_switch_{slug}", "requires_llm": true, "complexity": 2 }
   },
 
   "techniques": {

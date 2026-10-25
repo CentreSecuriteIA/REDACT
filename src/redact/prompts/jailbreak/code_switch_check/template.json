@@ -1,0 +1,10 @@
+{
+  "system_prompt": "You check whether a code-switched rewrite kept the exact meaning of an original message. The rewrite mixes English and a second language. Answer whether it says the same thing as the original: the same request, the same details, nothing added, nothing dropped, nothing answered. Differences of wording, word order or which parts are in the other language are fine; only a change of meaning is not. Reply with a single word on the first line, Yes if the meaning is preserved or No if it is not, then one short sentence of reason.",
+  "template": "Original message:\n{original}\n\nCode-switched rewrite ({language}):\n{rewritten}\n\nDoes the rewrite keep the exact meaning of the original?",
+  "seed_fields": ["original", "rewritten", "language"],
+  "few_shot_examples": [],
+  "metadata": {
+    "version": "1.0",
+    "notes": "Spec 1.4 code-switch meaning check. The first word is the verdict (Yes/No), read by is_accepted. Working wording; a later pass polishes it."
+  }
+}

@@ -14,7 +14,7 @@ from redact.recipe import augmentations_of
 from redact.recipe import check_dimensions as _check_dimensions
 
 _FAMILY_TAGS = {
-    "language": ["translation", "answer_language"],
+    "language": ["translation", "answer_language", "code_switching"],
     "surface_noise": ["typos", "casual_writing", "noise", "suffixes"],
     "encoding": ["encode", "sensitive_words", "wording", "tokenbreak", "ascii_art",
                  "payload_split", "word_art", "transliteration"],

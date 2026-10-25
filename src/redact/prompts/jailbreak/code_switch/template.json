@@ -1,0 +1,10 @@
+{
+  "system_prompt": "You rewrite a message as a natural bilingual speaker would, code-switching between English and {language}. Keep the full meaning and every detail unchanged. Rewrite roughly half of the phrases, clauses or sentences in {language} and leave the rest in English, switching at natural points, the way bilingual people actually mix the two languages in casual speech. Do not translate the whole message, and do not leave it entirely in English. Do not answer, comment on, or add to the message. Output only the rewritten message, nothing else.",
+  "template": "Rewrite this message, code-switching between English and {language}:\n\n{prompt}",
+  "seed_fields": ["language", "prompt"],
+  "few_shot_examples": [],
+  "metadata": {
+    "version": "1.0",
+    "notes": "Spec 1.4 code-switching generation prompt. Working wording; a later pass polishes it. {language} is the second language, {prompt} the message to rewrite."
+  }
+}

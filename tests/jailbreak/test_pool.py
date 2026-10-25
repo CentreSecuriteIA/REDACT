@@ -178,23 +178,23 @@ def test_the_default_attack_pool_is_218_techniques_in_30_families():
     fake turns, the seven spec 1.3 members of the thin request families and
     the two spec 1.3 payload splits, the spec 1.3 word art and the three
     spec 1.3 persona archetypes and the two spec 1.3 wording techniques, and
-    the four spec 1.4 transliterations in. Small talk and the benign roles
-    leave it as it was."""
+    the four spec 1.4 transliterations and the ten spec 1.4 code-switching
+    techniques in. Small talk and the benign roles leave it as it was."""
     pool = technique_pool(resolve(None, "adversarial"))
-    assert len(pool) == 218     # noqa: PLR2004
-    assert len({fn.families[0] for fn in pool}) == 30     # noqa: PLR2004
+    assert len(pool) == 228     # noqa: PLR2004
+    assert len({fn.families[0] for fn in pool}) == 31     # noqa: PLR2004
 
 
 def test_the_rewrite_layer_is_off_by_default_and_layers_allow_adds_its_16_techniques():
     """The spec has the layer off by default, so the default attack pool is
-    the 218 and no other pool holds a rewrite technique; a section that allows
+    the 228 and no other pool holds a rewrite technique; a section that allows
     the layer gains the 16 of its three families, and nothing else leaves or
     joins."""
     default = technique_pool(resolve(None, "adversarial"))
     allowed = technique_pool(resolve(
         {"adversarial": {"layers": {"allow": ["rewrite"]}}}, "adversarial"))
     gained = [fn for fn in allowed if fn not in default]
-    assert (len(default), len(allowed), len(gained)) == (218, 234, 16)   # noqa: PLR2004
+    assert (len(default), len(allowed), len(gained)) == (228, 244, 16)   # noqa: PLR2004
     assert gained == _rewrites(all_techniques())
     assert {fn.families[0] for fn in gained} == {
         "persuasion", "tense_rewrite", "model_distractors"}
@@ -366,7 +366,7 @@ def test_a_check_not_among_the_checks_raises_at_tagging(monkeypatch):
     assert _tag_base64(monkeypatch, check="preserve").check == "preserve"
     with pytest.raises(ValueError, match="'to_base64': check must be one of "
                        r"\['typos', 'scenario', 'word_list', 'translate', "
-                       r"'preserve'\]"):
+                       r"'preserve', 'meaning'\]"):
         _tag_base64(monkeypatch, check="typo")
 
 

@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from .ascii_art import get_ascii_art_functions
 from .casual_writing import get_casual_writing_functions
+from .code_switching import get_code_switching_functions
 from .encoding import get_encoding_functions
 from .neutral_container import get_neutral_container_functions
 from .noise import get_noise_functions
@@ -37,4 +38,5 @@ def get_all_obfuscation_functions() -> list[Callable]:
         + get_payload_split_functions()
         + get_word_art_functions()
         + get_transliteration_functions()
+        + get_code_switching_functions()
     )

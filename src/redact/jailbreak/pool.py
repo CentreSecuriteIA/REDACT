@@ -180,9 +180,10 @@ def uses_translation(pool: list[Callable]) -> bool:
 
 
 #: The spec ``check`` values whose check the stage's check model makes: the
-#: typo check, the scenario check and the rewrite's. Translation checks its
-#: own work, and a marked-word list is parsed, not checked by a model.
-MODEL_CHECKS = ("typos", "scenario", "preserve")
+#: typo check, the scenario check, the rewrite's and the meaning check (code
+#: switching, romanization). Translation checks its own work, and a
+#: marked-word list is parsed, not checked by a model.
+MODEL_CHECKS = ("typos", "scenario", "preserve", "meaning")
 
 
 def uses_check(pool: list[Callable]) -> bool:

@@ -1026,3 +1026,28 @@ def test_a_transliteration_joins_a_wrapper_a_request_or_the_hacking_layers(
     (it is not in the manipulation block)."""
     assert _joins(translit, other)
     assert _joins(other, translit)
+
+
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_base64", "to_french", "to_russian",
+    "to_rewrite_with_typos_low", "to_lowercase", "to_payload_split",
+    "to_cyrillic_transliteration"])
+def test_code_switching_refuses_the_whole_text_obfuscations_either_way(other):
+    """Code-switching is a whole-text language rewrite at the front: it
+    refuses the obfuscation families a translation does, translation, and the
+    other language-mix families, each way."""
+    assert not _joins("to_code_switch_spanish", other)
+    assert not _joins(other, "to_code_switch_spanish")
+
+
+@pytest.mark.parametrize("second", ["to_code_switch_french", "to_code_switch_arabic"])
+def test_a_combination_holds_one_code_switch(second):
+    assert not _joins("to_code_switch_spanish", second)
+
+
+@pytest.mark.parametrize("other", ["to_json", "to_summarize", "to_fsh_random_short"])
+def test_code_switching_joins_a_wrapper_a_request_or_a_few_shot(other):
+    """It keeps English words, so a wrapper, a request template or a few-shot
+    frame may sit with it (not in the manipulation block)."""
+    assert _joins("to_code_switch_spanish", other)
+    assert _joins(other, "to_code_switch_spanish")
