@@ -1,7 +1,9 @@
 """Tests for continuation-attack jailbreak techniques (requests/continuation.py)."""
 
 import random
+import re
 
+from redact.jailbreak.directives import read_pools
 from redact.jailbreak.requests.continuation import (
     get_continuation_functions,
     to_complete_story,
@@ -71,3 +73,31 @@ class TestIndividualFunctions:
             result, _ = to_continue_passage(SAMPLE)
             results.add(result)
         assert len(results) > 1
+
+
+class TestEveryVariantFramesThePromptCoherently:
+    """What each directive's text says must fit the text it is put around:
+    the prompt is a request, so a variant that speaks of a blank, a story or
+    numbered instructions has to give the prompt that place. Flags, not text."""
+
+    _POOLS = read_pools("requests/continuation_templates.json")
+
+    def test_a_fill_in_blank_variant_has_a_blank_to_fill_after_the_prompt(self):
+        marker = re.compile(r"_{3,}|\[missing\]|\[Insert")
+        without = [v["name"] for v in self._POOLS["fill_in_blank"]
+                   if not marker.search(v["suffix"])]
+        assert without == []
+
+    def test_a_continue_instructions_variant_makes_the_prompt_the_first_entry(self):
+        without = [v["name"] for v in self._POOLS["continue_instructions"]
+                   if not v["prefix"].endswith("\n\n1. ")]
+        assert without == []
+
+    def test_a_complete_story_variant_says_the_story_opens_with_the_prompt(self):
+        opening = re.compile(r"\b(opens|opening|beginning|begins|begun|says)\b")
+        without = [v["name"] for v in self._POOLS["complete_story"]
+                   if not opening.search(v["prefix"])]
+        assert without == []
+
+    def test_every_pool_still_has_its_floor_of_variants(self):
+        assert all(len(pool) >= 8 for pool in self._POOLS.values())   # noqa: PLR2004

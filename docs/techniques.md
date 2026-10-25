@@ -599,6 +599,11 @@ generation model.
 - `framing` directives are transforms that change the scenario or the
   intent. Each has named template variants in
   `configs/jailbreak/hacking/framing_templates.json`; one is drawn per call.
+  `to_nefarious_goal` has the asker state a bad goal in the first person
+  (eight variants, none a legitimate role: the second eval release
+  rewrote the four that were a researcher, a tester, a scholar and a
+  journalist, which read as `to_noble_goal`'s pretexts under a label that
+  said the opposite).
 - `persona_template` (spec version 1.3) sets the prompt in a fixed frame
   for one of eleven well-known jailbreak personas, a technique each
   (`to_dan_persona_template` to `to_liberated_model_persona_template`), with
@@ -971,7 +976,13 @@ file under `configs/jailbreak/requests/`. The `answer_language` techniques
 are generated from the rows of `configs/jailbreak/languages.json` marked
 `answer_language` ([the language table](#the-language-table)), so a new
 language is one row. `to_impersonate_good_person` has eight
-profession variants and `to_use_past_tense` eight historical framings.
+profession variants and `to_use_past_tense` eight historical framings, each
+asking for the account in the past. Each continuation variant gives the
+prompt the place its text speaks of: `to_fill_in_blank` leaves a blank to
+fill after it, `to_continue_instructions` makes it the first numbered entry,
+`to_complete_story` says the story opens with it (the second eval release
+changed the variants that spoke of a blank, a numbered list or a story the
+prompt was not in).
 
 Spec version 1.3 added three attack-only answer formats, eight variants
 each: `to_dual_answer` asks for two answers, one after the other,

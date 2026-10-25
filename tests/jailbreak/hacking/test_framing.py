@@ -1,7 +1,9 @@
 """Tests for scenario-modifying framing directives (hacking/framing.py)."""
 
 import random
+import re
 
+from redact.jailbreak.directives import read_pools
 from redact.jailbreak.hacking.framing import (
     get_framing_functions,
     to_fictional_world,
@@ -85,3 +87,39 @@ class TestIndividualDirectives:
             result, _ = to_fictional_world(SAMPLE)
             results.add(result)
         assert len(results) > 1
+
+
+class TestNefariousGoalStatesABadGoal:
+    """The directive is named for a bad goal the asker states, so every
+    variant says one in the first person, and none is one of the legitimate
+    roles (a researcher, a tester, a scholar, a journalist) that the
+    ``noble_goal`` pool and the ``cognitive`` techniques cover. The checks
+    show names and flags, not text."""
+
+    _POOL = read_pools("hacking/framing_templates.json")["nefarious_goal"]
+    _FIRST_PERSON = re.compile(r"\b(I|I'm|I'll|my|My)\b")
+    _LEGITIMATE_ROLE = re.compile(
+        r"researcher|research |journalist|academic|scholar|authori[sz]ed|"
+        r"red[- ]team|tester|educational|to protect|to counter", re.IGNORECASE)
+
+    def test_every_variant_speaks_in_the_first_person(self):
+        missing = [v["name"] for v in self._POOL
+                   if not self._FIRST_PERSON.search(v["template"])]
+        assert missing == []
+
+    def test_no_variant_claims_a_legitimate_role(self):
+        claimed = [v["name"] for v in self._POOL
+                   if self._LEGITIMATE_ROLE.search(v["template"])]
+        assert claimed == []
+
+    def test_the_variants_that_were_roles_are_gone(self):
+        names = {v["name"] for v in self._POOL}
+        assert not names & {"researcher", "red_team", "academic", "journalist"}
+
+    def test_the_pool_still_has_its_floor_of_variants(self):
+        assert len(self._POOL) >= 8     # noqa: PLR2004
+
+    def test_the_technique_writes_one_of_them(self):
+        texts = {v["template"].format_map({"prompt": SAMPLE}) for v in self._POOL}
+        for seed in range(10):
+            assert to_nefarious_goal(SAMPLE, rng=random.Random(seed))[0] in texts
