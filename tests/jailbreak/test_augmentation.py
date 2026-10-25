@@ -513,8 +513,12 @@ def test_the_switch_turns_translation_on(kind):
     pool = technique_pool(resolve({kind: {"translation": True}}, kind))
     languages = [fn for fn in all_techniques() if "translation" in fn.families]
     assert languages and all(fn in pool for fn in languages)
-    # The kind's other filters still apply.
-    assert set(pool) == set(technique_pool(resolve(None, kind))) | set(languages)
+    # The switch also admits the dialect family, which runs on the translation
+    # model too; both packaged kinds draw it. The kind's other filters still
+    # apply.
+    served = [fn for fn in all_techniques()
+              if {"translation", "dialect"} & set(fn.families)]
+    assert set(pool) == set(technique_pool(resolve(None, kind))) | set(served)
 
 
 def test_on_the_switch_wins_over_a_family_deny_and_a_technique_deny_still_applies():

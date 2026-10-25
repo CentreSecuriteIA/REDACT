@@ -39,7 +39,7 @@ on its own:
    to remove the generating model's fingerprint.
 5. **jailbreaks**: attacks and natural variations of the inputs, drawn from
    274 techniques in 40 families (the default attacks draw 244 of them, the
-   natural variations 72) and dealt evenly across categories.
+   natural variations 96) and dealt evenly across categories.
 6. **build**: the accepted rows of every stage, merged into
    `complete_dataset.csv` for training, or into three flat files for
    evaluation (`eval_inputs.csv`, `eval_outputs.csv`, `eval_jailbreaks.csv`).

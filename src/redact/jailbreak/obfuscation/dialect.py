@@ -18,7 +18,7 @@ failure, as translation's.
 
 from collections.abc import Callable
 
-from redact.jailbreak.technique import DISCARDED, TechniqueGen, data_rows
+from redact.jailbreak.technique import TechniqueGen, data_rows
 from redact.llms.model_config import default_model_for_role
 
 from .translation import (

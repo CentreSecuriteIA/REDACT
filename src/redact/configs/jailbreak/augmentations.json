@@ -26,7 +26,8 @@
     "families": {
       "allow": ["typos", "casual_writing", "noise", "neutral_container",
                 "answer_language", "answer_format", "asking", "indirect",
-                "smalltalk_prefix", "smalltalk_suffix", "benign_role"],
+                "smalltalk_prefix", "smalltalk_suffix", "benign_role",
+                "transliteration", "code_switching", "romanization", "dialect"],
       "deny": []
     },
     "techniques": {

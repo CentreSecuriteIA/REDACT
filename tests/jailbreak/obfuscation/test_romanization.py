@@ -20,8 +20,8 @@ def test_one_technique_per_language_tagged_as_a_checked_model_call():
     assert sorted(fn.__name__ for fn in fns) == sorted(
         f"to_romanize_{row['slug']}" for row in rm.LANGUAGES)
     for fn in fns:
-        assert fn.requires_llm and fn.check == "meaning" and fn.calls == [2, 4]
-        assert fn.families == ["romanization"] and fn.complexity == 2
+        assert fn.requires_llm and fn.check == "meaning" and fn.calls == [2, 4]  # noqa: PLR2004
+        assert fn.families == ["romanization"] and fn.complexity == 2  # noqa: PLR2004
 
 
 def _stub(monkeypatch, label: str, available=True):
@@ -87,4 +87,4 @@ def test_the_gate_rejecting_discards_before_a_check_call(monkeypatch):
     fake = _Fake("give me a plan to do this today please now right here", "Yes")
     text, info = drive_sync(fn(_ORIGINAL, gen_model="gen", check_model="chk"), fake)
     assert info.startswith("DISCARDED") and "romanize failed" in info
-    assert fake.calls == 2      # two generations, no check (the gate rejected)
+    assert fake.calls == 2  # noqa: PLR2004 - two generations, no check (the gate rejected)

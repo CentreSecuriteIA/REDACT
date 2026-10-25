@@ -610,11 +610,17 @@ def test_an_attack_plan_of_spec_1_2_finds_the_later_techniques_as_growth():
     assert {registry(all_techniques())[name].since for name in added} == {"1.3", "1.4"}
 
 
-def test_a_natural_plan_of_spec_1_2_finds_the_urgent_ask_as_the_library_s_growth():
-    """Spec 1.3 added ``to_ask_with_urgency`` to the natural pool, the one
-    technique it added there."""
+def test_a_natural_plan_of_spec_1_2_finds_the_later_additions_as_growth():
+    """Spec 1.3 added ``to_ask_with_urgency`` to the natural pool, and spec
+    1.4's language-mix step added the four transliterations, the ten
+    code-switching techniques and the ten romanizations (dialect is natural
+    too but only under the translation switch, off here): 25 names in all,
+    none retired."""
     pool = technique_pool(resolve(None, "natural"))
-    assert _growth_since_1_2("natural", pool) == (["to_ask_with_urgency"], [])
+    added, retired = _growth_since_1_2("natural", pool)
+    assert retired == [] and "to_ask_with_urgency" in added
+    assert len(added) == 25     # noqa: PLR2004
+    assert {registry(all_techniques())[name].since for name in added} == {"1.3", "1.4"}
 
 
 def test_an_eval_plan_of_spec_1_2_finds_no_growth():

@@ -2,8 +2,6 @@
 gate, and the generate-gate-check loop, with a fake client and GlotLID
 stubbed."""
 
-import pytest
-
 import redact.jailbreak  # noqa: F401  (tags the techniques)
 from redact.jailbreak.obfuscation import code_switching as cs
 from redact.jailbreak.obfuscation.code_switching import (
@@ -22,8 +20,8 @@ def test_one_technique_per_language_tagged_as_a_checked_model_call():
     assert sorted(fn.__name__ for fn in fns) == sorted(
         f"to_code_switch_{row['slug']}" for row in cs.LANGUAGES)
     for fn in fns:
-        assert fn.requires_llm and fn.check == "meaning" and fn.calls == [2, 4]
-        assert fn.families == ["code_switching"] and fn.complexity == 2
+        assert fn.requires_llm and fn.check == "meaning" and fn.calls == [2, 4]  # noqa: PLR2004
+        assert fn.families == ["code_switching"] and fn.complexity == 2  # noqa: PLR2004
 
 
 def test_the_non_latin_gate_wants_a_mix_not_english_and_not_a_full_translation():
@@ -103,7 +101,7 @@ def test_the_gate_rejects_before_any_check_call_and_discards():
     assert info.startswith("DISCARDED") and "code switch failed" in info
     assert "language=Russian" in info
     # Two attempts, each a generation only (the gate rejects before the check).
-    assert fake.calls == 2
+    assert fake.calls == 2  # noqa: PLR2004
 
 
 def test_the_check_rejecting_every_time_discards():

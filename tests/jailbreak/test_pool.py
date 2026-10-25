@@ -134,25 +134,29 @@ _MILD_NOISE = [f"to_{noise}_{density}" for noise in (
     for density in ("low", "medium")]
 
 
-def test_the_default_variation_pool_is_the_72_pinned_natural_techniques():
+def test_the_default_variation_pool_is_the_96_pinned_natural_techniques():
     """A technique added to a family the spec marks natural takes its
     family's kinds, so it joins the natural pool unless its entry says
     ``["adversarial"]``. This fails until it is decided, in the spec and
     ``fixtures/natural_pool.json``. Spec 1.2 added six answer languages and
-    the natural-only small talk (2) and benign roles (3). Spec 1.3 added one:
-    ``to_ask_with_urgency``, which was decided to be natural; its three
-    answer formats say ``["adversarial"]``."""
+    the natural-only small talk (2) and benign roles (3). Spec 1.3 added one,
+    ``to_ask_with_urgency``. Spec 1.4's language-mix step admitted the four
+    transliterations, the ten code-switching techniques and the ten
+    romanizations to the natural kind (dialect too, but only under the
+    translation switch, which the natural kind has off by default)."""
     pool = technique_pool(resolve(None, "natural"))
     assert sorted(fn.__name__ for fn in pool) == NATURAL_POOL
-    assert len(pool) == 72      # noqa: PLR2004
+    assert len(pool) == 96      # noqa: PLR2004
     # Family by family: two typos, seven whole families, the asking family
-    # whole, four answer formats, the mild noise, and three techniques of
-    # attack families.
+    # whole, four answer formats, the mild noise, three techniques of attack
+    # families, and the spec 1.4 language-mix families drawn without the
+    # translation switch (transliteration, code_switching, romanization).
     listed = sorted([
         "to_rewrite_with_typos_low", "to_rewrite_with_typos_medium",
         *_family("casual_writing", "neutral_container", "answer_language",
                  "indirect", "smalltalk_prefix", "smalltalk_suffix",
-                 "benign_role"),
+                 "benign_role", "transliteration", "code_switching",
+                 "romanization"),
         *_family("asking"),
         "to_answer_in_markdown", "to_answer_as_tutorial", "to_answer_as_code",
         "to_answer_as_structured_data", *_MILD_NOISE,
@@ -163,7 +167,7 @@ def test_the_default_variation_pool_is_the_72_pinned_natural_techniques():
         "typos", "casual_writing", "noise", "neutral_container",
         "answer_language", "answer_format", "asking", "indirect",
         "smalltalk_prefix", "smalltalk_suffix", "benign_role", "encode",
-        "suffixes"}
+        "suffixes", "transliteration", "code_switching", "romanization"}
 
 
 def test_the_default_attack_pool_is_244_techniques_in_33_families():
@@ -220,11 +224,11 @@ def test_the_natural_kind_and_the_eval_type_draw_no_rewrite_technique_though_all
 
 def test_the_natural_kind_draws_only_what_the_spec_marks_natural():
     natural = {fn.__name__ for fn in all_techniques() if "natural" in fn.kinds}
-    assert natural == {*NATURAL_POOL, *_family("translation")}
-    # Translation is natural too, when the kind's switch is on.
+    assert natural == {*NATURAL_POOL, *_family("translation"), *_family("dialect")}
+    # Translation and dialect are natural too, when the kind's switch is on.
     pool = technique_pool(resolve({"natural": {"translation": True}}, "natural"))
     assert sorted(fn.__name__ for fn in pool) == sorted(natural)
-    assert (len(NATURAL_POOL), len(pool)) == (72, 95)     # noqa: PLR2004
+    assert (len(NATURAL_POOL), len(pool)) == (96, 125)     # noqa: PLR2004
     # A family allowed whole gives its natural techniques only.
     typos = resolve({"natural": {"families": {"allow": ["typos"]},
                                  "techniques": {"allow": None}}}, "natural")

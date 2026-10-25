@@ -24,9 +24,13 @@ _LEAST_PER_FAMILY = 10
 # Units a simulated plan deals, in three groups.
 _SIMULATED = 3000
 # The most a technique's share of its family may be, over an even share, by
-# budget and in a count round.
+# budget and in a count round. The count-round bound rose from 1.2 to 1.25
+# when the spec 1.4 language-mix families joined the natural pool: with more
+# families each gets fewer of the count round's picks, so a family's members
+# complete fewer full even cycles and its top member sits a little higher
+# (casual_writing's reaches 1.215 at seeds 42 and 44).
 _TOP_OVER_EVEN = 1.5
-_COUNT_TOP_OVER_EVEN = 1.2
+_COUNT_TOP_OVER_EVEN = 1.25
 
 
 def _one_group(n: int) -> pd.DataFrame:

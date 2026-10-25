@@ -4,7 +4,6 @@ import pytest
 
 import redact.jailbreak  # noqa: F401  (tags the techniques)
 from redact.jailbreak.obfuscation.transliteration import (
-    _has_latin,
     _TABLES,
     _transliterate,
     get_transliteration_functions,

@@ -50,8 +50,8 @@ def test_one_technique_per_variant_on_the_translation_path():
     assert sorted(fn.__name__ for fn in fns) == sorted(
         f"to_dialect_{row['slug']}" for row in D.LANGUAGES)
     for fn in fns:
-        assert fn.requires_llm and fn.check == "translate" and fn.calls == [2, 12]
-        assert fn.families == ["dialect"] and fn.complexity == 2
+        assert fn.requires_llm and fn.check == "translate" and fn.calls == [2, 12]  # noqa: PLR2004
+        assert fn.families == ["dialect"] and fn.complexity == 2  # noqa: PLR2004
 
 
 def test_the_length_band_uses_the_base_language_ratio_or_an_estimate():
