@@ -1,5 +1,6 @@
 """Encoding techniques: the prompt as a cipher, a character code, a byte codec,
-Morse or Braille, reversed, or in look-alike, fullwidth or math-styled letters.
+Morse or Braille, reversed, in look-alike, fullwidth or math-styled letters,
+or spaced out letter by letter.
 
 ``info`` is empty, except ``sep=<separator>`` from ``to_separator``,
 ``shift=<n>`` from ``to_caesar_cipher`` and ``math_style=<name>`` from
@@ -137,6 +138,17 @@ def to_separator(prompt: str, *, rng: random.Random | None = None) -> tuple[str,
     """Insert a random separator character between every character a reader sees."""
     sep = (rng or random).choice(SEPARATORS)
     return sep.join(_clusters(prompt)), f"sep={sep}"
+
+
+def to_letter_spacing(prompt: str) -> tuple[str, str]:
+    """Put a space between every two characters a reader sees, the BELLS
+    guardrail attacks' ``space_between_letters`` (``" ".join(prompt)``): a
+    space between two words becomes three, so the words stay apart, and a
+    line break gets a space on each side. A mark, a joiner or a skin tone
+    stays with its character (:func:`_clusters`), where the reference's join
+    of code points would set it apart; on a text without one the two write
+    the same. Any script is spaced out, not only Latin."""
+    return " ".join(_clusters(prompt)), ""
 
 
 _LEET_MAP_BASIC = {
@@ -437,6 +449,7 @@ _ENCODERS = [
     to_atbash,
     to_fullwidth,
     to_math_styled,
+    to_letter_spacing,
 ]
 
 _HINTS_FILE = "obfuscation/decode_hints.json"

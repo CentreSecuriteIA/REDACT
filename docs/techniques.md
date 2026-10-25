@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 244 active techniques in 5 layers and 36
+The jailbreak stage draws from 245 active techniques in 5 layers and 36
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -72,10 +72,10 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 35 | at most 1 |
-| `obfuscation` | 14 | 110 | no cap |
+| `obfuscation` | 14 | 111 | no cap |
 | `requests` | 12 | 68 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| all | 36 | 244 | |
+| all | 36 | 245 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -108,7 +108,7 @@ that call a model call the generation model.
 | obfuscation | `word_art` | `encoding` | 55 | 1 | yes | no | `to_word_art` |
 | obfuscation | `suffixes` | `surface_noise` | 60 | 4 | no | no | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_fragments`, `to_adversarial_suffix_unicode`, `to_adversarial_suffix_emoji` |
 | obfuscation | `payload_split` | `encoding` | 65 | 2 | `to_payload_split_semantic` | no | `to_payload_split`, `to_payload_split_semantic` |
-| obfuscation | `encode` | `encoding` | 70 | 27 | no | no | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_basic`, `to_leetspeak_intermediate`, `to_leetspeak_advanced`, `to_morse`, `to_braille`, `to_reversed_characters`, `to_reversed_words`, `to_reversed_word_order`, `to_lookalike_letters`, `to_zero_width_noise`, `to_hex`, `to_binary`, `to_url_encoding`, `to_html_entities`, `to_base32`, `to_base85`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth`, `to_math_styled` |
+| obfuscation | `encode` | `encoding` | 70 | 28 | no | no | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_basic`, `to_leetspeak_intermediate`, `to_leetspeak_advanced`, `to_morse`, `to_braille`, `to_reversed_characters`, `to_reversed_words`, `to_reversed_word_order`, `to_lookalike_letters`, `to_zero_width_noise`, `to_hex`, `to_binary`, `to_url_encoding`, `to_html_entities`, `to_base32`, `to_base85`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth`, `to_math_styled`, `to_letter_spacing` |
 | obfuscation | `neutral_container` | `container` | 80 | 6 | no | no | `to_code_comment`, `to_yaml_document`, `to_csv_row`, `to_email_message`, `to_transcript_line`, `to_log_entry` |
 | obfuscation | `structural` | `container` | 80 | 3 | no | no | `to_json`, `to_xml`, `to_markdown` |
 | obfuscation | `ascii_art` | `encoding` | 90 | 1 | no | no | `to_ascii_art` |
@@ -141,8 +141,8 @@ belong to `encode`, so one of them blocks both families.
 `encode` techniques carry an `encode_weight`: `light` for `to_rot13`,
 `to_rot18`, `to_rot47`, `to_separator`, the three `to_leetspeak_*`, the
 three reversals, `to_lookalike_letters`, `to_zero_width_noise`,
-`to_url_encoding`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth` and
-`to_math_styled`; `heavy` for `to_base64`, `to_unicode_escape`,
+`to_url_encoding`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth`,
+`to_math_styled` and `to_letter_spacing`; `heavy` for `to_base64`, `to_unicode_escape`,
 `to_ascii_ordinal`, `to_hex`, `to_binary`, `to_html_entities`, `to_base32`,
 `to_base85`, `to_morse`, `to_braille` (each a code for every character, of
 complexity 3). The ten `to_sensitive_words_encode_*`
@@ -842,7 +842,19 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   and fullwidth and math-styled Unicode (math-styled drawing one
   Mathematical Alphanumeric style per call, reported in `math_style=<name>`).
   Hex, binary, HTML entities, base32 and base85 are `heavy`, the rest `light`.
-  Spec version 1.3 gives 21 of the 27 encodings *decode hints*: at the spec's
+  Spec version 1.4 adds `to_letter_spacing`, pure and `light`: a space
+  between every two characters a reader sees (the clusters the separator
+  keeps), so a space between two words becomes three and the words stay
+  apart. It is the `space_between_letters` attack of the BELLS guardrail
+  benchmark (`" ".join(prompt)`), whose output it gives for a text without a
+  combining mark or a joined sequence; the reference joins code points and
+  would set a mark apart from its letter. It spaces out any script, so it
+  has no `needs_latin`, and like every encoding it is kept from a
+  translation; it may sit with ASCII art (spaces draw) and with fsh, dap and
+  the fake turns (it is light). It is an attack only, and the eval type
+  denies it by name, so the pinned eval pool does not draw it.
+  Spec version 1.3 gives 21 of the 27 encodings *decode hints* (22 of 28 with
+  spec 1.4's letter spacing, which has four): at the spec's
   `decode_hint_rate` (0.5), such an encoding writes one of four hints around
   the encoded text, drawn by `rng` after the encoding, which says how to
   decode it (the Caesar cipher's states the shift that call used). The hints

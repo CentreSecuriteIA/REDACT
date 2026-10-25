@@ -20,6 +20,7 @@
   "obfuscation/decode_hints.json:to_html_entities": {"family": "encode", "variants": 4, "floor": 4},
   "obfuscation/decode_hints.json:to_leetspeak_advanced": {"family": "encode", "variants": 4, "floor": 4},
   "obfuscation/decode_hints.json:to_leetspeak_intermediate": {"family": "encode", "variants": 4, "floor": 4},
+  "obfuscation/decode_hints.json:to_letter_spacing": {"family": "encode", "variants": 4, "floor": 4},
   "obfuscation/decode_hints.json:to_lookalike_letters": {"family": "encode", "variants": 4, "floor": 4},
   "obfuscation/decode_hints.json:to_math_styled": {"family": "encode", "variants": 4, "floor": 4},
   "obfuscation/decode_hints.json:to_reversed_characters": {"family": "encode", "variants": 4, "floor": 4},

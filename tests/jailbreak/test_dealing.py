@@ -516,8 +516,12 @@ _BUDGETS = [
 # obfuscations deal them under a name of their own beside encode, so the
 # group's family counts and the names the dealer breaks a tie among change
 # from the first obfuscation pick on (219 of the 240 dealt units; the 200
-# undealt draws ask no dealer and do not move).
-_PINNED_DRAWS = "93982088b48668f879bb867db3cdaf1665975b1561731774159496f26b5f01ed"
+# undealt draws ask no dealer and do not move). Spec 1.4's to_letter_spacing,
+# a light encode member, moved it again: encode's members are dealt among
+# more, and through the units' rng and counts the rest of their draws (5 of
+# the 240 dealt units, none of which draws it; the 200 undealt draws do not
+# move).
+_PINNED_DRAWS = "7f3c34fc45a4fdb7eae0cba9377f16028da8730f725b7258a8b708f562f68c6a"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

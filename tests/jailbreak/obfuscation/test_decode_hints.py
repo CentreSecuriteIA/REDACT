@@ -73,8 +73,9 @@ def never(monkeypatch, stand_in_hints):
 
 # --- the hints file and which encodings have them -------------------------------
 
-def test_twenty_one_encodings_have_four_hints_each():
-    assert len(E._HINTS) == 21  # noqa: PLR2004
+def test_twenty_two_encodings_have_four_hints_each():
+    """Spec 1.4's letter spacing is the twenty-second."""
+    assert len(E._HINTS) == 22  # noqa: PLR2004
     assert all(len(pool) == 4 for pool in E._HINTS.values())  # noqa: PLR2004
     assert sorted(E._HINTS) == HINTED
 
