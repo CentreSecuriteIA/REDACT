@@ -8,9 +8,9 @@ reason it reported. Meant to be run on a GPU pod where the translation,
 generation and check models are served; the main session reads the numbers.
 
 Usage (from the repo root, PYTHONPATH=src):
-    python scripts/langmix_smoke.py --n 20 \
-        --gen-model venice-uncensored --translate-model translategemma-27b
+    python scripts/langmix_smoke.py --n 20 --gen-model venice-uncensored
 The families default to the four language-mix ones; --families narrows them.
+A dialect translates on the translation role's registered model.
 """
 
 import argparse

@@ -802,6 +802,63 @@ the default) and in `params["jailbreaks"]`.
   resumes with the WARNING that the rules its combinations were drawn by
   changed (its `rules` id holds the weight) and replays its combinations;
   plan it again with `resume=False` to draw at 0.25.
+- **The technique catalog.** [catalog.md](catalog.md) and `docs/catalog.json`
+  list every registered technique with its tags, model calls, template
+  variants, prompts and pools, the techniques it combines with and the rules
+  that refuse the others, generated from the code (`scripts/catalog.py`); a
+  test fails until both are written again after a change to the spec, a
+  rule, a pool, a template or a prompt. It changes no run.
+
+Three more changes of this release, none of which moves a plan, a pool or
+a draw, have notes of their own:
+
+**Release note: the persona is the answerer.** The `persona` techniques
+(the adversarial kind only; the `eval` type draws none) asked the model for a
+scene in which the persona would *ask* the text, and gave the construction the
+persona's description but never its name, so whether the final text asked the
+target to *play* the persona was left to the construction model. The scene
+prompt (`persona_scenario_generation`) now has a user put the text to the
+persona, which answers in character; `persona_invention` asks for a character
+who would answer it; and the construction is a prompt of its own,
+`jailbreak/persona_construction`, given the persona's `display_name` (the
+invented name for `to_invented_persona`), its description, the scene and the
+text, which asks the target to play the persona. The `cognitive` techniques,
+`to_persona_roleplay` among them, keep `scenario_generation` and
+`jailbreak_construction`. The calls (3 to 9; 4 to 12 for the invented
+persona), the info, the checks and the plan are unchanged: no plan raises or
+warns, and no pure technique's draw moves. Fresh plans and the pending units
+of a kept plan use the new prompts; finished rows keep their texts. An
+overlay of `jailbreak_construction` no longer reaches the persona
+techniques: copy `persona_construction` to change theirs. How the scenario
+check takes the new scenes, and how often the construction is discarded, is
+not measured yet: `scripts/persona_smoke.py` counts acceptance and discards
+per technique on a model.
+
+**Release note: the family and layer columns.** A build writes two more
+columns on its jailbreak and variation rows, read from `technique` through
+the library's registry: `families`, the first family of each technique, and
+`layers`, its layer, each `+`-joined in the order of `technique`, so a
+dataset can be split per family or per layer; a name the library does not
+register reads `?<name>` and `?`, and the build goes on
+([build](stages/build.md#the-families-and-layers-columns)).
+`complete_dataset.csv` has them after the jailbreak file's columns, and
+`eval_jailbreaks.csv` right after `technique`: an eval file built from now on
+has two more columns than one built before, so a reader that takes its
+columns by position, or compares two eval releases' headers, sees them. The
+stage files keep their columns, and nothing needs to run again: build again
+to get the columns. The build's run record now holds `spec_version`, the
+spec they were read off.
+
+**Release note: the scenarios table.** The jailbreak stage takes
+`scenarios` (a params key under `jailbreaks`; off by default): on, each kind
+keeps the scene each cognitive or persona technique built its prompt on in
+`<stem>.scenarios.csv` beside its manifest (`input_id`, `iteration`,
+`sample_id`, `technique`, `scenario`), so the model-written scenarios can
+be read beside the rows without growing `technique_info`, which still names
+the category only ([the scenarios table](stages/jailbreaks.md#the-scenarios-table)).
+Turning it on changes no row and no plan: a kept plan resumes with it, and
+the table holds the scenes of the units that run from then on. A fresh run
+removes the table with the kind's other files.
 
 **Upgrading from spec version 1.0 to 1.3.** The
 jailbreak library grew from 151 techniques in 23 families to 244 active ones
@@ -1245,28 +1302,6 @@ units of a fresh plan draw other techniques than they did with the same
 seed. A plan kept from before resumes with the growth WARNING, which names
 them, and does not draw them until it is planned again with `resume=False`.
 The `eval` and natural kinds do not draw them.
-
-**Release note: the persona is the answerer.** The `persona` techniques
-(the adversarial kind only; the `eval` type draws none) asked the model for a
-scene in which the persona would *ask* the text, and gave the construction the
-persona's description but never its name, so whether the final text asked the
-target to *play* the persona was left to the construction model. The scene
-prompt (`persona_scenario_generation`) now has a user put the text to the
-persona, which answers in character; `persona_invention` asks for a character
-who would answer it; and the construction is a prompt of its own,
-`jailbreak/persona_construction`, given the persona's `display_name` (the
-invented name for `to_invented_persona`), its description, the scene and the
-text, which asks the target to play the persona. The `cognitive` techniques,
-`to_persona_roleplay` among them, keep `scenario_generation` and
-`jailbreak_construction`. The calls (3 to 9; 4 to 12 for the invented
-persona), the info, the checks and the plan are unchanged: no plan raises or
-warns, and no pure technique's draw moves. Fresh plans and the pending units
-of a kept plan use the new prompts; finished rows keep their texts. An
-overlay of `jailbreak_construction` no longer reaches the persona
-techniques: copy `persona_construction` to change theirs. How the scenario
-check takes the new scenes, and how often the construction is discarded, is
-not measured yet: `scripts/persona_smoke.py` counts acceptance and discards
-per technique on a model.
 
 **Release note: the techniques spec 1.2 adds.** Forty-eight techniques in
 six groups, below. A fresh plan draws them; since each adds members to deal,
@@ -1805,7 +1840,8 @@ alone would have made it the round that draws the most, and a kind that wants
 more of them in its late rounds cannot say so: the weight is one number of
 the spec, which a `config_dir` never overlays.
 
-The weight was set by measurement over seeds 42 to 46 in three groups: 0.3
+The weight was set, at spec 1.3 (spec 1.4 retuned it to 0.25, in its notes
+above), by measurement over seeds 42 to 46 in three groups: 0.3
 draws them 64 to 69 times, 0.5 100 to 108, and a weight of 1, a family's
 share, about 200 (`encode` then at 0.30 draws a unit); 0.18 gives 39 to 41.
 The total depends on how the units are grouped, since each group's dealer
@@ -1855,32 +1891,6 @@ written before the id was narrowed (by an earlier build of this release)
 holds an id over more keys, so its first resume gives the one WARNING; a
 plan drawn by these rules has none of its pending units refused, and can be
 resumed as it is.
-
-**Release note: the family and layer columns.** A build writes two more
-columns on its jailbreak and variation rows, read from `technique` through
-the library's registry: `families`, the first family of each technique, and
-`layers`, its layer, each `+`-joined in the order of `technique`, so a
-dataset can be split per family or per layer; a name the library does not
-register reads `?<name>` and `?`, and the build goes on
-([build](stages/build.md#the-families-and-layers-columns)).
-`complete_dataset.csv` has them after the jailbreak file's columns, and
-`eval_jailbreaks.csv` right after `technique`: an eval file built from now on
-has two more columns than one built before, so a reader that takes its
-columns by position, or compares two eval releases' headers, sees them. The
-stage files keep their columns, and nothing needs to run again: build again
-to get the columns. The build's run record now holds `spec_version`, the
-spec they were read off.
-
-**Release note: the scenarios table.** The jailbreak stage takes
-`scenarios` (a params key under `jailbreaks`; off by default): on, each kind
-keeps the scene each cognitive or persona technique built its prompt on in
-`<stem>.scenarios.csv` beside its manifest (`input_id`, `iteration`,
-`sample_id`, `technique`, `scenario`), so the model-written scenarios can
-be read beside the rows without growing `technique_info`, which still names
-the category only ([the scenarios table](stages/jailbreaks.md#the-scenarios-table)).
-Turning it on changes no row and no plan: a kept plan resumes with it, and
-the table holds the scenes of the units that run from then on. A fresh run
-removes the table with the kind's other files.
 
 ## The model registry
 
@@ -2154,7 +2164,7 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | File | Holds | Read by |
 |---|---|---|
 | `configs/llm/gpu_pricing.json` | Provider, then GPU name as `nvidia-smi` reports it, then hourly USD per GPU; `*` is a provider's fallback | the cost roll-up |
-| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layers_off_by_default` (the layers a kind leaves out unless its `layers.allow` names them, checked against `layer_order` as the spec loads), `decode_hint_rate` (the share of hinted encodings that write a decode hint, 0.5), `heavy_encoding_weight` (the weight, times `encode`'s, of the slot a budget round deals the ten heavy full-text encodings in, 0.2, above 0 and at most 1; left out, they are dealt as `encode`'s members), `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`, `check` and `calls`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `request_obfuscation_refuses` (per family a request obfuscation is drawn from, the families it then keeps out of the combination: a translation keeps `suffixes`, `structural` and `neutral_container`; as the spec loads, each key must be a family a request obfuscation is drawn from, `translation` or `encode` (the light encodings `request_obfuscation_allowed_families` calls `encode_light`), and each name an obfuscation-layer family, since the step is drawn after every other layer's pick), `generators` (the families whose techniques come one per row of a data file, expanded into `techniques` as the spec loads), `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, `needs_latin`, optional `max_tokens`, `cross_incompatible_with`, `kinds`, `check`, `calls`, `since`, the spec version that added the technique, and `deprecated`, the one that retired it) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
+| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layers_off_by_default` (the layers a kind leaves out unless its `layers.allow` names them, checked against `layer_order` as the spec loads), `decode_hint_rate` (the share of hinted encodings that write a decode hint, 0.5), `heavy_encoding_weight` (the weight, times `encode`'s, of the slot a budget round deals the ten heavy full-text encodings in, 0.25, above 0 and at most 1; left out, they are dealt as `encode`'s members), `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`, `check` and `calls`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `request_obfuscation_refuses` (per family a request obfuscation is drawn from, the families it then keeps out of the combination: a translation keeps `suffixes`, `structural` and `neutral_container`; as the spec loads, each key must be a family a request obfuscation is drawn from, `translation` or `encode` (the light encodings `request_obfuscation_allowed_families` calls `encode_light`), and each name an obfuscation-layer family, since the step is drawn after every other layer's pick), `generators` (the families whose techniques come one per row of a data file, expanded into `techniques` as the spec loads), `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, `needs_latin`, optional `max_tokens`, `cross_incompatible_with`, `kinds`, `check`, `calls`, `since`, the spec version that added the technique, and `deprecated`, the one that retired it) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
 | `configs/jailbreak/languages.json` | One row per language: `name`, `slug`, `complexity`, `script`, whether it has a `translation` and an `answer_language` technique, and the spec versions that added them: `since` (the row) and `translation_since` (its translation, when later) | `jailbreak/technique.py` (the spec's generators), `obfuscation/translation.py`, `requests/answer_language.py` |
 | `configs/jailbreak/obfuscation/suffix_strings.json` | One row per adversarial suffix published in the literature: `slug`, `suffix`, `source`, `optimized_against`, `since`, and optionally `notes`, `complexity`, `deprecated`; each row is an attack-only technique `to_adversarial_suffix_<slug>` of the `suffixes` family | `jailbreak/technique.py` (the spec's generators), `obfuscation/suffixes.py`, which refuses at import a row without one of the five |
 | `configs/jailbreak/augmentations.json` | The two default kinds and `natural_only_families` | `jailbreak/augmentation.py` |

@@ -49,6 +49,7 @@ the technique names are in [techniques.md](../techniques.md).
 | `pipeline.py` | `run_augmentation`, the stage core; `_library_change`, the kept plan's pool against what the library added and retired since |
 | `variants.py` | `variants_of` (a row's template variants, paired by position), `write_variants` (the kind's `<stem>.variants.csv`), `COLUMNS` |
 | `scenarios.py` | `rows_of` (a finished unit's scene rows), `write_scenarios` (the kind's `<stem>.scenarios.csv` kept to its rows), `COLUMNS` |
+| `catalog.py` | The technique catalog, from the code: `build`, `refusal_rules` (mirrors `rules.compatible`, rule by rule), `compatible_with`, `code_reach` (the prompt steps and chain arguments a technique's code reaches, read off its bytecode), `dumps` and `markdown`; `python -m redact.jailbreak.catalog` (`scripts/catalog.py`, `--check` to only compare) writes `docs/catalog.json` and [catalog.md](../catalog.md) |
 | `directives.py` | The variant pools of the pure techniques: `read_pools` (a template file's pools by directive, whatever its shape), `PoolRef` and `uses_pool` (the pool a technique draws from, set as its `variant_pool`), `check_pools` (called by `pool.py` at import), `enabled`, `draw_variant`, `apply_template_directive`; `load_templates` (a file as written) |
 
 ## Techniques

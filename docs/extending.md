@@ -567,7 +567,7 @@ pool of one variant named after the entry. `personas.json` and
    keeps as it is. A pool that reaches its floor must leave
    `known_short`: the test fails until it does. The list is kept by hand and
    nothing but review stops a new below-floor pool from being added to it, so
-   add one only on purpose. The list is empty today: all 91 pools are at
+   add one only on purpose. The list is empty today: all 95 pools are at
    their floor or above. A pool also fails when one of its variants repeats
    another (to the case and the spaces).
 
