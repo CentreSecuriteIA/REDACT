@@ -101,3 +101,24 @@ class TestEveryVariantFramesThePromptCoherently:
 
     def test_every_pool_still_has_its_floor_of_variants(self):
         assert all(len(pool) >= 8 for pool in self._POOLS.values())   # noqa: PLR2004
+
+    def test_no_two_variants_of_a_pool_say_nearly_the_same_thing(self):
+        """Two variants of one pool must differ in wording, not only in a
+        label: the smaller of their sets of word trigrams (prefix and suffix
+        together) shares at most half with the other. The pools keep to 0.24
+        or less; ``fill_blank`` and ``blank_answer`` of ``fill_in_blank`` were
+        at 0.73 (a question, an answer line, an instruction to fill it in)
+        before the second was written as a transcript. A flag, not text."""
+        def trigrams(variant: dict) -> set[tuple[str, ...]]:
+            words = re.findall(r"\w+", (variant["prefix"] + " "
+                                        + variant["suffix"]).lower())
+            return {tuple(words[i:i + 3]) for i in range(len(words) - 2)}
+
+        too_alike = []
+        for directive, pool in self._POOLS.items():
+            for i, first in enumerate(pool):
+                for second in pool[i + 1:]:
+                    a, b = trigrams(first), trigrams(second)
+                    if a and b and len(a & b) / min(len(a), len(b)) > 0.5:  # noqa: PLR2004
+                        too_alike.append((directive, first["name"], second["name"]))
+        assert too_alike == []

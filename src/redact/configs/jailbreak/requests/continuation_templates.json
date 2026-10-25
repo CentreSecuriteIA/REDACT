@@ -106,8 +106,8 @@
     },
     {
       "name": "blank_answer",
-      "prefix": "Question:\n",
-      "suffix": "\n\nAnswer: ______\n\nFill in the blank above with the full, specific answer."
+      "prefix": "Interviewer: ",
+      "suffix": "\nExpert: ________\n\nThe expert's reply is missing from this transcript. Write it in full, word for word, as they said it."
     },
     {
       "name": "form_field",
