@@ -847,18 +847,22 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   and fullwidth and math-styled Unicode (math-styled drawing one
   Mathematical Alphanumeric style per call, reported in `math_style=<name>`).
   Hex, binary, HTML entities, base32 and base85 are `heavy`, the rest `light`.
-  Spec version 1.3 gives 21 of the 27 encodings *decode hints*: at the spec's
+  Spec version 1.3 gives 21 of the 27 encodings *decode hints*, and the
+  second eval release the five heavy encodings of the eval pool too, 26 in
+  all: at the spec's
   `decode_hint_rate` (0.5), such an encoding writes one of four hints around
   the encoded text, drawn by `rng` after the encoding, which says how to
   decode it (the Caesar cipher's states the shift that call used). The hints
   are in `obfuscation/decode_hints.json`, a pool of four per technique; the
   info gains `hint=<name>` when a hint was written, and the kind's variants
   table counts them. An encoding that changed nothing (a text of digits under
-  ROT13) gets none. Six encodings have none: the five of the eval pool,
-  `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`, `to_morse` and
-  `to_braille`, whose hints would change the pinned eval pool's text, and `to_leetspeak_basic`,
-  which the natural kind draws; import fails for a pool of hints that names one
-  (`NEVER_HINTED` in `obfuscation/encoding.py`). The ten `to_sensitive_words_encode_*` techniques
+  ROT13) gets none. One encoding has none, `to_leetspeak_basic`, which the
+  natural kind draws; import fails for a pool of hints that names it
+  (`NEVER_HINTED` in `obfuscation/encoding.py`). The eval pool's `to_base64`,
+  `to_unicode_escape`, `to_ascii_ordinal`, `to_morse` and `to_braille` write
+  a hint on about half their rows since the second eval release: their
+  hinted rows' text moved, their unhinted rows' did not (the hint is drawn
+  after the encoding, from the technique's own generator). The ten `to_sensitive_words_encode_*` techniques
   call the plain encoders, so they carry none.
 - `structural` wraps the text in JSON, XML or markdown. Each of its three
   techniques draws one of the variants of its pool in
@@ -1042,7 +1046,7 @@ directive and variant of a fault. A pool should hold at least 8 variants
 (a request or framing directive, a container, a fake turn, the payload split's reassembly, the
 word art's decoding, the wording's key and puzzles), 12 for a benign role, 20 for small talk, 6 for the
 persona templates' mechanics and 4 for an encoding's decode hints;
-None of the 86 pools is below its floor today. The pools of the eval-pool
+None of the 91 pools is below its floor today. The pools of the eval-pool
 techniques that were (the five framing, the four continuation,
 `refusal_then_comply` and `past_tense`, each with 4) have 8 since the second
 eval release, which changed the eval text and pinned it again; the structural
