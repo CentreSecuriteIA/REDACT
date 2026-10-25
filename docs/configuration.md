@@ -1326,12 +1326,12 @@ application costs 2 to 4 calls; a distractor costs 1 to 3 (a reply with no
 text is asked for again), and no check reads it. They add no model role.
 
 The layer is off, so a run that does not allow it changes nowhere: the
-default attack pool is still 214 techniques in 29 families, the natural pool
+default attack pool is still 226 techniques in 29 families, the natural pool
 the 72 (every rewrite technique says `["adversarial"]`), and the `eval`
 type's pool and draws are unchanged (36 techniques; its allow lists name no rewrite
 family, so allowing the layer there adds nothing to its pool or its rounds
 until the families are allowed too). A kind that allows the layer draws them: the packaged
-adversarial kind's pool is then 230 techniques in 32 families, its rounds say
+adversarial kind's pool is then 242 techniques in 32 families, its rounds say
 `include_rewrite: true` (an adversarial plan kept from a section that allowed
 the layer before its pool held a technique raises on resume naming `rounds`), a
 budget round deals the layer at `layer_rates.rewrite` (the spec's 0, with a

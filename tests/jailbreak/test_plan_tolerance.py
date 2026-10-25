@@ -599,15 +599,18 @@ def _growth_since_1_2(key: str, pool: list) -> tuple[list[str], list[str]] | Non
 
 
 def test_an_attack_plan_of_spec_1_2_finds_spec_1_3_s_36_techniques_as_growth():
-    """The attack pool of a plan made at 1.2 differs from today's by 36 names,
-    all dated 1.3 (the four translations switched on among them), none
-    retired: the library added them after the plan, so the plan is kept and
-    the run warns."""
+    """The attack pool of a plan made at 1.2 differs from today's by 36 names
+    dated 1.3 (the four translations switched on among them), those dated 1.4
+    since, none retired: the library added them after the plan, so the plan is
+    kept and the run warns."""
     added, retired = _growth_since_1_2(
         "adversarial", technique_pool(resolve(None, "adversarial")))
-    assert (len(added), retired) == (36, [])     # noqa: PLR2004
-    assert set(_FOUR_TRANSLATIONS) <= set(added)
-    assert {registry(all_techniques())[name].since for name in added} == {"1.3"}
+    by_name = registry(all_techniques())
+    dated_1_3 = [name for name in added if by_name[name].since == "1.3"]
+    assert (len(dated_1_3), retired) == (36, [])     # noqa: PLR2004
+    assert set(_FOUR_TRANSLATIONS) <= set(dated_1_3)
+    # What spec 1.4 added since is growth too, dated 1.4.
+    assert {by_name[name].since for name in added} <= {"1.3", "1.4"}
 
 
 def test_a_natural_plan_of_spec_1_2_finds_the_urgent_ask_as_the_library_s_growth():

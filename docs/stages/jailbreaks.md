@@ -9,7 +9,7 @@ Augment the accepted inputs with technique combinations, in two kinds:
 
 | Kind | Writes | Default |
 |---|---|---|
-| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from 214 techniques in 29 families, the 23 translations among them: the 244 active techniques less the 16 of the `rewrite` layer (off by default), the nine `casual_writing` ones and the five natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
+| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from 226 techniques in 29 families, the 23 translations among them: the 256 active techniques less the 16 of the `rewrite` layer (off by default), the nine `casual_writing` ones and the five natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
 | `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 72 techniques (95 with `"translation": true`, which adds the 23 translations) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
@@ -276,7 +276,10 @@ families, among them the urgent ask, two payload splits, the word art, the
 two wording techniques, three personas and four translations); a natural
 plan names the urgent ask alone, and the four translations too when its
 `translation` switch is on. The sixteen techniques of the `rewrite` layer
-are off by default, in no kind's pool, so no plan names them.
+are off by default, in no kind's pool, so no plan names them. Spec 1.4 adds twelve more persona templates (emotional
+and family appeals, legitimate experts and authorities, simulated systems and games, and one frame each built around
+a point and penalty system, a persona-tagged opening and a stay-in-character reset) to the adversarial pool alone:
+an adversarial plan kept from an earlier spec resumes with the growth WARNING naming them, and no other pool changes.
 
 ## Rejected and failed units
 
