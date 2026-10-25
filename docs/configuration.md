@@ -568,8 +568,8 @@ favours a family's cheaper techniques). `family_weights` may name only
 families the kind's pool draws. In a budget round the ten heavy full-text
 encodings (`to_base64`, `to_morse` and the others of `encode_weight` heavy
 that encode the whole text) are dealt in a slot of their own beside
-`encode`, at the spec's `heavy_encoding_weight` (0.2) times `encode`'s
-weight, so they are drawn about a fifth as often as a family: the slot is
+`encode`, at the spec's `heavy_encoding_weight` (0.25) times `encode`'s
+weight, so they are drawn about a quarter as often as a family: the slot is
 not a family, so `family_weights` cannot name it (`"encode:heavy"` raises
 as any name the kind does not draw); weight `encode` to move both. It is a
 quota in every budget round, not a floor: a round whose budget would have
@@ -591,7 +591,7 @@ obfuscation layer's.
 
 A budget round lets each unit spend up to `max_complexity`. A unit that
 draws cheap techniques leaves the rest unspent, so a group's units spend
-less than `max_complexity` on average (5.64 of 6 in the table below). With
+less than `max_complexity` on average (5.60 of 6 in the table below). With
 `"budget": "group"` the units of a `(category, entry_type, iteration)` group
 share it: a unit may spend `max_complexity` plus what the group's earlier
 units left unspent of it, up to `max_unit_complexity` (`max_complexity + 3`
@@ -619,34 +619,34 @@ group has no bank, so it spends up to `max_complexity`.
 
 What it does, measured over 3,000 units of the default adversarial kind in
 three groups (`max_complexity` 6, ceiling 9; `python -m tests.jailbreak.simulate
-3000 budget` prints seed 42). Each cell is seed 42, then the range over
-seeds 42 to 46:
+3000 budget` prints seed 42), at spec 1.4 with `heavy_encoding_weight` 0.25.
+Each cell is seed 42, then the range over seeds 42 to 46:
 
 | | `"unit"` | `"group"` |
 |---|---|---|
-| Mean complexity per unit | 5.64 (5.63 to 5.65) | 6.00 |
+| Mean complexity per unit | 5.60 (5.59 to 5.62) | 6.00 |
 | Highest complexity of one unit | 6 | 9 |
-| Units above 6 | 0 | 780 (745 to 780) |
-| Obfuscations per unit | 1.47 (1.47 to 1.48) | 1.62 |
-| Draws of complexity 3 or more | 1,451 (1,430 to 1,456) | 1,578 (1,565 to 1,578) |
-| `encode`: the top member's share of the family's draws, as a multiple of an even share | 8.07 (7.58 to 8.26) | 4.90 (3.88 to 4.90) |
-| `sensitive_words`: the same | 3.66 (3.53 to 3.89) | 1.64 (1.64 to 1.96) |
-| Of complexity 3 or more, drawn: `encode` (of 10) | all 10, 3 to 6 times each (3 to 6) | all 10, 4 to 6 times each (3 to 6) |
-| Of complexity 3 or more, drawn: `sensitive_words` (of 4) | all 4, 18 to 20 times each (17 to 22) | all 4, 36 to 37 times each (34 to 37) |
+| Units above 6 | 0 | 859 (819 to 867) |
+| Obfuscations per unit | 1.49 (1.49 to 1.51) | 1.66 |
+| Draws of complexity 3 or more | 1,267 (1,250 to 1,267) | 1,367 (1,356 to 1,367) |
+| `encode`: the top member's share of the family's draws, as a multiple of an even share | 7.44 (7.32 to 8.04) | 2.47 (2.47 to 3.48) |
+| `sensitive_words`: the same | 3.45 (3.24 to 3.57) | 1.58 (1.45 to 1.58) |
+| Of complexity 3 or more, drawn: `encode` (of 10) | all 10, 3 to 5 times each (3 to 6) | all 10, 3 to 6 times each (3 to 6) |
+| Of complexity 3 or more, drawn: `sensitive_words` (of 4) | all 4, 13 to 15 times each (10 to 16) | all 4, 10 to 44 times each (6 to 44) |
 
 The group budget evens out the cheap members of `encode` and
 `sensitive_words`, which the unit budget favours because a cheap one fits
 more units (the top member of each is the complexity-1 leetspeak), and
 spends the mean it is given. The heavy members stay rarer than those of
-complexity 2 under both budgets (each heavy `encode` member 3 to 6 times
-under the unit budget at seed 42, against 30 to 32 for one of complexity 2):
+complexity 2 under both budgets (each heavy `encode` member 3 to 5 times
+under the unit budget at seed 42, against 27 to 29 for one of complexity 2):
 one of complexity 3 fits only a unit whose earlier picks leave 3 points, and
 `fsh` and `dap` refuse the heavy `encode` members (not the `sensitive_words`
 ones, which are drawn more). That skew toward the cheaper members is
 intended; the ten heavy full-text encodings are dealt in a slot of their own
-at a fifth of a family's weight (above), without which they were drawn 0 to
+at a quarter of a family's weight (above), without which they were drawn 0 to
 3 times each. The extra allowance goes to the obfuscations, the request
-obfuscation's included (2.51 complexity per unit against 2.87; the other
+obfuscation's included (2.54 complexity per unit against 2.94; the other
 layers spend the same). The draws of complexity 3 or more include 112 of the
 two `selected_many` variants under both budgets (108 to 112 over the seeds).
 
@@ -777,6 +777,26 @@ the default) and in `params["jailbreaks"]`.
   (one request per combination, competing with the others), and the plan
   draws it for every input but an absolutely benign one
   ([techniques.md](techniques.md)).
+- **The heavy encodings' slot is retuned to 0.25.** The four language-mix
+  families share the obfuscation layer's family-first picks among more
+  families, and the slot followed them down: at the spec's
+  `heavy_encoding_weight`, 0.2, the ten heavy full-text encodings were drawn
+  30 or 31 times in 3,000 units of the default attacks, where the weight was
+  set for about 40 (44 to 50 at spec 1.3). Over seeds 42 to 46 in one, three
+  and ten groups (15 plans of 3,000 units a weight) the mean is 30.1 at 0.2,
+  38.8 at 0.25, 46.5 at 0.3, 51.7 at 0.35 and 59.6 at 0.4, and one of the ten
+  goes undrawn in 2, 0, 0, 0 and 1 of the 15 plans (in ten groups), so the
+  weight is 0.25 now: 37 or 38 draws in one group, 38 or 39 in three, 40 in
+  ten, the least drawn of the ten 3 times in one and three groups and 1 to 3
+  in ten. The escalation's round 3 draws 36 of them (30 at 0.2) and round 4
+  27 or 28 (24). A plan of 300 inputs in 15 groups of 20 draws 8 to 11 at
+  any weight from 0.2 to 0.4: each small group's slot takes its first pick
+  early and its next only after more units than the group has. A count round
+  (the eval type, the natural kind, escalation rounds 1 and 2) does not read
+  the weight, so the eval draws do not move. A budget plan kept from before
+  resumes with the WARNING that the rules its combinations were drawn by
+  changed (its `rules` id holds the weight) and replays its combinations;
+  plan it again with `resume=False` to draw at 0.25.
 
 **Upgrading from spec version 1.0 to 1.3.** The
 jailbreak library grew from 151 techniques in 23 families to 244 active ones
@@ -857,9 +877,9 @@ a run you already have, and what you will see; each point has its note below.
   wrapper and a container out of the unit (which makes the translation the
   unit's only obfuscation); and a budget round deals the ten heavy full-text
   encodings in a slot of their own at the spec's `heavy_encoding_weight`,
-  0.2, a quota rather than a floor (about 45 draws of the ten in 3,000 units
-  of the escalation's last round, where they were about 121; the note on the
-  eval release, below).
+  0.2 (0.25 since spec 1.4's retune), a quota rather than a floor (about 45
+  draws of the ten in 3,000 units of the escalation's last round, where they
+  were about 121; the note on the eval release, below).
 - **Stricter checks, and what they skip.** An allow list or `family_weights`
   that names a family or technique of a layer the kind leaves off raises
   (the `rewrite` layer needs `layers.allow`); a `config_dir`
@@ -1749,7 +1769,8 @@ offline.
 
 The sixth change is for training only: a budget round deals the ten heavy
 full-text encodings in a slot of their own beside `encode`, at the spec's
-new `heavy_encoding_weight`, 0.2, times `encode`'s weight
+new `heavy_encoding_weight`, 0.2 (0.25 since spec 1.4's retune, in the
+spec 1.4 notes), times `encode`'s weight
 (`HEAVY_ENCODINGS` in `jailbreak/sampling.py`, a name the dealer counts them
 under). Dealt as `encode`'s members, a heavy one fitted only a unit with 3
 points left, and the light members kept the family's count high, so it was

@@ -156,18 +156,19 @@ these ten, the `heavy` ones stay allowed with `fsh` and `dap`, which the plain
 `heavy` `encode` techniques are not; the `light` ones, like the plain `light`
 ones, may be the request obfuscation, which no `heavy` one is. A budget round
 deals the ten plain `heavy` ones, the full-text encodings, in a slot of their
-own beside `encode`, at the spec's `heavy_encoding_weight` (0.2) times
-`encode`'s weight, about a fifth of a family's draws: dealt as `encode`'s
+own beside `encode`, at the spec's `heavy_encoding_weight` (0.25) times
+`encode`'s weight, about a quarter of a family's draws: dealt as `encode`'s
 members they were seldom drawn in the default attacks, since one fits only a
 unit with 3 points of its budget left ([internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)).
 The slot is a quota in every budget round, not a floor, whatever the round's
-budget: about 45 draws in 3,000 units when it was set (spec 1.3), so round 3
-of the escalation rose from 6 to 42 and round 4, whose budget of 9 dealt
-them about 121 times, fell to about 45. Spec 1.4's four language-mix
-families share the obfuscation picks among more families, and the slot
-follows: 30 draws of the ten in 3,000 units of the default attacks (3
-each), 30 in round 3 and 24 in round 4 (three groups, seeds 42 to 46, the
-same at each). A count round deals them as `encode`'s members.
+budget: about 45 draws in 3,000 units when it was set (spec 1.3, at 0.2), so
+round 3 of the escalation rose from 6 to 42 and round 4, whose budget of 9
+dealt them about 121 times, fell to about 45. Spec 1.4's four language-mix
+families share the obfuscation picks among more families, which brought 0.2
+down to 30 draws, so spec 1.4 set the weight to 0.25: 38 or 39 draws of the
+ten in 3,000 units of the default attacks in three groups (37 to 40 in one,
+three or ten), 3 to 6 each, 36 in round 3 and 27 or 28 in round 4 (three
+groups, seeds 42 to 46). A count round deals them as `encode`'s members.
 
 Nineteen of them are tagged `needs_latin`: the ciphers `to_rot13`,
 `to_rot18`, `to_rot47`, `to_caesar_cipher`, `to_atbash`, the three

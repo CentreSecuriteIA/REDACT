@@ -28,7 +28,11 @@ _SIMULATED = 3000
 # when the spec 1.4 language-mix families joined the natural pool: with more
 # families each gets fewer of the count round's picks, so a family's members
 # complete fewer full even cycles and its top member sits a little higher
-# (casual_writing's reaches 1.215 at seeds 42 and 44).
+# (casual_writing's reaches 1.215 at seeds 42 and 44). The spec 1.4 retune of
+# heavy_encoding_weight cannot bring it back to 1.2: a count round deals the
+# heavy encodings as encode's members and never reads the weight, and the
+# natural kind draws none of them (casual_writing's top member is 1.215 at
+# 0.2 and at 0.25 alike).
 _TOP_OVER_EVEN = 1.5
 _COUNT_TOP_OVER_EVEN = 1.25
 
@@ -305,24 +309,27 @@ def test_the_default_attacks_draw_every_technique_of_their_pool(section):
 
 # The ten heavy full-text encodings, dealt in a slot of their own beside encode
 # in a budget draw (sampling.HEAVY_ENCODINGS, at the spec's
-# heavy_encoding_weight, 0.2).
+# heavy_encoding_weight, 0.25).
 _HEAVY = ("to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
           "to_braille", "to_hex", "to_binary", "to_html_entities", "to_base32",
           "to_base85")
 
 
 def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares):
-    """3,000 units in three groups at seed 42: 30 draws of the ten, about 3
+    """3,000 units in three groups at seed 42: 39 draws of the ten, 3 to 5
     each. The slot fixes the total, not a count for each encoding; the total
-    is 30 or 31 in one group, 30 in three and ten (seeds 42 to 46); the least
-    drawn of the ten is drawn 3 times in one and three groups, 0 to 1 times in
-    ten. The four spec 1.4 language-mix families (dialect, code-switching,
-    transliteration, romanization) joined the obfuscation layer, so the
-    layer's family-first picks are shared among more families and the slot's
-    absolute count fell from 45 to 30. Dealt as encode's members the ten got
-    12, two of them never; dealt as a family of their own (weight 1), ~200."""
+    is 37 or 38 in one group, 38 or 39 in three and 40 in ten (seeds 42 to
+    46); the least drawn of the ten is drawn 3 times in one and three groups,
+    1 or 2 times in ten. The four spec 1.4 language-mix families (dialect,
+    code-switching, transliteration, romanization) joined the obfuscation
+    layer, so the layer's family-first picks are shared among more families
+    and at the weight of 0.2 the slot's count fell from 45 to 30 (the bounds
+    were 28 to 42 then); spec 1.4 retuned the weight to 0.25 for about 40,
+    and the bounds are those of spec 1.3 again. Dealt as encode's members the
+    ten got 12, two of them never; dealt as a family of their own (weight 1),
+    ~200."""
     counts = [default_shares[name]["count"] for name in _HEAVY]
-    assert 28 <= sum(counts) <= 42  # noqa: PLR2004
+    assert 36 <= sum(counts) <= 60  # noqa: PLR2004
     assert min(counts) >= 3  # noqa: PLR2004
 
 
@@ -551,7 +558,11 @@ _BUDGETS = [
 # picks, so the group's family counts and the tie-break names change from the
 # first obfuscation pick on, and the undealt draws gain the new families (233
 # of the 240 dealt units, 96 of them holding one of the 30; 176 of the 200
-# undealt draws, 54 holding one).
+# undealt draws, 54 holding one). Retuning heavy_encoding_weight from 0.2 to
+# 0.25 did not move it (0 of the 240 dealt units, 0 of the 200 undealt
+# draws): in groups of 30 units the slot takes its first pick early and its
+# next only after more units than the group has, so any weight from 0.2 to
+# 0.3 deals it on the same units (a weight of 1 moves 120 of the 240).
 _PINNED_DRAWS = "af558c1b95335e0bd4f8ac058beebf25b0e94f5be45d8865ad46a0f223c83623"
 
 

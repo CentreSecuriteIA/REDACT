@@ -46,9 +46,13 @@ def _at_weight(monkeypatch, weight: float) -> None:
 
 # --- the weight in the spec ----------------------------------------------------
 
-def test_the_packaged_weight_is_one_fifth_and_the_spec_reads_it():
-    assert load_spec()["heavy_encoding_weight"] == 0.2  # noqa: PLR2004
-    assert heavy_encoding_weight() == 0.2  # noqa: PLR2004
+def test_the_packaged_weight_is_one_quarter_and_the_spec_reads_it():
+    """0.25 since spec 1.4: 0.2 drew the ten 30 or 31 times in 3,000 default
+    attack units once the four language-mix families joined the obfuscation
+    picks, where the weight was set for about 40; 0.25 draws 37 to 40
+    (seeds 42 to 46, in one, three or ten groups)."""
+    assert load_spec()["heavy_encoding_weight"] == 0.25  # noqa: PLR2004
+    assert heavy_encoding_weight() == 0.25  # noqa: PLR2004
 
 
 def _spec_with(tmp_path, **changes):
@@ -114,7 +118,7 @@ def test_a_spec_without_the_weight_has_no_slot(without_the_slot):
 
 
 def test_the_slot_takes_the_spec_s_weight_times_encode_s(monkeypatch):
-    """The plan's dealers weigh the slot at 0.2, or 0.2 times the kind's
+    """The plan's dealers weigh the slot at 0.25, or 0.25 times the kind's
     ``encode`` weight."""
     weights = []
 
@@ -127,7 +131,7 @@ def test_the_slot_takes_the_spec_s_weight_times_encode_s(monkeypatch):
     simulate.plan_rows(simulate.inputs(4), all_techniques())
     simulate.plan_rows(simulate.inputs(4), all_techniques(),
                        family_weights={"encode": 2})
-    assert [w[HEAVY_ENCODINGS] for w in weights] == [0.2, 0.4]
+    assert [w[HEAVY_ENCODINGS] for w in weights] == [0.25, 0.5]
 
 
 def test_family_weights_cannot_name_the_slot():
