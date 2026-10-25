@@ -144,6 +144,49 @@ def extra_eval_techniques(config_dir: str | Path) -> list[str]:
     return sorted(pool(config_dir) - pool(None))
 
 
+def unseen_type_families(
+    config_dir: str | Path, dataset_type: str,
+) -> dict[str, list[str]]:
+    """The families the packaged dataset type ``dataset_type`` draws from that
+    it draws no technique of through ``config_dir``, per augmentation kind
+    that lacks one (``{"adversarial": [...], "natural": [...]}``, sorted):
+    what a copy of ``dataset_types/<type>.json`` made before the library
+    admitted them cannot draw. A copy of the first eval release's
+    ``eval.json`` lacks the families eval pool v2 admitted. The mirror
+    of :func:`extra_eval_techniques`, which names what a copy adds. Empty
+    when the folder holds no copy of the file, or one that reads as the
+    packaged file does (whatever its formatting).
+
+    Raises:
+        ValueError: The folder's type does not resolve, as a recipe of that
+            type would raise when it loads.
+    """
+    relative = f"dataset_types/{dataset_type}.json"
+    mine = Path(config_dir) / relative
+    if dataset_type not in DATASET_TYPES or not mine.is_file():
+        return {}
+    packaged = paths.configs_dir() / relative
+    if (json.loads(mine.read_text(encoding="utf-8"))
+            == json.loads(packaged.read_text(encoding="utf-8"))):
+        return {}
+    # Imported here: the recipe and the jailbreak package read this module.
+    from redact.jailbreak.augmentation import resolve
+    from redact.jailbreak.pool import technique_pool
+    from redact.jailbreak.technique import KINDS
+    from redact.recipe import load_dataset_type
+
+    def families(folder: str | Path | None, kind: str) -> set[str]:
+        base = load_dataset_type(dataset_type, folder)["augmentations"]
+        resolved = resolve(None, kind, base=base, config_dir=folder)
+        if not resolved:
+            return set()
+        return {family for fn in technique_pool(resolved) for family in fn.families}
+
+    unseen = {kind: sorted(families(None, kind) - families(config_dir, kind))
+              for kind in KINDS}
+    return {kind: lacked for kind, lacked in unseen.items() if lacked}
+
+
 def report_config_sources(
     config_dir: str | Path | None, *, verbose: bool = True,
     dataset_type: str | None = None,
@@ -156,7 +199,11 @@ def report_config_sources(
     run, the techniques its attacks draw through the folder beyond the
     packaged eval type's are named in a WARNING
     (:func:`extra_eval_techniques`): a copy made before the library grew
-    widens the eval pool the library holds.
+    widens the eval pool the library holds. For a ``dataset_type`` run whose
+    copy of ``dataset_types/<type>.json`` differs from the packaged file,
+    the families the packaged type draws from and the copy draws none of
+    are named in a WARNING (:func:`unseen_type_families`): a copy made
+    before the library admitted them narrows the pool.
 
     Returns:
         :func:`config_sources`, each list empty for no ``config_dir``.
@@ -191,4 +238,17 @@ def report_config_sources(
             "scaffold_setup(..., overwrite=True), which replaces your edits, or "
             "add them to its adversarial techniques.deny.",
             config_dir, len(extra), ", ".join(extra), _AUGMENTATIONS)
+    if dataset_type in DATASET_TYPES and (
+            unseen := unseen_type_families(config_dir, dataset_type)):
+        lacked = "; ".join(f"{kind}: {', '.join(families)}"
+                           for kind, families in unseen.items())
+        logger.warning(
+            "configs: dataset_types/%s.json in %s differs from the library's, and "
+            "through it the %s run draws no technique of these families, which "
+            "the library's %s type draws (%s). A copy made before the library "
+            "admitted them keeps the pool it had: delete the copy, write it again "
+            "with scaffold_setup(..., overwrite=True), which replaces your edits, "
+            "or copy the packaged lists into it; if you left them out on purpose, "
+            "nothing is wrong.",
+            dataset_type, config_dir, dataset_type, dataset_type, lacked)
     return found

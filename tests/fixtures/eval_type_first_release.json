@@ -1,0 +1,44 @@
+{
+  "_comment": "What dataset_type eval means: the clear ends of the constitution (harmful and benign) and a hard, clear corner of the attacks, on the harmful inputs only. Every input is explicit (inputs.axes.directness), since an implicit or euphemistic request is borderline by construction; the other axes keep their packaged weights. A recipe's stages replace these, its augmentations overlay these kind by kind, and its params file overlays these params key by key per stage.",
+  "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
+  "params": {
+    "constitution": {"entry_types": ["harmful", "benign"],
+                     "include_general_benign": true,
+                     "general_benign_categories": 10},
+    "inputs": {"entry_types": ["harmful", "benign"],
+               "axes": {"directness": {"explicit": 1, "implicit": 0, "euphemistic": 0}}},
+    "jailbreaks": {"seed": 43}
+  },
+  "augmentations": {
+    "adversarial": {
+      "entry_types": ["harmful"],
+      "translation": true,
+      "families": {
+        "allow": ["encode", "fsh", "dap", "framing", "structural", "ascii_art",
+                  "continuation"],
+        "deny": ["sensitive_words"]
+      },
+      "techniques": {
+        "allow": ["to_swahili", "to_thai", "to_khmer", "to_nepali",
+                  "to_zulu", "to_scots_gaelic", "to_bengali", "to_javanese",
+                  "to_refusal_then_comply", "to_use_past_tense"],
+        "deny": ["to_rot13", "to_rot18", "to_rot47", "to_separator",
+                 "to_leetspeak_basic", "to_leetspeak_intermediate",
+                 "to_leetspeak_advanced",
+                 "to_reversed_characters", "to_reversed_words",
+                 "to_reversed_word_order", "to_lookalike_letters",
+                 "to_zero_width_noise", "to_hex", "to_binary",
+                 "to_url_encoding", "to_html_entities", "to_base32",
+                 "to_base85", "to_caesar_cipher", "to_atbash",
+                 "to_fullwidth", "to_math_styled",
+                 "to_fsh_random_many", "to_fsh_selected_many",
+                 "to_dap_random_many", "to_dap_selected_many"]
+      },
+      "pure_only": false,
+      "family_weights": {"translation": 3},
+      "rounds": [{"exact_techniques": 1}, {"exact_techniques": 2}],
+      "allow_request_obfuscation": false
+    },
+    "natural": null
+  }
+}

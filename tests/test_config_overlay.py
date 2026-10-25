@@ -15,6 +15,7 @@ from redact.config_overlay import (
     report_config_sources,
     taxonomy_folder,
     unseen_natural_families,
+    unseen_type_families,
 )
 from redact.content_moderation import axes as A
 from redact.driver import read_record, run_pipeline
@@ -275,39 +276,81 @@ def test_a_stale_eval_copy_names_what_it_adds_to_the_eval_pool(tmp_path, caplog)
     assert "overwrite=True" in record.getMessage()
 
 
-def _eval_before_v2() -> dict:
-    """The packaged eval.json as a copy made before eval pool v2 held it: the
-    first pool's seven families, no answer language or suffix, the letter
-    spacing denied."""
-    data = json.loads((paths.configs_dir() / "dataset_types" / "eval.json")
-                      .read_text(encoding="utf-8"))
-    adversarial = data["augmentations"]["adversarial"]
-    adversarial["families"]["allow"] = [
-        "encode", "fsh", "dap", "framing", "structural", "ascii_art", "continuation"]
-    adversarial["techniques"]["allow"] = [
-        name for name in adversarial["techniques"]["allow"]
-        if not name.startswith("to_ask_answer_in_")]
-    adversarial["techniques"]["deny"] = [
-        *(name for name in adversarial["techniques"]["deny"]
-          if not name.startswith("to_adversarial_suffix_")), "to_letter_spacing"]
-    return data
+#: The eval.json of the first eval release (643c0ed), byte for byte: what
+#: scaffold_setup wrote into a config_dir before eval pool v2.
+_FIRST_RELEASE_EVAL = Path(__file__).parent / "fixtures" / "eval_type_first_release.json"
+
+#: The families eval pool v2 admitted, which that copy draws none of.
+_V2_FAMILIES = [
+    "answer_language", "asking", "distractor_prefix", "distractor_suffix",
+    "fake_turns", "guardrail_address", "impersonation", "indirect",
+    "neutral_container", "persona_template", "suffixes", "transliteration"]
 
 
-def test_a_copy_from_before_eval_pool_v2_keeps_the_first_pool_and_is_not_warned_about(
+def test_a_copy_from_the_first_eval_release_lacks_the_v2_families_and_is_warned_about(
         tmp_path, caplog):
-    """The check names what a copy draws beyond the packaged eval type, not
-    what it lacks, so a copy of the release before keeps the first 36
-    techniques silently (the release note says so)."""
+    """The released copy keeps the first pool and adds to_letter_spacing (its
+    encode family is allowed whole, and spec 1.4 added the technique there):
+    37 techniques, none beyond the packaged type's 126, so the check of what
+    a copy adds is silent; the check of what it lacks names the twelve
+    families eval pool v2 admitted, in one WARNING, on an eval run only."""
     from redact.jailbreak.pool import technique_pool
     from tests.jailbreak.test_eval_pairs import FIRST_POOL
 
-    _write(tmp_path / "dataset_types" / "eval.json", _eval_before_v2())
+    (tmp_path / "dataset_types").mkdir()
+    (tmp_path / "dataset_types" / "eval.json").write_bytes(_FIRST_RELEASE_EVAL.read_bytes())
     base = load_dataset_type("eval", tmp_path)["augmentations"]
     pool = technique_pool(resolve(None, "adversarial", base=base, config_dir=tmp_path))
-    assert sorted(fn.__name__ for fn in pool) == sorted(FIRST_POOL)
+    assert sorted(fn.__name__ for fn in pool) == sorted([*FIRST_POOL, "to_letter_spacing"])
     assert extra_eval_techniques(tmp_path) == []
+    assert unseen_type_families(tmp_path, "eval") == {"adversarial": _V2_FAMILIES}
     with caplog.at_level("WARNING", logger="redact.config_overlay"):
         report_config_sources(tmp_path, verbose=False, dataset_type="eval")
+    (record,) = caplog.records
+    assert record.levelname == "WARNING"
+    message = record.getMessage()
+    assert "dataset_types/eval.json" in message
+    assert f"(adversarial: {', '.join(_V2_FAMILIES)})" in message
+    assert "overwrite=True" in message
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="redact.config_overlay"):
+        report_config_sources(tmp_path, verbose=False, dataset_type="training")
+        report_config_sources(tmp_path, verbose=False)
+    assert caplog.records == []
+
+
+def test_a_training_copy_that_drops_a_natural_family_is_warned_about(tmp_path, caplog):
+    data = json.loads((paths.configs_dir() / "dataset_types" / "training.json")
+                      .read_text(encoding="utf-8"))
+    data["augmentations"] = {"natural": {"families": {"deny": ["noise"]}},
+                             "adversarial": {"families": {"deny": ["framing"]}}}
+    _write(tmp_path / "dataset_types" / "training.json", data)
+    assert unseen_type_families(tmp_path, "training") == {
+        "adversarial": ["framing"], "natural": ["noise"]}
+    assert unseen_type_families(tmp_path, "eval") == {}
+    with caplog.at_level("WARNING", logger="redact.config_overlay"):
+        report_config_sources(tmp_path, verbose=False, dataset_type="training")
+    (record,) = caplog.records
+    assert "(adversarial: framing; natural: noise)" in record.getMessage()
+
+
+def test_a_copy_that_lacks_no_family_is_not_warned_about(tmp_path, caplog):
+    """No copy; a copy as packaged (reformatted); a copy that differs but
+    draws every packaged family (a comment, a stale copy that only adds);
+    the eval copy of the growth test, which adds and lacks no family."""
+    assert unseen_type_families(tmp_path, "eval") == {}
+    for name in ("eval", "training"):
+        data = json.loads((paths.configs_dir() / "dataset_types" / f"{name}.json")
+                          .read_text(encoding="utf-8"))
+        _write(tmp_path / "dataset_types" / f"{name}.json", data)
+        assert unseen_type_families(tmp_path, name) == {}
+        _write(tmp_path / "dataset_types" / f"{name}.json",
+               {**data, "_comment": "my own copy"})
+        assert unseen_type_families(tmp_path, name) == {}
+    _write(tmp_path / "dataset_types" / "eval.json", _eval_before_growth())
+    assert unseen_type_families(tmp_path, "eval") == {}
+    with caplog.at_level("WARNING", logger="redact.config_overlay"):
+        report_config_sources(tmp_path, verbose=False, dataset_type="training")
     assert caplog.records == []
 
 

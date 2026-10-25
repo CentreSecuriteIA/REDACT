@@ -165,9 +165,10 @@ passes each stage, for the plan and for the run record's `serving`.
 | `config_file(relative, config_dir)` | `configs/<relative>`: the `config_dir`'s file when it has one, else the packaged one |
 | `taxonomy_folder(name, taxonomy_dir, config_dir)` | The folder a taxonomy is read from: `taxonomy_dir` when given, else `<config_dir>/taxonomy` when it has the file, else `None` (the packaged one) |
 | `config_sources(config_dir)` | The folder's files under the folders of `configs/`: `overridden`, `added` (read, with no packaged file of that name) and `ignored` |
-| `report_config_sources(config_dir, verbose=True, dataset_type=None)` | Warns about the `ignored` files and, with `verbose`, logs the files read; logs at INFO the families of `unseen_natural_families`; for an `eval` run, names the techniques of `extra_eval_techniques` in a WARNING |
+| `report_config_sources(config_dir, verbose=True, dataset_type=None)` | Warns about the `ignored` files and, with `verbose`, logs the files read; logs at INFO the families of `unseen_natural_families`; for an `eval` run, names the techniques of `extra_eval_techniques` in a WARNING; for a `dataset_type` run, names the families of `unseen_type_families` in a WARNING |
 | `unseen_natural_families(config_dir)` | The families the packaged `augmentations.json` allows the natural kind that the folder's copy does not: what a copy made before the library added them cannot draw |
-| `extra_eval_techniques(config_dir)` | The techniques the eval type's attacks draw through the folder that the packaged eval type's do not: what a copy of `eval.json` (or `augmentations.json`) made before the library added them lets into the pinned eval pool; not what a copy lacks (a copy made before eval pool v2 draws the first 36 and is not warned about) |
+| `extra_eval_techniques(config_dir)` | The techniques the eval type's attacks draw through the folder that the packaged eval type's do not: what a copy of `eval.json` (or `augmentations.json`) made before the library added them lets into the pinned eval pool; not what a copy lacks, which `unseen_type_families` names |
+| `unseen_type_families(config_dir, dataset_type)` | Per augmentation kind, the families the packaged dataset type draws from that it draws no technique of through the folder, when the folder's copy of `dataset_types/<type>.json` differs from the packaged file (parsed, so formatting does not count): what a copy made before the library admitted them cannot draw. The first eval release's copy lacks the twelve families eval pool v2 admitted |
 
 These files are read from the folder: `dataset_types/eval.json` and
 `training.json`, `taxonomy/<name>.json`, `jailbreak/augmentations.json`,
@@ -188,7 +189,8 @@ tied to code, so they come from the package only.
    warns about the files of the folder no run reads, with `verbose` logs
    those it reads, logs the packaged natural families its copy of
    `augmentations.json` does not allow, and, in an eval run, warns naming
-   the techniques its copies add to the eval pool.
+   the techniques its copies add to the eval pool, and warns naming the
+   families a differing copy of the run's dataset type file draws none of.
 4. `residency.loaded_engines()`: the engines loaded before the run.
    `capabilities.set_run_serving(...)`: each model's `backend_type` and
    `workers` for every client built during the run.

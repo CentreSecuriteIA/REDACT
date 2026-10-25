@@ -837,9 +837,13 @@ the jailbreak stage of an eval run with `resume=False` (the stage starts
 over). A plan of 300 inputs in three groups at seed 43, which a digest pins,
 deals 281 of its 300 round-1 rows another technique and all 300 round-2
 rows another pair. A `config_dir` copy of `eval.json` made before this
-release (what `scaffold_setup` wrote) keeps the first pool, 36 techniques,
-and nothing warns about it: the check names what a copy draws beyond the
-packaged type, not what it lacks. Write it again with
+release (what `scaffold_setup` wrote at the first eval release, `643c0ed`)
+keeps the first pool and adds `to_letter_spacing` (its `encode` family is
+allowed whole there, and spec 1.4 added the technique to it): 37
+techniques in 10 families, none beyond the packaged type's. An eval run
+names the twelve families it lacks in a WARNING (`configs:
+dataset_types/eval.json in ... differs from the library's, and through it
+the eval run draws no technique of these families ...`). Write it again with
 `scaffold_setup(..., overwrite=True)`, delete it if you did not change it, or
 copy the packaged adversarial lists into it
 ([refreshing a stale copy](#your-own-config-folder)).
@@ -1073,8 +1077,9 @@ a run you already have, and what you will see; each point has its note below.
   write it again with `scaffold_setup(..., overwrite=True)`
   ([refreshing a stale copy](#your-own-config-folder)); to keep your edits,
   add the 21 names to its adversarial `techniques.deny`. (Eval pool v2,
-  above, then admitted eleven families: a copy made before it draws the
-  first pool and is not warned about.) The packaged type
+  above, then admitted twelve families: a copy made before it draws the
+  first pool and `to_letter_spacing`, and an eval run names the families it
+  lacks in a WARNING.) The packaged type
   now names `to_use_past_tense` under `techniques.allow` and no longer
   allows the `temporal` family whole, so its pool, rounds and draws are the
   same but its `dataset_type_hash` in run records is another.
@@ -2245,11 +2250,17 @@ library adds to a family `dataset_types/eval.json` allows, and denies there
 to keep the eval pool pinned, is drawn through a copy made before it; an eval run
 says so in a WARNING, naming the techniques (`configs: the eval attacks of
 ... draw ... technique(s) the library's eval type does not ...`). The other
-way round nothing warns: a copy of `eval.json` made before eval pool v2
-keeps the first eval pool, 36 techniques in 10 families, where the packaged
-type draws 126 in 22 (the check names what a copy adds, not what it lacks),
-so its eval files are those of the release before (the [release
-note](#release-notes)). Add the
+way round, a copy of `dataset_types/eval.json` or `training.json` that
+differs from the packaged file and draws no technique of a family the
+packaged type draws is named in a WARNING, per kind (`configs:
+dataset_types/eval.json in ... differs from the library's, and through it
+the eval run draws no technique of these families ...`). A copy of
+`eval.json` from the first eval release (`643c0ed`) keeps the first eval
+pool and adds `to_letter_spacing`, 37 techniques in 10 families, where the
+packaged type draws 126 in 22, so its eval files are not those of eval
+pool v2 (the [release note](#release-notes)); the WARNING names the twelve
+families it lacks. A family you left out on purpose is named too, and
+nothing is wrong then. Add the
 names to the copy's natural `families.allow` (or its adversarial
 `techniques.deny`, or, for v2, copy the packaged adversarial lists into it),
 delete a copy you did not change, or

@@ -453,7 +453,10 @@ techniques in 22 families, where they drew 36 in 10
   those built after.
 - A `config_dir` written by `scaffold_setup` before the change holds a copy
   of the former `dataset_types/eval.json`, read in place of the packaged
-  one: its eval runs keep the first pool, and nothing warns. Write the
+  one: its eval runs keep the first pool and add `to_letter_spacing` (37
+  techniques), and a WARNING names the twelve families it lacks
+  (`configs: dataset_types/eval.json in ... differs from the library's
+  ...`). Write the
   folder again with `scaffold_setup(..., overwrite=True)`, delete the file,
   or copy the packaged adversarial lists into it.
 
@@ -633,6 +636,7 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `ValueError: .../jailbreak/augmentations.json: natural lacks [...]` (or `lacks natural_only_families`, `must be an object`, `gives exact_techniques`) | A `config_dir` copy of `augmentations.json` that cannot be read as a default section | Write the key as the library's file does, delete the copy, or `scaffold_setup(..., overwrite=True)`, which replaces your edits |
 | INFO `configs: the natural kind of jailbreak/augmentations.json in ... does not allow ..., which the library's allows ...` | A `config_dir` copy of `augmentations.json` made before the library allowed those natural families; its variations do not draw them | Add them to the copy's natural `families.allow`, delete the copy, or `scaffold_setup(..., overwrite=True)`, which replaces your edits ([configuration.md](configuration.md#your-own-config-folder)) |
 | WARNING `configs: the eval attacks of ... draw N technique(s) the library's eval type does not: ...` | An eval run whose `config_dir` holds a copy of `dataset_types/eval.json` made before the library added those techniques to a family it allows (21 for a copy of the previous release); the eval pool is wider than the pinned 126 | Delete the copy, `scaffold_setup(..., overwrite=True)`, which replaces your edits, or add the names to its adversarial `techniques.deny` ([configuration.md](configuration.md#release-notes)) |
+| WARNING `configs: dataset_types/<type>.json in ... differs from the library's, and through it the <type> run draws no technique of these families, which the library's <type> type draws (...)` | A run whose `config_dir` holds a copy of its dataset type file that differs from the packaged one and leaves out whole families the packaged type draws: a copy made before the library admitted them (the first eval release's `eval.json` lacks the twelve families of eval pool v2), or families you left out on purpose | If on purpose, nothing is wrong; else delete the copy, `scaffold_setup(..., overwrite=True)`, which replaces your edits, or copy the packaged lists into it ([configuration.md](configuration.md#your-own-config-folder)) |
 | WARNING `Variations: left out N benign or dual-use benign rows made with a technique the natural kind does not draw (...)` | `variations.csv` holds rows of a natural plan made before the `kinds` gate; the build leaves the benign ones out | Run the natural kind with `"resume": false` and build again |
 | `ValueError: The plan names the technique '...', which no registered technique implements` | A kept plan names a technique that was renamed or removed | Run the jailbreak stage with `"resume": false` |
 | `ValueError: Benign data not found and no client provided for generation ...` | `auto_generate_benign` is false and there is no benign file | Run once with it on, or set `benign_path` |
