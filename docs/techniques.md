@@ -971,7 +971,7 @@ file under `configs/jailbreak/requests/`. The `answer_language` techniques
 are generated from the rows of `configs/jailbreak/languages.json` marked
 `answer_language` ([the language table](#the-language-table)), so a new
 language is one row. `to_impersonate_good_person` has eight
-profession variants and `to_use_past_tense` four historical framings.
+profession variants and `to_use_past_tense` eight historical framings.
 
 Spec version 1.3 added three attack-only answer formats, eight variants
 each: `to_dual_answer` asks for two answers, one after the other,
@@ -1031,10 +1031,12 @@ directive and variant of a fault. A pool should hold at least 8 variants
 (a request or framing directive, a container, a fake turn, the payload split's reassembly, the
 word art's decoding, the wording's key and puzzles), 12 for a benign role, 20 for small talk, 6 for the
 persona templates' mechanics and 4 for an encoding's decode hints;
-11 of the 86 pools are below their floor today (the five
-framing, the four continuation, `refusal_then_comply` and `past_tense`, each
-with 4): the techniques of the eval pool, whose text is pinned until the next
-eval review. A test ratchets the rest
+None of the 86 pools is below its floor today. The pools of the eval-pool
+techniques that were (the five framing, the four continuation,
+`refusal_then_comply` and `past_tense`, each with 4) have 8 since the second
+eval release, which changed the eval text and pinned it again; the structural
+pools have 9 or 10. A test ratchets the counts and fails on a variant that
+repeats another in its pool
 ([extending.md](extending.md#add-variants-to-a-template-pool)).
 
 The info names the variant drawn: `variant=<name>` for the framing

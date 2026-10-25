@@ -5,7 +5,7 @@ draws from (``pool.variant_pools``, named ``<file>:<directive>``), its
 family, its count of variants on (weight above 0) and its floor, the fewest
 it should have, from :data:`FLOORS` by family. Its ``known_short`` list
 names the pools below their floor that are known to be: the gaps still to
-close.
+close (empty now: every pool is at its floor or above).
 
 The tests fail when:
 
@@ -35,6 +35,7 @@ from pathlib import Path
 
 import pytest
 
+from redact.jailbreak.directives import read_pools
 from redact.jailbreak.pool import variant_pools
 
 _FIXTURE = Path(__file__).parents[1] / "fixtures" / "variant_floor.json"
@@ -86,10 +87,11 @@ def _dumps(pools: dict[str, dict], known_short: list[str]) -> str:
     rows = ",\n".join(f"  {json.dumps(name)}: {json.dumps(entry)}"
                       for name, entry in pools.items())
     short = ",\n".join(f"  {json.dumps(name)}" for name in sorted(known_short))
+    listed = f"[\n{short}\n ]" if known_short else "[]"
     return (
         '{\n "_comment": "Regenerate with PYTHONPATH=src py -m '
         'tests.jailbreak.test_variant_floor; known_short is kept by hand.",\n'
-        f' "pools": {{\n{rows}\n }},\n "known_short": [\n{short}\n ]\n}}\n')
+        f' "pools": {{\n{rows}\n }},\n "known_short": {listed}\n}}\n')
 
 
 def lost(recorded: dict[str, dict], current: dict[str, dict]) -> list[str]:
@@ -165,6 +167,26 @@ def test_a_known_short_pool_is_still_short(recorded, current):
                     if name not in current
                     or current[name]["variants"] >= current[name]["floor"])
     assert closed == [], "take these pools out of known_short"
+
+
+def _text_of(variant: dict) -> str:
+    """What a variant writes around the prompt, read the way a person would
+    compare two: lower case, spaces squeezed, the prompt slot ignored."""
+    text = variant["template"] if "template" in variant else (
+        variant["prefix"] + "{prompt}" + variant["suffix"])
+    return " ".join(text.casefold().split())
+
+
+def test_no_pool_repeats_a_variant():
+    """A pool's variants are different texts: a variant that repeats another
+    (to the case and the spaces) adds nothing to the count the floor holds."""
+    repeated = {}
+    for name in sorted(variant_pools()):
+        file, directive = name.split(":", 1)
+        texts = [_text_of(v) for v in read_pools(file)[directive]]
+        if len(set(texts)) != len(texts):
+            repeated[name] = len(texts) - len(set(texts))
+    assert repeated == {}, "these pools repeat a variant (pool: repeats)"
 
 
 # --- the regeneration -----------------------------------------------------------

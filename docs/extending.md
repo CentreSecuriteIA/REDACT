@@ -537,8 +537,9 @@ pool of one variant named after the entry. `personas.json` and
    keeps as it is. A pool that reaches its floor must leave
    `known_short`: the test fails until it does. The list is kept by hand and
    nothing but review stops a new below-floor pool from being added to it, so
-   add one only on purpose. 11 of the 86 pools are on it today, in 4
-   families, all drawn by eval-pool techniques (whose text is pinned).
+   add one only on purpose. The list is empty today: all 86 pools are at
+   their floor or above. A pool also fails when one of its variants repeats
+   another (to the case and the spaces).
 
 A new directive is a new list in the file and a technique that names it
 with `@uses_pool` ([above](#add-a-jailbreak-technique)); its family needs

@@ -54,10 +54,10 @@ class TestIndividualFunctions:
         result, _ = to_complete_story(SAMPLE)
         assert len(result) > len(SAMPLE)
 
-    def test_fill_in_blank_appends(self):
+    def test_fill_in_blank_keeps_the_prompt_and_adds_to_it(self):
         random.seed(42)
         result, _ = to_fill_in_blank(SAMPLE)
-        assert result.startswith(SAMPLE)
+        assert SAMPLE in result and len(result) > len(SAMPLE)
 
     def test_continue_instructions_longer(self):
         random.seed(42)
