@@ -35,7 +35,7 @@ reads every rewrite the gate passes, for meaning.
 ``info`` is ``language=<name>``.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 
 from redact.content_moderation.feedback import with_feedback
 from redact.jailbreak.technique import (
@@ -50,7 +50,8 @@ from redact.llms.prompting import PromptTemplate, build_messages, load_prompt
 from . import langid
 from .scripts import script_share
 
-#: The second languages, one row per technique (name, slug, script, label).
+#: The second languages, one row per technique (name, slug, script, label,
+#: and optionally also_labels).
 LANGUAGES = data_rows("code_switch_languages.json")
 
 #: A code-switched text's length over the prompt's must lie within, to catch a
@@ -111,18 +112,29 @@ def _gate_windows(text: str) -> list[str]:
     return _windows(text, max(1, n // 2))
 
 
-def _latin_mix_reason(text: str, label: str, name: str) -> str | None:
+def second_labels(language: dict) -> frozenset[str]:
+    """The GlotLID labels a window of ``language`` (a row of
+    :data:`LANGUAGES`) may carry: its ``label`` and its optional
+    ``also_labels`` (Swahili's ``swc_Latn`` and ``swa_Latn``, as translation
+    accepts them)."""
+    return frozenset([language["label"], *language.get("also_labels", ())])
+
+
+def _latin_mix_reason(text: str, label: str | Collection[str],
+                      name: str) -> str | None:
     """Why a Latin-script code-switch is rejected by GlotLID over word
     windows (:func:`_gate_windows`), or ``None``; skipped (``None``) without
-    the detector."""
+    the detector. ``label`` is the second language's label, or the set of
+    them (:func:`second_labels`)."""
     if not langid.available():
         return None
     windows = _gate_windows(text)
     if not windows:
         return f"no {name}"
+    accepted = {label} if isinstance(label, str) else set(label)
     labels = [langid.detect(window) for window in windows]
     n = len(windows)
-    second = sum(lbl == label for lbl in labels)
+    second = sum(lbl in accepted for lbl in labels)
     english = sum(lbl == "eng_Latn" for lbl in labels)
     if second < 1 or second / n < MIN_WINDOW_SHARE:
         return f"no {name}"
@@ -148,9 +160,9 @@ def _code_gate(text: str, original: str, language: dict) -> str:
         low, high = LENGTH_RATIO_BAND
         if not low <= ratio <= high:
             return f"length_ratio={ratio:.2f}"
-    name, script, label = language["name"], language["script"], language["label"]
+    name, script = language["name"], language["script"]
     if script == "Latn":
-        return _latin_mix_reason(text, label, name) or ""
+        return _latin_mix_reason(text, second_labels(language), name) or ""
     share = script_share(text, script)
     low, high = SECOND_SCRIPT_BAND
     if share < low:

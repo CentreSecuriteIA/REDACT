@@ -11,7 +11,8 @@ by what GlotLID and the characters can tell: the base language's GlotLID
 labels and length band (GlotLID reads the base language, not the region), for
 Traditional Chinese a share of Traditional over Simplified characters, and for
 German (Switzerland) no sharp s (Swiss Standard German writes ``ss``). Region
-adherence itself is not checked here (see the blockers note).
+adherence itself is not checked here: GlotLID cannot tell it, and no native
+speaker checked any variant.
 
 German (Switzerland), ``de-CH``, is standard German as written in Switzerland,
 not the spoken Swiss German dialects (Schweizerdeutsch, GlotLID ``gsw_Latn``):
