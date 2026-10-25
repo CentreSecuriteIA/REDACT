@@ -69,8 +69,7 @@ class _Fake:
 
     def __call__(self, request) -> str:
         self.calls += 1
-        joined = " ".join(m["content"] for m in request.messages)
-        return self.verdict if "keep the exact meaning" in joined else self.gen_reply
+        return self.verdict if request.model == "chk" else self.gen_reply
 
 
 def test_a_romanization_the_check_accepts_returns_the_text_and_language(monkeypatch):

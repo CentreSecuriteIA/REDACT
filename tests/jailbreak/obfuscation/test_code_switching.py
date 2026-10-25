@@ -75,15 +75,14 @@ def test_without_glotlid_the_latin_mix_check_is_skipped(monkeypatch):
 
 class _Fake:
     """A blocking call for drive_sync: the gen reply for a generation request,
-    a verdict for a check request (told apart by the check's wording)."""
+    a verdict for a check request (told apart by the model it names)."""
 
     def __init__(self, gen_reply: str, verdict: str):
         self.gen_reply, self.verdict, self.calls = gen_reply, verdict, 0
 
     def __call__(self, request) -> str:
         self.calls += 1
-        joined = " ".join(m["content"] for m in request.messages)
-        return self.verdict if "keep the exact meaning" in joined else self.gen_reply
+        return self.verdict if request.model == "chk" else self.gen_reply
 
 
 def test_a_good_mix_the_check_accepts_returns_the_text_and_the_language():
