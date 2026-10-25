@@ -737,7 +737,12 @@ the default) and in `params["jailbreaks"]`.
   spelled in the Latin alphabet), each checked by a code gate (script share
   or GlotLID, and a length band) and then by the check model for meaning, a
   rejected rewrite made again once, so they add `meaning` to the spec's
-  checks and make a run with them plan the check model.
+  checks and make a run with them plan the check model. A code-switch needs
+  a prompt of two words or more: a fresh plan does not draw one for a
+  one-word input, and one a kept plan names is discarded without a call
+  (`reason=too short to mix`); a Latin-script rewrite of four words or
+  fewer is read by GlotLID in windows of one or two words, whose labels
+  are less reliable than those of the four-word windows of a longer one.
   `transliteration` is pure: the Latin letters written in Cyrillic, Greek,
   Devanagari or Arabic script by a fixed table, tagged `needs_latin`. The
   four families refuse what a translation refuses, `translation` and one
