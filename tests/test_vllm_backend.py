@@ -1087,7 +1087,10 @@ class TestVLLMAgenerate:
             "This model's maximum context length is 384 tokens. However, you "
             "requested 0 output tokens and your prompt contains at least 385 "
             "input tokens", parameter="prompt"),
-    ], ids=["at_the_limit", "older_vllm", "by_message"])
+        # The parameter alone, whatever the message says.
+        VLLMValidationError("Too many tokens for this model.",
+                            parameter="input_tokens", value=9000),
+    ], ids=["at_the_limit", "older_vllm", "by_message", "by_parameter"])
     def test_a_prompt_that_fills_the_context_raises_prompt_too_long(
             self, monkeypatch, events, error):
         """A prompt of exactly ``max_model_len`` tokens leaves no room for a
