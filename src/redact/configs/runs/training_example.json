@@ -1,5 +1,5 @@
 {
-  "_comment": "Its attacks translate on translategemma-27b, a local vLLM model (one GPU); venice-uncensored-fp8 as gen shares its card. Without a GPU, set \"translation\": false in augmentations.adversarial, or name the hosted deepseek-v3.2 for translation.",
+  "_comment": "Its paraphrase stage runs humanizer-12b and its attacks translate on translategemma-27b, both local vLLM models (a GPU). To serve gen and check there too, name venice-uncensored-fp8 for gen; paraphrase_check stays on the hosted default unless it names that model too. Without a GPU, take paraphrase out of stages, and set \"translation\": false in augmentations.adversarial or name the hosted deepseek-v3.2 for translation.",
   "dataset_type": "training",
   "data_dir": "./runs/training_example",
   "models": {
