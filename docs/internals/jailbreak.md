@@ -14,7 +14,9 @@ the technique names are in [techniques.md](../techniques.md).
   layers, complexities and compatibility rules. Importing `redact.jailbreak`
   fails when the spec and the registered functions name different
   techniques. A family whose techniques come one per row of a data file
-  (the two language families, from `languages.json`) is a `generators`
+  (the two language families, from `languages.json`, and the published
+  adversarial suffixes of `suffixes`, from `obfuscation/suffix_strings.json`)
+  is a `generators`
   entry, which `load_spec` expands into technique entries, so every reader
   sees one `techniques` dict; the family's module builds its functions from
   the same rows ([extending.md](../extending.md#add-a-jailbreak-technique)).
@@ -37,7 +39,7 @@ the technique names are in [techniques.md](../techniques.md).
 |---|---|
 | `technique.py` | The technique contract, `load_spec` and `read_spec` (the spec, its generators expanded), `data_rows`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds`, `FIRST_VERSION`, `version_key`, `decode_hint_rate` (the spec's share of hinted encodings written with a hint), `heavy_encoding_weight` (the spec's weight of the heavy full-text encodings' slot) |
 | `rewrite/`, `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` and `smalltalk.py` each hold both families of their pair), each with a getter; `get_all_rewrite_functions` (16), `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage; `all_techniques` joins the rewrite layer last, so the others keep their registry order. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)`; the fake turns (`manipulation/fake_turns.py`) need none. `hacking/persona_templates.py` checks its persona frames at import (`check_pools`): a frame is its technique's own text, and only the mechanics are its `variant_pool` |
-| `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation`, `uses_check` (whether a pool holds a technique the check model checks), `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
+| `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation`, `uses_check` (whether a pool holds a technique the check model checks), `uses_check_model` (that, or a technique that needs the benign data, whose pairs the check model reads), `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates`, `after_request_obfuscation` (what may still join once a pick is the request obfuscation) |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family`, `deal_key` (the name a dealer counts a technique under), `is_heavy_encoding`, `REQUEST_SCOPE`, `HEAVY_ENCODINGS` |
@@ -341,8 +343,8 @@ keeps the rewrite layer out of a count round.
 
 Every pick is **family first** (`_pick_by_family`): a family, then a
 technique within it, both dealt when the plan passes its dealer
-([balanced dealing](#balanced-dealing)). The 23 translation languages are
-one choice, not 23.
+([balanced dealing](#balanced-dealing)). The 24 translation languages are
+one choice, not 24.
 The rules are those of [techniques.md](../techniques.md#compatibility-rules);
 among them, a translation is never paired with `sensitive_words`, `wording`,
 `tokenbreak` or `word_art`, whose marking call mostly fails on translated

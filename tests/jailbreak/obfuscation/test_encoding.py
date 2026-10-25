@@ -458,6 +458,26 @@ SCRIPT_OF = {
 }
 
 
+def _keeps_its_characters(fn, text: str) -> bool:
+    """Whether ``fn`` gives back every non-ASCII character of ``text``, in
+    order, and no other, without rejecting it: what it changed, if
+    anything, is ASCII only."""
+    import inspect
+
+    from redact.jailbreak.technique import is_discarded
+    from redact.llm_pipeline import drive_sync
+
+    if inspect.isgeneratorfunction(fn):
+        result, info = drive_sync(fn(text), lambda request: "none")
+    else:
+        result, info = fn(text)
+
+    def beyond_ascii(s: str) -> list[str]:
+        return [c for c in s if not c.isascii()]
+
+    return beyond_ascii(result) == beyond_ascii(text) and not is_discarded(info)
+
+
 def _leaves_unchanged(fn, text: str) -> bool:
     """Whether ``fn`` gives ``text`` back unchanged, and does not reject it.
 
@@ -501,17 +521,27 @@ class TestLatinOnly:
         assert set(SCRIPT_OF) == set(NON_LATIN)
         assert written - {"Latn"} == set(SCRIPT_OF.values())
 
-    def test_a_latin_only_technique_leaves_every_other_script_unchanged(self):
+    def test_a_latin_only_technique_encodes_no_character_of_another_script(self):
+        """Every tagged technique gives each sample's characters back, in
+        their order, and adds none of its own but ASCII ones: morse's
+        spaces and ``/``."""
         tagged = [fn for fn in self._encodings() if fn.needs_latin]
-        assert len(tagged) == 26     # noqa: PLR2004
+        assert len(tagged) == 28     # noqa: PLR2004
         for fn in tagged:
             for language, text in NON_LATIN.items():
-                assert _leaves_unchanged(fn, text), (fn.__name__, language)
+                assert _keeps_its_characters(fn, text), (fn.__name__, language)
 
-    def test_every_technique_that_leaves_them_unchanged_is_marked_but_braille(self):
-        """Braille passes another script through too, but is in the eval
-        pool, which is pinned: marking it would change the eval draws."""
+    def test_every_technique_that_leaves_them_unchanged_is_marked(self):
+        """And every marked one leaves them unchanged but morse, which
+        spaces their characters out, as it spaces its codes."""
         unchanged = {fn.__name__ for fn in self._encodings()
                      if all(_leaves_unchanged(fn, text) for text in NON_LATIN.values())}
         tagged = {fn.__name__ for fn in self._encodings() if fn.needs_latin}
-        assert unchanged == tagged | {"to_braille"}
+        assert "to_braille" in unchanged
+        assert unchanged == tagged - {"to_morse"}
+
+    def test_morse_spaces_another_script_out_without_encoding_it(self):
+        from redact.jailbreak.obfuscation.encoding import to_morse
+
+        assert to_morse("привет один") == ("п р и в е т / о д и н", "")
+        assert not _leaves_unchanged(to_morse, NON_LATIN["Russian"])

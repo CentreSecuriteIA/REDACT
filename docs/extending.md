@@ -309,7 +309,7 @@ contract.
      names the natural kind draws by default, and
      `tests/jailbreak/test_pool.py` fails until you decide: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.
-     The same file checks the attack pool's 226 techniques in 29 families.
+     The same file checks the attack pool's 251 techniques in 29 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
      `continuation`), so a technique added to one of them joins
@@ -394,21 +394,22 @@ The `translation` and `answer_language` techniques are generated from
 `configs/jailbreak/languages.json`, one row per language:
 
 1. **Add a row**, for example
-   `{"name": "Welsh", "slug": "welsh", "complexity": 2, "script": "Latn", "translation": false, "answer_language": true, "since": "1.4"}`:
+   `{"name": "Welsh", "slug": "welsh", "complexity": 2, "script": "Latn", "translation": false, "answer_language": true, "since": "1.5"}`:
    `name` as prompts and infos write it, `slug` the end of its technique
    names (`to_welsh`, `to_ask_answer_in_welsh`), `complexity` by resource
    tier (0 high, 1 mid, 2 low), `script` the ISO 15924 code it is written
    in, and which families it joins. A row's place in the file is its
    technique's place in its family, which the draws follow: append it, since
    moving a row changes which language a seed draws.
-2. **Date it**: move the spec's `version` up (to `"1.4"`, the example's
-   `since`, when the spec is at 1.3) and give the row that `since`, so a
+2. **Date it**: move the spec's `version` up (to `"1.5"`, the example's
+   `since`, when the spec is at 1.4) and give the row that `since`, so a
    jailbreak plan kept from before resumes with a WARNING. A language
    already in the table that gains a family (an answer language measured as a
    translation) keeps its `since` and gets `translation_since` for the new
    technique, which the spec's `version` then dates.
 3. **For a translation**, add the language's ISO 639-1 code (or its name, when
-   the translation model takes it only by name, as Hmong), its accepted
+   the translation model takes it only by name, as Hmong, or measured
+   better by name, as Yoruba), its accepted
    GlotLID labels and its median length ratio, measured with the
    translation model on a parallel corpus, to `LANGUAGE_CODES`,
    `ACCEPTED_LABELS` and `MEDIAN_RATIO` in `obfuscation/translation.py`,
@@ -417,15 +418,39 @@ The `translation` and `answer_language` techniques are generated from
    added (Hmong, Guarani, Chinese, Hindi, Yoruba, Amharic), the measurement
    was made on a GPU pod on 2026-10-22 and four became translations in spec
    1.3: their rows say `"translation": true, "translation_since": "1.3"` and
-   they have those three entries. Guarani (it loops on a fifth of its
-   sentences) and Yoruba (the judge rejects 41% of its calls) stay answer
-   languages only.
+   they have those three entries. Yoruba followed in spec 1.4
+   (`"translation_since": "1.4"`), on watch: the judge rejects 41% of its
+   calls, so its technique discards about one text in thirteen. Guarani (it
+   loops on a fifth of its sentences) stays an answer language only.
 4. **Then as for any technique**: regenerate the registry fixture and, for
    an answer language (a template technique), the template draws; decide the
    natural pool (an answer language joins it: add its name to
    `tests/fixtures/natural_pool.json`), and update the counts in the docs.
    The eval type's translation allow list names its languages, so a new
    translation is not drawn there.
+
+### Add a published adversarial suffix
+
+The `suffixes` family's published suffixes are generated from
+`configs/jailbreak/obfuscation/suffix_strings.json` (the spec's `suffixes`
+generator), one row per string, after the family's four noise suffixes,
+which stay in code:
+
+1. **Add a row**: `slug` (lower-case letters, digits and underscores, the end
+   of its technique's name `to_adversarial_suffix_<slug>`, none of the noise
+   suffixes' `punctuation`, `fragments`, `unicode`, `emoji`), `suffix` (the
+   string as published), `source` (the paper, its arXiv id or the repository
+   it is from, without a `;`), `optimized_against` (the model or models), and
+   `since`, the spec version that adds it; `notes`, `complexity` (default 1)
+   and `deprecated` are optional. `obfuscation/suffixes.py` refuses a row
+   without one of the five at import, naming it. Append the row: its place is
+   its technique's place in the family.
+2. **Date it** as a language: move the spec's `version` up and give the row
+   that `since`.
+3. **Then as for any technique**: regenerate the registry fixture and update
+   the counts in the docs. The technique is attack only (the generator's
+   `kinds`; a row's own `kinds` are not read), so the natural pool does not
+   move, and the eval type's allow list names no suffix.
 
 ### Add a rewrite technique
 

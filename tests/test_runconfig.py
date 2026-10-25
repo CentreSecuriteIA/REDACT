@@ -1542,15 +1542,24 @@ def test_translation_is_planned_when_a_kind_switches_it_on(kind):
 
 
 def test_a_separate_check_model_is_planned_for_the_attacks_only_when_they_check():
-    """The eval type's attacks draw no technique a check model checks (no
-    typos, scenario or rewrite), so the jailbreak stage plans no check model;
-    the inputs stage still does, and the training type's attacks do."""
+    """The check model reads a technique's reply (typos, scenario, rewrite)
+    and each benign pair the stage generates for fsh and dap. The eval type's
+    attacks draw no technique a check model checks, but fsh and dap: the
+    jailbreak stage plans the check model; without fsh and dap it plans none.
+    The inputs stage still does, and the training type's attacks do."""
+    import copy
+
     from redact.driver import _stage_models
     from redact.recipe import load_dataset_type
 
     models = _models(gen="venice-uncensored-fp8", check="llama-3.2-3b-debug")
     evals = load_dataset_type("eval")["augmentations"]
     assert _stage_models(models, ["jailbreaks"], evals) == [
+        "venice-uncensored-fp8", "llama-3.2-3b-debug", "translategemma-27b"]
+    unprimed = copy.deepcopy(evals)
+    unprimed["adversarial"]["families"]["allow"].remove("fsh")
+    unprimed["adversarial"]["families"]["allow"].remove("dap")
+    assert _stage_models(models, ["jailbreaks"], unprimed) == [
         "venice-uncensored-fp8", "translategemma-27b"]
     assert "llama-3.2-3b-debug" in _stage_models(models, ["inputs"], evals)
     training = load_dataset_type("training")["augmentations"]

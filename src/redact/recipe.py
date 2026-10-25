@@ -507,14 +507,15 @@ def resolve_role(
     :func:`augmentations_of` reads) draws a translation technique; not asked
     when ``augmentations`` is None. In the ``jailbreaks`` ``stage``,
     ``check`` is no model either when no kind draws a technique whose reply
-    a check model checks (:func:`~redact.jailbreak.pool.uses_check`), so a
-    separate check model is neither planned nor loaded for that stage.
+    a check model checks, nor one that needs the benign data, whose pairs it
+    checks (:func:`~redact.jailbreak.pool.uses_check_model`), so a separate
+    check model is neither planned nor loaded for that stage.
 
     Raises:
         KeyError, ValueError: No model is registered for the role.
     """
     from .content_moderation.paraphrase import paraphrase_pool
-    from .jailbreak.pool import technique_pool, uses_check, uses_translation
+    from .jailbreak.pool import technique_pool, uses_check_model, uses_translation
     from .llms.model_config import default_model_for_role
 
     def drawn(uses) -> bool:
@@ -526,7 +527,7 @@ def resolve_role(
         return paraphrase_pool(name)
     if role == "check":
         if (stage == "jailbreaks" and augmentations is not None
-                and not drawn(uses_check)):
+                and not drawn(uses_check_model)):
             return []
         return [name] if name else resolve_role(models, "gen", augmentations)
     if role == "translation" and augmentations is not None and not drawn(

@@ -12,6 +12,7 @@ library itself retired.
 """
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
@@ -263,7 +264,7 @@ def test_the_rules_id_moves_with_a_rule_not_with_the_pool_order_or_a_comment(
 
 
 @pytest.mark.parametrize(("name", "tag", "value"), [
-    ("to_morse", "needs_latin", True),
+    ("to_base64", "needs_latin", True),
     ("to_thai", "script", T.LATIN),
 ], ids=["needs_latin", "script"])
 def test_the_rules_id_leaves_out_the_tags_no_rule_reads(monkeypatch, name, tag, value):
@@ -273,11 +274,34 @@ def test_the_rules_id_leaves_out_the_tags_no_rule_reads(monkeypatch, name, tag, 
     import redact.jailbreak.plan as JP
 
     every = registry(all_techniques())
-    pool = [every["to_morse"], every["to_thai"]]
+    pool = [every["to_base64"], every["to_thai"]]
     before = JP.rules_id(pool, rounds=_BUDGET)
     assert getattr(every[name], tag) != value
     monkeypatch.setattr(every[name], tag, value)
     assert JP.rules_id(pool, rounds=_BUDGET) == before
+
+
+def test_a_family_s_description_changes_no_rule_draw_or_pool(monkeypatch):
+    """A family's ``description`` is documentation: with every family's
+    taken out, the rules id, a dealt plan and the default pools are as they
+    were."""
+    import redact.jailbreak.plan as JP
+    from tests.jailbreak import simulate
+
+    pool = all_techniques()
+
+    def observed():
+        return (JP.rules_id(pool, rounds=[*_BUDGET, *_COUNT]),
+                simulate.deal(pool, 30, groups=2, seed=1, rounds=[*_BUDGET, *_COUNT]),
+                [fn.__name__ for kind in ("adversarial", "natural")
+                 for fn in technique_pool(resolve(None, kind))])
+
+    before = observed()
+    families = T.load_spec()["families"]
+    assert sum("description" in family for family in families.values()) > 30  # noqa: PLR2004
+    for family in families.values():
+        monkeypatch.delitem(family, "description", raising=False)
+    assert observed() == before
 
 
 def test_the_rules_id_moves_with_the_obfuscations_kept_from_manipulation(monkeypatch):
@@ -591,6 +615,16 @@ _SPEC_1_2 = json.loads((Path(__file__).parents[1] / "fixtures" / "spec_1_2_pools
 _FOUR_TRANSLATIONS = ["to_amharic", "to_chinese", "to_hindi", "to_hmong"]
 
 
+#: What spec 1.4 added to the attack pool, by family: twelve persona
+#: templates, the 24 published suffixes and the Yoruba translation.
+SPEC_1_4_ADDED = {"persona_template": 12, "suffixes": 24, "translation": 1}
+
+
+def _by_family(names: list[str]) -> dict[str, int]:
+    every = registry(all_techniques())
+    return dict(Counter(every[name].families[0] for name in names))
+
+
 def _growth_since_1_2(key: str, pool: list) -> tuple[list[str], list[str]] | None:
     """What :func:`~redact.jailbreak.pipeline._library_change` finds in
     ``pool`` against the pool a spec 1.2 plan recorded for ``key``."""
@@ -598,11 +632,11 @@ def _growth_since_1_2(key: str, pool: list) -> tuple[list[str], list[str]] | Non
     return JPipe._library_change(made_with, pool, registry(all_techniques()))
 
 
-def test_an_attack_plan_of_spec_1_2_finds_specs_1_3_and_1_4_techniques_as_growth():
-    """The attack pool of a plan made at 1.2 differs from today's by 48 names,
+def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
+    """The attack pool of a plan made at 1.2 differs from today's by 73 names,
     none retired: 36 dated 1.3 (the four translations switched on among them)
-    and the 12 persona templates dated 1.4. The library added them after the
-    plan, so the plan is kept and the run warns."""
+    and the 37 dated 1.4 (:data:`SPEC_1_4_ADDED`). The library added them
+    after the plan, so the plan is kept and the run warns."""
     added, retired = _growth_since_1_2(
         "adversarial", technique_pool(resolve(None, "adversarial")))
     by_name = registry(all_techniques())
@@ -611,10 +645,9 @@ def test_an_attack_plan_of_spec_1_2_finds_specs_1_3_and_1_4_techniques_as_growth
         for version in {by_name[name].since for name in added}}
     assert retired == []
     assert {version: len(names) for version, names in by_version.items()} == {
-        "1.3": 36, "1.4": 12}
+        "1.3": 36, "1.4": 37}
     assert set(_FOUR_TRANSLATIONS) <= set(by_version["1.3"])
-    assert {by_name[name].families[0] for name in by_version["1.4"]} == {
-        "persona_template"}
+    assert _by_family(by_version["1.4"]) == SPEC_1_4_ADDED
 
 
 def test_a_natural_plan_of_spec_1_2_finds_the_urgent_ask_as_the_library_s_growth():
@@ -622,6 +655,78 @@ def test_a_natural_plan_of_spec_1_2_finds_the_urgent_ask_as_the_library_s_growth
     technique it added there."""
     pool = technique_pool(resolve(None, "natural"))
     assert _growth_since_1_2("natural", pool) == (["to_ask_with_urgency"], [])
+
+
+#: The pools of the kinds at the released spec 1.3, as a plan made then
+#: recorded them (``fixtures/spec_1_3_pools.json``).
+_SPEC_1_3 = json.loads((Path(__file__).parents[1] / "fixtures" / "spec_1_3_pools.json")
+                       .read_text(encoding="utf-8"))
+
+
+def _growth_since_1_3(key: str, pool: list) -> tuple[list[str], list[str]] | None:
+    """What :func:`~redact.jailbreak.pipeline._library_change` finds in
+    ``pool`` against the pool a spec 1.3 plan recorded for ``key``."""
+    made_with = {"spec_version": "1.3", "pool": _SPEC_1_3[key]}
+    return JPipe._library_change(made_with, pool, registry(all_techniques()))
+
+
+def test_an_attack_plan_of_spec_1_3_finds_what_spec_1_4_added_as_growth():
+    """Spec 1.4 switched Yoruba's translation on and added twelve persona
+    templates and the 24 published suffixes: a plan kept from 1.3 finds the
+    37 as the library's growth, retiring nothing, so the plan is kept and the
+    run warns."""
+    added, retired = _growth_since_1_3(
+        "adversarial", technique_pool(resolve(None, "adversarial")))
+    assert "to_yoruba" in added and retired == []
+    assert {registry(all_techniques())[name].since for name in added} == {"1.4"}
+    assert _by_family(added) == SPEC_1_4_ADDED
+
+
+def test_a_resume_of_a_spec_1_3_plan_warns_that_the_library_added_yoruba(
+        tmp_path, monkeypatch, caplog):
+    """A kept attack plan whose plan file says 1.3 and whose pool lacks
+    Yoruba resumes with one WARNING naming it, and runs as planned."""
+    out = tmp_path / "jb.csv"
+    kind = {"translation": True, "techniques": {"allow": ["to_french", "to_yoruba"]},
+            "rounds": [{"exact_techniques": 1}]}
+    with monkeypatch.context() as patch:
+        patch.setattr(JPipe, "drive_units", lambda units, **kwargs: None)
+        generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                            auto_generate_benign=False, verbose=False,
+                            augmentation={"adversarial": kind, "natural": None})
+    manifest = Manifest.sidecar(out)
+    plan = [{**row, "combination": ["to_french"]} for row in manifest.load()]
+    manifest.write(plan)
+    import redact.jailbreak.plan as JP
+
+    record = read_plan(manifest.path)
+    pool = [name for name in record["pool"] if name != "to_yoruba"]
+    every = registry(all_techniques())
+    # As a 1.3 plan file recorded it: its pool, and the rules id of that pool.
+    _rewrite_plan_file(out, spec_version="1.3", pool=pool, rules=JP.rules_id(
+        [every[name] for name in pool], rounds=record["rounds"]))
+    monkeypatch.setattr(JPipe, "drive_units", lambda units, **kwargs: None)
+    with caplog.at_level("WARNING", logger="redact.jailbreak.pipeline"):
+        generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                            auto_generate_benign=False, verbose=False,
+                            augmentation={"adversarial": kind, "natural": None})
+    (warning,) = [r.getMessage() for r in caplog.records
+                  if r.name == "redact.jailbreak.pipeline"]
+    assert f"(spec version 1.3, now {NOW})" in warning
+    assert "added ['to_yoruba'] and retired []" in warning
+    assert "changed the rules" not in warning
+    assert Manifest.sidecar(out).load() == plan
+
+
+@pytest.mark.parametrize("key", ["natural", "eval:adversarial"])
+def test_a_natural_or_eval_plan_of_spec_1_3_finds_no_growth(key):
+    """The natural kind leaves translation off, and the eval type's pool is
+    pinned: Yoruba joins neither."""
+    from redact.recipe import load_dataset_type
+
+    section = (resolve(None, "natural") if key == "natural" else resolve(
+        load_dataset_type("eval")["augmentations"], "adversarial"))
+    assert _growth_since_1_3(key, technique_pool(section)) == ([], [])
 
 
 def test_an_eval_plan_of_spec_1_2_finds_no_growth():

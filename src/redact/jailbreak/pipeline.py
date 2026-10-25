@@ -83,7 +83,8 @@ def run_augmentation(
     gives them (one round of the sampler's defaults when None);
     ``family_weights`` and ``layer_rates``
     go to the dealing of :func:`plan_run`. ``check`` checks what a
-    technique's model writes (the typo check), ``client`` when None;
+    technique's model writes (the typo check) and each benign pair the
+    stage generates, ``client`` when None;
     translation keeps its own checkers. ``label`` is the progress label, the
     internals-capture root, and part of the techniques' random seed and of an
     error row's id. With ``accept_noop`` False, a row whose text
@@ -260,7 +261,7 @@ def run_augmentation(
     benign_data = None
     if needs_benign:
         benign_data = get_or_generate_benign_data(
-            client=client if auto_generate_benign else None,
+            client=client if auto_generate_benign else None, check=check,
             cache_path=benign_path, verbose=verbose,
             taxonomy=benign_taxonomy, taxonomy_dir=taxonomy_dir,
             prompt_dir=prompt_dir, batch_size=batch_size)

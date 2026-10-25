@@ -166,35 +166,36 @@ def test_the_default_variation_pool_is_the_72_pinned_natural_techniques():
         "suffixes"}
 
 
-def test_the_default_attack_pool_is_226_techniques_in_29_families():
+def test_the_default_attack_pool_is_251_techniques_in_29_families():
     """Every active technique but casual writing and the natural-only
-    families: the 23 translations included, now the packaged adversarial
+    families: the 24 translations included, now the packaged adversarial
     kind has its translation switch on (the four spec 1.3 ones are Hmong,
-    Chinese, Hindi and Amharic); the seven spec 1.1 retired left out,
-    the fifteen spec 1.2 encodings, the twelve spec 1.2 noise techniques, the
+    Chinese, Hindi and Amharic, the spec 1.4 one Yoruba); the seven spec 1.1
+    retired left out, the fifteen spec 1.2 encodings, the twelve spec 1.2 noise techniques, the
     six spec 1.2 neutral containers, the six spec 1.2 answer languages, the
     four spec 1.2 many-shot fsh and dap variants, the eleven spec 1.3
     persona templates, the three spec 1.3 answer formats, the three spec 1.3
     fake turns, the seven spec 1.3 members of the thin request families and
     the two spec 1.3 payload splits, the spec 1.3 word art and the three
-    spec 1.3 persona archetypes, the two spec 1.3 wording techniques and the
-    twelve spec 1.4 persona templates in.
+    spec 1.3 persona archetypes, the two spec 1.3 wording techniques, the
+    twelve spec 1.4 persona templates and the 24 spec 1.4 published suffixes
+    in.
     Small talk and the benign roles leave it as it was."""
     pool = technique_pool(resolve(None, "adversarial"))
-    assert len(pool) == 226     # noqa: PLR2004
+    assert len(pool) == 251     # noqa: PLR2004
     assert len({fn.families[0] for fn in pool}) == 29     # noqa: PLR2004
 
 
 def test_the_rewrite_layer_is_off_by_default_and_layers_allow_adds_its_16_techniques():
     """The spec has the layer off by default, so the default attack pool is
-    the 226 and no other pool holds a rewrite technique; a section that allows
+    the 251 and no other pool holds a rewrite technique; a section that allows
     the layer gains the 16 of its three families, and nothing else leaves or
     joins."""
     default = technique_pool(resolve(None, "adversarial"))
     allowed = technique_pool(resolve(
         {"adversarial": {"layers": {"allow": ["rewrite"]}}}, "adversarial"))
     gained = [fn for fn in allowed if fn not in default]
-    assert (len(default), len(allowed), len(gained)) == (226, 242, 16)   # noqa: PLR2004
+    assert (len(default), len(allowed), len(gained)) == (251, 267, 16)   # noqa: PLR2004
     assert gained == _rewrites(all_techniques())
     assert {fn.families[0] for fn in gained} == {
         "persuasion", "tense_rewrite", "model_distractors"}
@@ -222,7 +223,7 @@ def test_the_natural_kind_draws_only_what_the_spec_marks_natural():
     # Translation is natural too, when the kind's switch is on.
     pool = technique_pool(resolve({"natural": {"translation": True}}, "natural"))
     assert sorted(fn.__name__ for fn in pool) == sorted(natural)
-    assert (len(NATURAL_POOL), len(pool)) == (72, 95)     # noqa: PLR2004
+    assert (len(NATURAL_POOL), len(pool)) == (72, 96)     # noqa: PLR2004
     # A family allowed whole gives its natural techniques only.
     typos = resolve({"natural": {"families": {"allow": ["typos"]},
                                  "techniques": {"allow": None}}}, "natural")
@@ -392,6 +393,20 @@ def test_a_spec_version_that_is_not_dotted_whole_numbers_raises_at_tagging(
         monkeypatch):
     with pytest.raises(ValueError, match="the version of the spec must be"):
         _tag_base64(monkeypatch, spec_version="1.1-beta")
+
+
+def test_no_technique_is_dated_after_the_spec_s_version():
+    """The spec's ``version`` moves up with each change that adds or retires
+    a technique, which carries it: a technique dated later than the spec
+    would read as the library's growth to a plan made today."""
+    from redact.jailbreak.technique import load_spec, version_key
+
+    now = version_key(load_spec()["version"])
+    dates = {fn.__name__: version
+             for fn in all_techniques()
+             for version in (fn.since, fn.deprecated) if version is not None}
+    assert [name for name, version in dates.items() if version_key(version) > now] == []
+    assert max(version_key(version) for version in dates.values()) == now
 
 
 def test_versions_compare_as_whole_numbers():

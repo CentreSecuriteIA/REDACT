@@ -201,7 +201,13 @@ _MORSE_MAP = {
 
 
 def to_morse(prompt: str) -> tuple[str, str]:
-    """Convert string to Morse code."""
+    """Convert string to Morse code: each Latin letter, ASCII digit and
+    space (``/``) to its code, the codes joined by spaces.
+
+    A character with no code (one of another script, a digit of its own,
+    most punctuation) stays as it is, spaced like a code: a text of another
+    script comes back spaced out, not encoded. So it is tagged
+    ``needs_latin``, as the Latin-only ciphers are."""
     return " ".join(_MORSE_MAP.get(c.upper(), c) for c in prompt), ""
 
 
@@ -218,7 +224,11 @@ _BRAILLE_MAP = {
 
 
 def to_braille(prompt: str) -> tuple[str, str]:
-    """Convert string to Braille."""
+    """Convert string to Braille: each Latin letter to its cell.
+
+    Every other character (a digit, punctuation, a letter of another script)
+    stays as it is: a text of another script comes back unchanged. So it is
+    tagged ``needs_latin``, as the Latin-only ciphers are."""
     return "".join(_BRAILLE_MAP.get(c.lower(), c) for c in prompt), ""
 
 

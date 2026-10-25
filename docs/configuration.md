@@ -332,7 +332,13 @@ ruled distinct: who writes a message is not a role or scenario the message
 sets up, so the writer axis varies beside the persona, framing, cognitive,
 persona_template and impersonation families and the natural kind's benign roles
 (`tests/test_dimensions.py` records the ruling, and checks both dataset
-types and both example recipes).
+types and both example recipes). `to_synonym_substitution` and the
+`directness` axis are left unmarked by ruling too: the technique swaps the
+words a model marks for synonyms, which can name a subject less plainly, as
+`directness` (`request_intent`) does, but a family carries one tag, its
+family `sensitive_words` encodes, and marking `encoding` against
+`request_intent` would stop every training run, whose attacks draw it beside
+the varied axis (the same test file records it).
 
 The outputs stage's answer mode (`harmful` or `helpful`) is no axis and
 carries no tag: it picks the response's prompt, checker and label, the
@@ -493,7 +499,7 @@ type is a one-key override: its pool keeps the other 28 techniques. An allow
 list left empty by this is dropped when the other list still names
 something; when nothing but translation was allowed, the kind raises.
 
-The packaged attacks have it `true`, drawing all 23 languages, and the
+The packaged attacks have it `true`, drawing all 24 languages, and the
 natural kind `false`; the eval type narrows its attacks to the eight
 low-resource languages. They run on the `translation` role's default,
 `translategemma-27b`, a local vLLM model
@@ -682,9 +688,43 @@ the default) and in `params["jailbreaks"]`.
 
 ### Release notes
 
-**Upgrading from the previous release (spec version 1.0, now 1.4).** The
-jailbreak library grew from 151 techniques in 23 families to 256 active ones
-(263 registered, 7 retired) in 36 families and five layers. What that asks of
+**Spec version 1.4.** What changes for a run you already have:
+
+- **Thirty-seven techniques.** Spec 1.4 adds twelve persona templates and
+  the 24 published adversarial suffixes, both attack only, and the Yoruba
+  translation: the library has 281 active techniques (288
+  registered, 7 retired) in 36 families, the default attack pool goes from
+  214 to 251 techniques in 29 families, the natural pool stays at 72 (96
+  with `"translation": true`, which adds Yoruba), and the `eval` type's pool
+  is unchanged (36). An attack plan kept from 1.3 resumes with the growth
+  WARNING naming them and does not draw them until planned again with
+  `resume=False`; a fresh plan with the same seed draws differently, since
+  three families are larger.
+- **The Yoruba translation.** `to_yoruba` (its row of `languages.json` says
+  `"translation_since": "1.4"`) joins the default attack pool and the
+  natural pool with `"translation": true`. Yoruba is on watch: in the
+  measurement the judge rejected 40.7% of its calls and 7.4% of its units
+  were discarded after 4 rounds, so expect more calls and more discarded rows
+  for it than for the other languages.
+- **The benign pairs are checked.** Each pair the stage generates for `fsh`
+  and `dap` is read by the `check` model (else the `gen` model) and asked for
+  again when rejected; a cache written before is loaded as it is, unchecked.
+  To check it, delete `benign_samples.csv` and its two sidecars, so the
+  pairs are generated again. A recipe that names a separate `check` model now
+  has it planned for the jailbreak stage when the attacks draw `fsh` or `dap`,
+  which the eval type's do.
+- **`to_morse` and `to_braille` are tagged `needs_latin`.** No rule reads the
+  tag: no draw, pair or pin moves.
+- **Published adversarial suffixes** come from
+  `configs/jailbreak/obfuscation/suffix_strings.json`: 24 strings copied
+  from public GCG artifacts, each with its source and the model it was
+  optimized against, a technique per row (`to_adversarial_suffix_<slug>`,
+  the suffix appended after a space), attack only; the four noise suffixes
+  stay.
+
+**Upgrading from spec version 1.0 to 1.3.** The
+jailbreak library grew from 151 techniques in 23 families to 244 active ones
+(251 registered, 7 retired) in 36 families and five layers. What that asks of
 a run you already have, and what you will see; each point has its note below.
 
 - **One re-plan is planned: the adversarial kind.** The packaged attacks now
@@ -733,9 +773,8 @@ a run you already have, and what you will see; each point has its note below.
   rules are new, the layers are dealt with a jitter per unit, the request
   obfuscation is decided only for a unit that drew a request, and its
   families are counted apart from the obfuscation layer's, so the attacks
-  draw every technique of their pool. The default attack pool is 226
-  techniques in 29 families (142 in 22 before; 178 in 24 at spec 1.2, 214
-  at spec 1.3). The
+  draw every technique of their pool. The default attack pool is 214
+  techniques in 29 families (142 in 22 before; 178 in 24 at spec 1.2). The
   `eval` type's pool is unchanged, at 36 techniques in 10 families, but its
   draws moved: the ASCII-art cap changes the font `to_ascii_art` draws for
   texts of about 40 characters or more, and the rules of the eval release
@@ -985,14 +1024,11 @@ templates join `persona_template` (23 frames now, each drawing one of the
 same six mechanics): three each of emotional and family appeals, legitimate
 experts and authorities, and simulated systems and games, and one each built
 around a point and penalty system, a persona-tagged opening and a
-stay-in-character reset. They are attack-only, so the default attack pool
-goes from 214 to 226 techniques (29 families) and the natural pool (72) and
-the `eval` type's pool (36) do not change. An adversarial plan kept from
-spec 1.3 resumes with the growth WARNING naming the twelve; a fresh one
-draws differently, since the family is larger. The same release adds
-`obfuscation/suffix_strings.json`, 24 published adversarial suffixes with
-their source and the model each was optimized against, as data: no
-technique reads it yet.
+stay-in-character reset. They are attack-only, so neither the natural pool
+(72) nor the `eval` type's pool (36) changes. An adversarial plan kept from
+spec 1.3 resumes with the growth WARNING naming them; a fresh one draws
+differently, since the family is larger. (The default attack pool and the
+other techniques of spec 1.4 are in the note on spec version 1.4, above.)
 
 **Release note: the techniques spec 1.3 adds.** Twenty-four pure template
 techniques, attack-only but the urgent ask, whose text the maintainers wrote
@@ -1180,7 +1216,7 @@ in `techniques.deny` and allows none of the families), so its pool stays at
   Hindi, Yoruba and Amharic (rows of `configs/jailbreak/languages.json`): six
   pure techniques, `to_ask_answer_in_<slug>`, in the default attack pool and
   the natural pool. Four of them became translations in spec 1.3 (the note
-  on the four translation languages). The answer
+  on the four translation languages), and Yoruba in spec 1.4. The answer
   languages now follow the language table's order, which puts Swahili before
   Thai, so a fresh plan that drew one of the two draws the other (a kept plan
   replays by name) ([techniques.md](techniques.md#the-language-table)).
@@ -1345,12 +1381,12 @@ application costs 2 to 4 calls; a distractor costs 1 to 3 (a reply with no
 text is asked for again), and no check reads it. They add no model role.
 
 The layer is off, so a run that does not allow it changes nowhere: the
-default attack pool is still 226 techniques in 29 families, the natural pool
+default attack pool is still 251 techniques in 29 families, the natural pool
 the 72 (every rewrite technique says `["adversarial"]`), and the `eval`
 type's pool and draws are unchanged (36 techniques; its allow lists name no rewrite
 family, so allowing the layer there adds nothing to its pool or its rounds
 until the families are allowed too). A kind that allows the layer draws them: the packaged
-adversarial kind's pool is then 242 techniques in 32 families, its rounds say
+adversarial kind's pool is then 267 techniques in 32 families, its rounds say
 `include_rewrite: true` (an adversarial plan kept from a section that allowed
 the layer before its pool held a technique raises on resume naming `rounds`), a
 budget round deals the layer at `layer_rates.rewrite` (the spec's 0, with a
@@ -1970,15 +2006,15 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 | `input` | `generation/from_constitution/long`, `generation/from_constitution/short`, `quality_check` |
 | `output` | `generation/harmful`, `generation/helpful`, `quality_check/harmful`, `quality_check/helpful`: one generation prompt and one checker per [answer mode](stages/outputs.md#answer-modes) |
 | `paraphrase` | `generation`, `generation/<model>` (a paraphraser's own, when it has one; the directory is the registry name), `check` |
-| `jailbreak` | `scenario_generation`, `persona_invention`, `persona_scenario_generation`, `jailbreak_construction`, `payload_split_semantic`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `pseudonym`, `word_game`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `persuasion_rewrite`, `tense_rewrite`, `model_distractor`, `preserve_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
+| `jailbreak` | `scenario_generation`, `persona_invention`, `persona_scenario_generation`, `jailbreak_construction`, `payload_split_semantic`, `category_selection`, `benign_generation`, `benign_check`, `extract_harmful`, `synonym_substitution`, `pseudonym`, `word_game`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `persuasion_rewrite`, `tense_rewrite`, `model_distractor`, `preserve_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
 | `conversation` | `judge`, `success_judge`, `pair_attacker` |
 | `format_instructions` | `numbered`, `structured_qa` |
 
-The tree also holds `input/category_check` and `jailbreak/benign_check`,
-which no code loads.
+The tree also holds `input/category_check`, which no code loads.
 
-Text the stages add at run time, the rejection feedback and the outputs'
-length floor's reason, lives in
+Text the stages add at run time, the rejection feedback, the outputs'
+length floor's reason and the reason a benign pair asked for again is not
+one pair, lives in
 `content_moderation/feedback.py`, not in a prompt file.
 
 ### Scaffolding an overlay
@@ -1999,6 +2035,7 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | `configs/llm/gpu_pricing.json` | Provider, then GPU name as `nvidia-smi` reports it, then hourly USD per GPU; `*` is a provider's fallback | the cost roll-up |
 | `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layers_off_by_default` (the layers a kind leaves out unless its `layers.allow` names them, checked against `layer_order` as the spec loads), `decode_hint_rate` (the share of hinted encodings that write a decode hint, 0.5), `heavy_encoding_weight` (the weight, times `encode`'s, of the slot a budget round deals the ten heavy full-text encodings in, 0.2, above 0 and at most 1; left out, they are dealt as `encode`'s members), `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`, `check` and `calls`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `request_obfuscation_refuses` (per family a request obfuscation is drawn from, the families it then keeps out of the combination: a translation keeps `suffixes`, `structural` and `neutral_container`; as the spec loads, each key must be a family a request obfuscation is drawn from, `translation` or `encode` (the light encodings `request_obfuscation_allowed_families` calls `encode_light`), and each name an obfuscation-layer family, since the step is drawn after every other layer's pick), `generators` (the families whose techniques come one per row of a data file, expanded into `techniques` as the spec loads), `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, `needs_latin`, optional `max_tokens`, `cross_incompatible_with`, `kinds`, `check`, `calls`, `since`, the spec version that added the technique, and `deprecated`, the one that retired it) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
 | `configs/jailbreak/languages.json` | One row per language: `name`, `slug`, `complexity`, `script`, whether it has a `translation` and an `answer_language` technique, and the spec versions that added them: `since` (the row) and `translation_since` (its translation, when later) | `jailbreak/technique.py` (the spec's generators), `obfuscation/translation.py`, `requests/answer_language.py` |
+| `configs/jailbreak/obfuscation/suffix_strings.json` | One row per adversarial suffix published in the literature: `slug`, `suffix`, `source`, `optimized_against`, `since`, and optionally `notes`, `complexity`, `deprecated`; each row is an attack-only technique `to_adversarial_suffix_<slug>` of the `suffixes` family | `jailbreak/technique.py` (the spec's generators), `obfuscation/suffixes.py`, which refuses at import a row without one of the five |
 | `configs/jailbreak/augmentations.json` | The two default kinds and `natural_only_families` | `jailbreak/augmentation.py` |
 | `configs/jailbreak/<layer>/*_templates.json` | The variant pools of the pure techniques: per directive, named variants (a `template`, or continuation's `prefix` and `suffix`) with an optional `weight` ([extending.md](extending.md#add-variants-to-a-template-pool)); `hacking/persona_templates.json` holds a frame per persona (with its `display_name`) and the `mechanics` drawn into them, `manipulation/fake_turns_templates.json` the fake turns | `jailbreak/directives.py: read_pools`, checked at import by `pool.py` (the persona frames by `hacking/persona_templates.py`) |
 | `configs/jailbreak/multi_turn/crescendo_followups.json` | Follow-ups of the crescendo attack | `multiturn_attacks/attacks.py` |

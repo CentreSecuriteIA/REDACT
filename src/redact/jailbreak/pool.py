@@ -187,9 +187,17 @@ MODEL_CHECKS = ("typos", "scenario", "preserve")
 
 def uses_check(pool: list[Callable]) -> bool:
     """Whether ``pool`` holds a technique whose model reply the stage's check
-    model checks (its spec ``check`` is one of :data:`MODEL_CHECKS`); without
-    one, the stage needs no check model."""
+    model checks (its spec ``check`` is one of :data:`MODEL_CHECKS`)."""
     return any(getattr(fn, "check", None) in MODEL_CHECKS for fn in pool)
+
+
+def uses_check_model(pool: list[Callable]) -> bool:
+    """Whether the stage's check model has work with ``pool``: a technique
+    whose model reply it checks (:func:`uses_check`), or one that needs the
+    benign data (``requires_benign``), each pair of which it checks when the
+    stage generates them; without either, the stage needs no check model."""
+    return uses_check(pool) or any(getattr(fn, "requires_benign", False)
+                                   for fn in pool)
 
 
 _check_against_spec(all_techniques())

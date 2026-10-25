@@ -216,6 +216,25 @@ class TestTheCheck:
         assert set(_FAMILY_TAGS["role_framing"]) <= drawn
         check_dimensions({}, augmentations_of({}))
 
+    def test_synonym_substitution_and_directness_are_left_unmarked(self):
+        """The ruling that added no ninth tag: ``to_synonym_substitution``
+        swaps the words a model marks for synonyms, which can name a subject
+        less plainly, as the directness axis (``request_intent``) does; but a
+        family carries one tag, its family (``sensitive_words``) encodes,
+        and marking ``encoding`` against ``request_intent`` would stop every
+        training run, whose attacks draw it beside the varied axis."""
+        from redact.jailbreak.pool import registry
+        from redact.recipe import load_recipe
+
+        synonyms = registry(JPool.all_techniques())["to_synonym_substitution"]
+        assert synonyms.families == ["sensitive_words"]
+        assert load_spec()["families"]["sensitive_words"]["dimension"] == "encoding"
+        assert dimensions.relation("encoding", "request_intent") is None
+        assert A.varied(A.resolve("inputs"))["directness"] == "request_intent"
+        training = load_recipe({"dataset_type": "training"})["augmentations"]
+        assert synonyms in JPool.technique_pool(training["adversarial"])
+        _check_dimensions({}, training, dataset_type="training")
+
     @pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
     def test_the_example_recipes_and_their_types_pass(self, name):
         """With their params files, and with their dataset types alone: the

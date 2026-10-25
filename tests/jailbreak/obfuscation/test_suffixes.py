@@ -3,7 +3,9 @@
 import random
 
 from redact.jailbreak.obfuscation.suffixes import (
+    NOISE_SUFFIXES,
     get_suffix_functions,
+    suffix_rows,
     to_adversarial_suffix_emoji,
     to_adversarial_suffix_fragments,
     to_adversarial_suffix_punctuation,
@@ -34,10 +36,14 @@ class TestSuffixFunctions:
             assert isinstance(result, tuple) and len(result) == 2
 
     def test_count(self):
-        assert len(get_suffix_functions()) == 4
+        """The four noise suffixes, then one per published suffix."""
+        assert len(NOISE_SUFFIXES) == 4
+        assert len(get_suffix_functions()) == 4 + len(suffix_rows())
 
     def test_info_names_the_suffix_as_a_field(self):
-        for fn in get_suffix_functions():
+        """A noise suffix's; a published one names its row
+        (``test_suffix_strings.py``)."""
+        for fn in NOISE_SUFFIXES:
             result, info = fn(SAMPLE, rng=random.Random(0))
             assert info == f"suffix={result.removeprefix(SAMPLE + ' ')}"
 

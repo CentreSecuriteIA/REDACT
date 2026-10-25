@@ -521,8 +521,14 @@ _BUDGETS = [
 # draw that holds one takes another, and through the unit's rng and its
 # group's counts the rest of its draw (65 of the 240 dealt units, 41 of the
 # 200 undealt draws). The eval type's pin below does not move: no eval pool
-# draws the family.
-_PINNED_DRAWS = "f5c073ac6c13e39db149f888828a7b4c293d5353ee7356419aa4dab3107ec6ad"
+# draws the family. The rest of spec 1.4 moved it again: the Yoruba
+# translation widens the translation family and the 24 published suffixes the
+# suffixes family (4 members to 28), so a draw that holds one of the two
+# families may take a new member, and through the unit's rng and its group's
+# counts the rest of its draw (57 of the 240 dealt units, 46 of them holding
+# one of the 25 new techniques; 68 of the 200 undealt draws, 62 holding one).
+# The eval type's pin does not move: no eval pool draws Yoruba or a suffix.
+_PINNED_DRAWS = "670ed57f35d215a8628014ffec219a83cc1c9a5041d7ad6923095c6eeab35bfe"
 
 
 def test_the_budget_draws_are_the_pinned_ones():
