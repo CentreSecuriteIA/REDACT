@@ -332,7 +332,13 @@ ruled distinct: who writes a message is not a role or scenario the message
 sets up, so the writer axis varies beside the persona, framing, cognitive,
 persona_template and impersonation families and the natural kind's benign roles
 (`tests/test_dimensions.py` records the ruling, and checks both dataset
-types and both example recipes).
+types and both example recipes). `to_synonym_substitution` and the
+`directness` axis are left unmarked by ruling too: the technique swaps the
+words a model marks for synonyms, which can name a subject less plainly, as
+`directness` (`request_intent`) does, but a family carries one tag, its
+family `sensitive_words` encodes, and marking `encoding` against
+`request_intent` would stop every training run, whose attacks draw it beside
+the varied axis (the same test file records it).
 
 The outputs stage's answer mode (`harmful` or `helpful`) is no axis and
 carries no tag: it picks the response's prompt, checker and label, the

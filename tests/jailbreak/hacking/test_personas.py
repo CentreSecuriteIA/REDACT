@@ -92,6 +92,36 @@ def test_the_scene_reaches_the_construction_request():
     assert P._PERSONAS["alien"]["description"] in str(requests[1].messages)
 
 
+def test_only_the_scene_behind_the_delimiters_reaches_the_construction():
+    """The last block after the first ``---``: the notes before it and the
+    drafts between stay out of the construction request."""
+    reply = "zq notes\n---\nzq draft\n---\nzq final scene\n---"
+    _, requests = _drive(_named()["alien"], [reply, "jailbreak"])
+    construction = str(requests[1].messages)
+    assert "zq final scene" in construction
+    assert "zq notes" not in construction and "zq draft" not in construction
+
+
+#: The four personas spec 1.1 retired (near-duplicates, and one tying mental
+#: health to harm): registered still, so a plan kept from before replays them.
+_RETIRED = ["mentally_ill", "politician", "deformed_professor", "religious_figure"]
+
+
+@pytest.mark.parametrize("key", _RETIRED)
+def test_a_retired_persona_is_in_no_default_pool_and_still_replays(key):
+    from redact.jailbreak.augmentation import resolve
+    from redact.jailbreak.plan import combination_of
+    from redact.jailbreak.pool import all_techniques, registry, technique_pool
+
+    fn = _named()[key]
+    assert fn.deprecated == "1.1"
+    assert fn not in technique_pool(resolve(None, "adversarial"))
+    (replayed,) = combination_of([fn.__name__], registry(all_techniques())).techniques
+    result, requests = _drive(replayed, [_SCENE, "jailbreak"])
+    assert result == ("jailbreak", f"category={key}_persona")
+    assert P._PERSONAS[key]["display_name"] in str(requests[0].messages)
+
+
 def test_a_scenario_reply_without_a_scene_is_asked_again_then_discards():
     result, requests = _drive(_named()["alien"], ["notes", _SCENE, "jailbreak"])
     assert result == ("jailbreak", "category=alien_persona")

@@ -280,6 +280,29 @@ def test_the_rules_id_leaves_out_the_tags_no_rule_reads(monkeypatch, name, tag, 
     assert JP.rules_id(pool, rounds=_BUDGET) == before
 
 
+def test_a_family_s_description_changes_no_rule_draw_or_pool(monkeypatch):
+    """A family's ``description`` is documentation: with every family's
+    taken out, the rules id, a dealt plan and the default pools are as they
+    were."""
+    import redact.jailbreak.plan as JP
+    from tests.jailbreak import simulate
+
+    pool = all_techniques()
+
+    def observed():
+        return (JP.rules_id(pool, rounds=[*_BUDGET, *_COUNT]),
+                simulate.deal(pool, 30, groups=2, seed=1, rounds=[*_BUDGET, *_COUNT]),
+                [fn.__name__ for kind in ("adversarial", "natural")
+                 for fn in technique_pool(resolve(None, kind))])
+
+    before = observed()
+    families = T.load_spec()["families"]
+    assert sum("description" in family for family in families.values()) > 30  # noqa: PLR2004
+    for family in families.values():
+        monkeypatch.delitem(family, "description", raising=False)
+    assert observed() == before
+
+
 def test_the_rules_id_moves_with_the_obfuscations_kept_from_manipulation(monkeypatch):
     """The eval release kept the manipulation block on purpose (lifting it
     would admit 104 eval pairs): a plan drawn under another block list has

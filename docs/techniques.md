@@ -581,6 +581,13 @@ generation model.
   (`category=someone_from_the_future_persona`). Spec version 1.3 added
   three named personas, `mercenary`, `underground_hacker` and
   `anarchist_philosopher` (attack only, like the rest of the family). The
+  persona scenario prompt casts the persona as the one who would ask the
+  text, not as the role the answering model is asked to play; the
+  construction prompt then builds a role-play jailbreak from that scene and
+  the persona's description (a persona's name reaches the scenario only), so
+  whether the final text asks the model to play the persona is the
+  construction model's choice. Recasting the persona as the answerer is a
+  change of the two prompts' wording, not made in this release. The
   scenario prompts ask
   for the scene at the bottom, behind `---` delimiters: the scene is the
   last block after the first delimiter, or, in a reply without one, what
