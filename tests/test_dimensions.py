@@ -20,7 +20,7 @@ _FAMILY_TAGS = {
                       "char_injection"],
     "encoding": ["encode", "sensitive_words", "wording", "tokenbreak", "ascii_art",
                  "payload_split", "word_art", "transliteration", "unicode_smuggling"],
-    "container": ["structural", "neutral_container"],
+    "container": ["structural", "neutral_container", "special_tokens"],
     "role_framing": ["persona", "framing", "cognitive", "impersonation",
                      "benign_role", "persona_template"],
     "request_shape": ["indirect", "distractor_prefix", "distractor_suffix",
@@ -169,7 +169,7 @@ class TestTheCheck:
         assert ("natural: asking, indirect, smalltalk_prefix, smalltalk_suffix)"
                 in message)
         assert ("the container families (adversarial: neutral_container, "
-                "structural; natural: neutral_container).") in message
+                "special_tokens, structural; natural: neutral_container).") in message
         assert ("the example_priming families (adversarial: dap, fake_turns, fsh)"
                 in message)
         assert message.count("undecided") == len(("request_shape", "container",

@@ -603,7 +603,13 @@ _BUDGETS = [
 # moved it again, the same way (175 of the 240 dealt units, 22 of them holding
 # one of the eight; 10 of the 200 undealt draws, all holding one). The eval
 # type's pin does not move: no eval pool draws the family.
-_PINNED_DRAWS = "f4c305b6875b728c6ce3447deda80aea8164b02017080310444f4f7af4c92ce5"
+# Spec 1.5's special_tokens (two attack-only obfuscation techniques: an eos
+# marker append, complexity 1, and chat-template abuse, complexity 2; a
+# wrapper that joins encode and translation, so not exclusive) moved it again,
+# the same way (180 of the 240 dealt units, 34 of them holding one of the two;
+# 73 of the 200 undealt draws, 44 holding one). The eval type's pin does not
+# move: no eval pool draws the family.
+_PINNED_DRAWS = "d5d413a541703c22da1c5bd53fad97bb90384929b5eed153c3ca79247c20276d"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

@@ -13,6 +13,7 @@ from .noise import get_noise_functions
 from .payload_split import get_payload_split_functions
 from .romanization import get_romanization_functions
 from .sensitive_words import get_sensitive_words_functions
+from .special_tokens import get_special_tokens_functions
 from .structural import get_structural_functions
 from .suffixes import get_suffix_functions
 from .tokenbreak import get_tokenbreak_functions
@@ -47,4 +48,5 @@ def get_all_obfuscation_functions() -> list[Callable]:
         + get_dialect_functions()
         + get_unicode_smuggling_functions()
         + get_char_injection_functions()
+        + get_special_tokens_functions()
     )

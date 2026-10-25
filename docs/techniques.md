@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 326 active techniques in 5 layers and 43
+The jailbreak stage draws from 328 active techniques in 5 layers and 44
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -77,10 +77,10 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 47 | at most 1 |
-| `obfuscation` | 20 | 177 | no cap |
+| `obfuscation` | 21 | 179 | no cap |
 | `requests` | 13 | 71 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| all | 43 | 326 | |
+| all | 44 | 328 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -121,6 +121,7 @@ that call a model call the generation model.
 | obfuscation | `unicode_smuggling` | `encoding` | 73 | 3 | no | no | `to_variation_selector_smuggling`, `to_invisible_suffix`, `to_unicode_tag_smuggling` |
 | obfuscation | `neutral_container` | `container` | 80 | 6 | no | no | `to_code_comment`, `to_yaml_document`, `to_csv_row`, `to_email_message`, `to_transcript_line`, `to_log_entry` |
 | obfuscation | `structural` | `container` | 80 | 3 | no | no | `to_json`, `to_xml`, `to_markdown` |
+| obfuscation | `special_tokens` | `container` | 82 | 2 | no | no | `to_eos_tokens`, `to_chat_template_abuse` |
 | obfuscation | `char_injection` | `surface_noise` | 85 | 8 | no | no | `to_bidi_override`, `to_upside_down`, `to_deletion_chars_low`, `to_deletion_chars_medium`, `to_deletion_chars_high`, `to_zalgo_low`, `to_zalgo_medium`, `to_zalgo_high` |
 | obfuscation | `ascii_art` | `encoding` | 90 | 1 | no | no | `to_ascii_art` |
 | requests | `answer_format` | `answer_shape` |  | 12 | no | no | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data`, `to_dual_answer`, `to_tagged_prefix`, `to_answer_in_encoding` |
@@ -1196,6 +1197,19 @@ eval pool v2.
   injections strip back to the prompt. As a whole-text reorder or injection
   the family refuses every other obfuscation family; it still joins the
   hacking, request and manipulation layers.
+- `special_tokens` (2, spec version 1.5, attack only) places model control
+  tokens around the prompt. `to_eos_tokens` appends one model family's
+  end-of-sequence marker(s) after the prompt (BOOST, Yu 2405.20653), so a
+  model may read its own turn as ended; the marker is drawn from the
+  `eos_style` pool. `to_chat_template_abuse` wraps the prompt in another model
+  family's chat-template markup (ChatML, Llama, Gemma, Mistral, Vicuna,
+  Alpaca, Phi), ending with an assistant-turn opener (ChatBug, Jiang
+  2406.12935), from the `chat_template` pool. Both are pure wrappers, so the
+  family refuses the other wrappers (`structural`, `neutral_container`),
+  `ascii_art`, the whole-text hidings and reorderings, and the manipulation
+  layer, whose example turns or invented conversation clash with the injected
+  turn markup; it still joins an encoding, a translation, a hacking frame and
+  a request.
 
 **Requests.** These change how a request is posed, not its text, and call no
 model. Each technique picks one of its named template variants from a JSON

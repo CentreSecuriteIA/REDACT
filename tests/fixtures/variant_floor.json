@@ -44,6 +44,8 @@
   "obfuscation/neutral_container_templates.json:transcript_line": {"family": "neutral_container", "variants": 8, "floor": 8},
   "obfuscation/neutral_container_templates.json:yaml_document": {"family": "neutral_container", "variants": 8, "floor": 8},
   "obfuscation/payload_split_templates.json:reassembly": {"family": "payload_split", "variants": 8, "floor": 8},
+  "obfuscation/special_tokens_templates.json:chat_template": {"family": "special_tokens", "variants": 8, "floor": 8},
+  "obfuscation/special_tokens_templates.json:eos_style": {"family": "special_tokens", "variants": 8, "floor": 8},
   "obfuscation/structural_templates.json:to_json": {"family": "structural", "variants": 10, "floor": 8},
   "obfuscation/structural_templates.json:to_markdown": {"family": "structural", "variants": 9, "floor": 8},
   "obfuscation/structural_templates.json:to_xml": {"family": "structural", "variants": 9, "floor": 8},
