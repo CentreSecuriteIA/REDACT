@@ -29,7 +29,9 @@ A run is an ordered list of stages. Each stage has one public function, its
 Two more fronts are outside the recipe: `generate_conversations` and
 `evaluate_conversations` in `multi_turn/`
 ([stages/conversations.md](stages/conversations.md)), a planned extension,
-not finished.
+not finished. `search_combinations` in `jailbreak/` is outside it too: a beam
+search over technique combinations against a target model and a judge, called
+from Python ([stages/combination-search.md](stages/combination-search.md)).
 
 Every run seeds its inputs from a constitution: the recipe's `constitution`
 stage writes it, or an earlier run saved it under `data_dir`. A recipe's
@@ -162,7 +164,8 @@ For each stage, in the recipe's order, the driver:
    the params file's over them;
 4. counts the rows of the stage's files (`file_counts`);
 5. writes `Datasets/<stage>.run.json`, with the files the stage read in
-   `sources`, and the dataset type and its file's hash.
+   `sources`, the dataset type and its file's hash, and for the jailbreak and
+   build stages the spec version.
 
 Leaving the stage, telemetry logs per model how many replies were cut at the
 token limit in it.
@@ -188,7 +191,8 @@ in an eval run as in a training one; without one the stage stops with
 `No constitution at ...`. `generate_inputs` calls
 `InputPipeline.run_from_constitution`: `samples_per_entry` units per
 constitution entry, each dealt a spec of the generation axes and asking for
-one sample, checked by the `check` model.
+one sample from the one input template
+(`prompts/input/generation/template.json`), checked by the `check` model.
 Rows, accepted and rejected, go to
 `Datasets/constitution_inputs/<category>/samples.csv`. The front then copies
 the accepted rows of every category into
@@ -229,7 +233,8 @@ run has local models it waits at most 60 seconds for a preload still
 running, unloads the engines the run loaded, also after a planning error
 (those loaded before it, such as a notebook's, stay), and clears the
 planned shares and cards. It then rolls
-up telemetry (tokens, engine time, cost). `run_pipeline`
+up telemetry (tokens, engine time, cost) and stops collecting, so a stage
+function called afterwards writes to no trace. `run_pipeline`
 returns a summary: `dataset_type`, `data_dir`, `stages` (counts and record
 path per stage), `serving`, `telemetry` (with `cut`, the replies cut at the
 token limit per stage and model), and `residency` and `trace` when present.
@@ -252,7 +257,10 @@ input, and a variation can be a jailbreak's text.
 
 Every row has a `sample_id`, the content id of its own text, and every
 derived row has an `input_id`, the `sample_id` of the input it comes from. The text sits in a different column per part, as the
-table shows; [stages/build.md](stages/build.md) has the details.
+table shows; [stages/build.md](stages/build.md) has the details. The build
+adds two columns to the jailbreak and variation rows, `families` and
+`layers`, read from their `technique` when it runs
+([the columns](stages/build.md#the-families-and-layers-columns)).
 
 ## An eval run
 
@@ -264,12 +272,10 @@ six stages as a training run, with these differences:
 - the constitution and the inputs take only the `harmful` and `benign` entry
   types, the clear ends, beside the general-benign part both types build
   from the benign taxonomy;
-- the jailbreak stage attacks the harmful inputs only, with a pool of hard
-  techniques whose label stays certain (five heavy encodings, `fsh` and
-  `dap` less their many-shot variants, `framing`, `structural`,
-  `ascii_art`, `continuation`, `temporal`, `to_refusal_then_comply` and
-  eight low-resource translations), one technique then two, with seed 43,
-  and makes no natural variations;
+- the jailbreak stage attacks the harmful inputs only, with a pinned pool of
+  hard techniques whose label stays certain (eval pool v2: 126 techniques in
+  22 families, listed in [configuration.md](configuration.md#dataset-types)),
+  one technique then two, with seed 43, and makes no natural variations;
 - the build runs in `eval` mode and writes no complete dataset: it writes
   three files with one `text` and one `label` column each, so an evaluation
   reads them without a join.
@@ -281,7 +287,12 @@ six stages as a training run, with these differences:
 | `eval_jailbreaks.csv` | the accepted attacks that changed their input (`is_jailbreak` true), then the bare benign inputs (`is_jailbreak` false) | the entry type |
 
 The variations are in none of them. Every row keeps its `sample_id`, and
-a derived row its `input_id`, as in a training run's files. A training run
+a derived row its `input_id`, as in a training run's files. The files also
+carry the generation axis columns (an input's `length` to `focus`, taken from
+the input answered or attacked on a response or an attack, and a response's
+`response_length`, `response_format` and `response_register`; empty on a
+paraphrase), and `eval_jailbreaks.csv` the `technique`, `families` and
+`layers` of each attack ([stages/build.md](stages/build.md#eval-mode)). A training run
 and an eval run use two `data_dir`s; the eval build's `exclude_from` names
 the training run: the rows it holds by id or text are left out, those
 from a constitution entry it has too are kept and flagged, and both are
@@ -294,6 +305,7 @@ counted.
 | `multi_turn/` | Conversation datasets: a `Setting` of actors played on seeds (`generate_conversations`), scored by a judge (`evaluate_conversations`); a planned extension, not finished |
 | `multiturn_attacks/` | A `Setting` of an attacker and a target model (`generate_attacks`, `score_attacks`, `optimize_attack`), built on `multi_turn/`; a planned extension, not finished |
 | `optimization/` | A beam search over conversation moves scored by a judge (`optimize`); a planned extension, not finished |
+| `jailbreak/search.py` | A beam search over technique combinations against a target model and a judge (`search_combinations`), on the jailbreak library's sampler and rules ([stages/combination-search.md](stages/combination-search.md)) |
 | `dataset/loading.py` | Load a published dataset from the HuggingFace Hub (`load_hf_dataset`, `load_from_config`) |
 
 ## Out of scope

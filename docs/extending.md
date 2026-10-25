@@ -99,8 +99,13 @@ format and follows no other instruction:
 - Set `vram_gb` when you know the weights' size better than the estimate (an
   MoE checkpoint, a measured figure). Set `min_gpus` for a model larger than
   one card.
+- Set `"supports_temperature": false` for a model that rejects sampling
+  settings (Claude Opus 4.7 and later, such as the shipped `claude-opus-5-5`):
+  a temperature a call asks for, the checks' 0.15 included, is then not sent,
+  and the provider's default sampling applies. Such an entry may set no
+  `default_temperature`. `register_model` takes the same keyword.
 - `python scripts/download_models.py my-local-8b` fetches the weights ahead
-  of a run.
+  of a run (`--dry-run` lists what it would fetch).
 
 The registry loads and validates every entry at import; a bad entry stops the
 import with a message naming the field. `tests/llms/test_model_config.py`
@@ -163,12 +168,14 @@ packaged one. The seeded inputs stage renders it with `Category`,
 `num_samples`, and appends the `numbered` format instruction. To vary the
 samples' length, register and the rest, change the
 [generation axes](configuration.md#the-generation-axes) rather than the
-template.
+template: the words of the spec, each axis value's label and hint, are in
+`configs/generation_axes.json` (a `config_dir`'s copy is read whole), not in
+the template.
 
 **To change a prompt for your runs** without editing the library, use the
-overlay: `scripts/scaffold_prompts.py ./my_prompts`, keep the files you
-change, and set `prompt_dir`
-([configuration.md](configuration.md#the-prompt-overlay)).
+overlay: `scripts/scaffold_prompts.py ./my_prompts` (it refuses to write over
+a file the folder holds, unless `--overwrite`), keep the files you change, and
+set `prompt_dir` ([configuration.md](configuration.md#the-prompt-overlay)).
 
 ## Add a jailbreak technique
 
@@ -330,7 +337,9 @@ contract.
      review. A user's copy of `eval.json` in a `config_dir` is not updated:
      a deny added to the packaged file does not reach it, so a technique new
      to a family the copy allows joins that user's eval pool, and an eval
-     run names it in a WARNING (`extra_eval_techniques`).
+     run names it in a WARNING (`extra_eval_techniques`); a family the copy
+     lacks, that the packaged type draws, is named in another
+     (`unseen_type_families`).
 5. **Test it.** Add tests beside the module's, under
    `tests/jailbreak/<layer>/`. `tests/jailbreak/test_registry.py` compares
    the registry with `tests/fixtures/technique_registry.json` (names, tags,

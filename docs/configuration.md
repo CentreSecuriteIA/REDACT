@@ -20,7 +20,7 @@ that starts with `_` is a comment.
 | `prompt_dir` | path | none | The prompt overlay; see [below](#the-prompt-overlay) |
 | `stages` | list of stage names | the dataset type's: all six | The stages to run, in order, each once. `[]` runs nothing |
 | `augmentations` | object | the dataset type's | The jailbreak stage's augmentation section, over the dataset type's; see [below](#the-augmentation-section) |
-| `params_file` | path | none | The params file, relative to the recipe's folder. `--params` and `run_pipeline(params=...)` override it; their relative path is read from the current directory, else from the recipe's folder, and the run logs the file it read |
+| `params_file` | path | none | The params file, relative to the recipe's folder. `--params` and `run_pipeline(params=...)` override it; their relative path is read from the current directory, else from the recipe's folder, and with `verbose` the run logs the file it read |
 | `config_dir` | path | none | [Your own config folder](#your-own-config-folder), relative to the recipe's folder: its dataset type, taxonomy, augmentation, generation axes and dimensions files are read in place of the packaged ones. Not a folder: raises at load |
 | `resume` | bool | `true` | `false` starts every listed stage over ([running.md](running.md#resume-fresh-runs-and-a-kill-partway-through)). Any other value than `true` or `false`, the string `"false"` too, raises |
 
@@ -123,7 +123,7 @@ a key that starts with `_` is a comment. A value is a registry name, `null`
 |---|---|---|
 | `name` | registry name | Left out or `null`: the role's default |
 | `backend_type` | `"api"`, `"vllm"`, `"introspect"` | The setup of the registry entry that serves the model |
-| `copies` | int >= 1 | vLLM setups only: copies of the engine, one per card. Left out: a copy on each card with room |
+| `copies` | int >= 1 | vLLM setups only: copies of the engine, one per card; `1` turns copies off. Left out: a copy on each card with room |
 | `workers` | int >= 1 | API setups only: requests in flight. Left out: `recommended_max_workers`. Must be 1 on Anthropic |
 
 `paraphraser` may also be `"distribution"`, the pool of every model with the
@@ -204,6 +204,12 @@ writes the type's `directness` pin again:
                     "length": {"long": 0, "very_long": 0}}}
 ```
 
+Both pass the params load and the dimension check for both types
+(`tests/test_runconfig.py` holds them). A `style` key in a params file stops
+the run before any stage, like any key the front does not take, and an inputs
+folder written when a `style` picked one of two templates is not supported:
+start a new `data_dir`.
+
 ### `outputs`
 
 | Key | Default | Meaning |
@@ -251,8 +257,10 @@ The run passes the recipe's `gen`, `check` and `translation` models as
 what a technique's model writes, and left out it is the `gen` model, so no
 other model loads ([the stage's models](stages/jailbreaks.md#models)). A
 `check` model of its own is created, planned and loaded for the stage only
-when a kind draws a technique it checks (the typo, scenario or rewrite
-check); the eval type's attacks draw none.
+when a kind draws a technique it checks (the typo, scenario, preserve or
+meaning check) or one that needs the benign data, whose generated pairs it
+reads; the eval type's attacks draw `fsh` and `dap`, so it is planned for
+their pairs.
 The flat keywords (`include_hacking`, ..., `entry_types`) are also accepted
 here, with a `DeprecationWarning`, and applied over the adversarial kind (see
 [deprecated keywords](#deprecated-flat-keywords)). A key that only the
@@ -282,8 +290,11 @@ group at the table's weights, or [log-weighted](#log-weighting)
 ([inputs](stages/inputs.md#the-generation-axes),
 [outputs](stages/outputs.md#unit-and-ledger-key)); the prompt shows it in
 `{sample_spec}` or `{response_spec}`, and the row records it in a column per
-axis. Paraphrase rows carry no axis columns, by design: a paraphrase's
-`input_id` names the row whose spec it rewords.
+axis. The jailbreak and variation rows carry their input's columns. The
+eval files carry them too ([build](stages/build.md)): an input's own, an
+input's on its responses and attacks, a response's own `response_*` ones.
+Paraphrase rows carry no axis columns, by design (empty in the eval files): a
+paraphrase's `input_id` names the row whose spec it rewords.
 
 | Stage | Axis | Values (weight) |
 |---|---|---|
@@ -312,8 +323,10 @@ weight}}`, a value not named keeping its weight; an axis as `null` to leave
 it out; `false` for no axes, and the placeholder renders empty. Weights
 only: change a label or a hint in your own copy of the file
 ([your own config folder](#your-own-config-folder)). A stage's plan file
-records its `seed` and weights, so a resume with others raises, naming
-`resume=False`.
+(`constitution_inputs.plan.json`, `output_responses.plan.json`) records its
+`seed` and weights, the inputs' also `samples_per_entry`, so a resume with
+others raises, naming `resume=False`; the inputs compare only once the folder
+has a done unit. `resume=False` starts the whole inputs stage over.
 
 ### Log weighting
 
@@ -1174,7 +1187,9 @@ a run you already have, and what you will see; each point has its note below.
   WARNING (two entry types for one id raise); a kind whose pool is empty is
   skipped with a WARNING, as a kind with no matching entry type is; and the
   stage plans and loads a separate `check` model only when a kind's pool
-  holds a technique that is checked (the eval type's attacks hold none).
+  holds a technique that is checked (the eval type's attacks held none then;
+  since the benign pairs are checked, spec 1.4, a kind that draws `fsh` or
+  `dap` plans it too, which the eval type's do).
 - **A new layer, off by default.** The `rewrite` layer holds 16 model-written
   techniques (persuasion, tense rewrites, model distractors; attacks only).
   No packaged section allows it, so no pool, plan or draw changes unless a
@@ -2160,7 +2175,16 @@ process only.
 | `max_retries` | `2` | Retries the SDK makes of a failed call (a 429, a 5xx, a lost connection), with its own backoff, unseen by the rate limiter and the trace. A call that still fails stops the stage |
 | `timeout_s` | `null` | Seconds before the SDK gives up on a call; `null` keeps the SDK's default (10 minutes). Above 0 |
 
+On `anthropic`, a call's temperature is sent in `extra_body`, since the SDK
+(held below 2 in `pyproject.toml`) has no `temperature` keyword. An SDK that
+sends API version 2026-10-21 or later refuses a temperature on every model, so
+none is sent there, with one WARNING.
+
 ### `vllm` (VLLMConfig)
+
+The `vllm` setups need vLLM 0.31 or later (`pip install -e ".[vllm]"`); an
+older one installed is named in the import error, or in a warning when it
+imports.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -2225,7 +2249,7 @@ defingerprinting model lives in another repository; register it with the
 | `VENICE_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` | the shipped API setups | API keys, named by `api_key_env` |
 | `HF_HOME` | vLLM, transformers | The HuggingFace cache for weights, `~/.cache/huggingface` when unset. Give it room: the local weights of `venice-uncensored` take about 48 GB |
 | `HF_TOKEN` | HuggingFace | Access to gated checkpoints and datasets |
-| `REDACT_OUTPUT_DIR` | `paths.get_output_dir` | The default working root, and where `.env` is read |
+| `REDACT_OUTPUT_DIR` | `paths.get_output_dir` | The default working root, and where `.env` is read; its values win over the shell's. Left out, the first folder above the package that holds a `pyproject.toml` or `.git`, else the current directory |
 | `REDACT_TRACE` | `telemetry.install` | `jsonl` (default), `wandb` or `off` |
 | `WANDB_PROJECT` | the W&B sink | Project name, default `redact` |
 | `REDACT_GPU_PROVIDER` | the cost roll-up | Provider key in `gpu_pricing.json`; default `local`, priced at 0 |
@@ -2335,9 +2359,13 @@ loaded by `load_prompt(pipeline, category, prompt_dir)` or
 copy. A user folder holds only the prompts it changes, so the others stay
 current as the library's change. At the start of a run (with `verbose`) the
 driver logs how
-many prompts are overridden, and warns about a folder that matches no
-packaged prompt (a misspelt name) or that has several `.json` files and no
-`template.json`.
+many prompts are overridden (the names, when few), and warns about a
+`prompt_dir` that is not a folder, a folder that matches no packaged prompt
+(a misspelt name) or that has several `.json` files and no `template.json`,
+and one of the former `output/generation/` and `output/quality_check/` (now
+one per answer mode), naming where it goes. A folder under
+`paraphrase/generation/` named for a registered model is that model's own
+prompt (listed as a per-model override), any other name is unused.
 
 Every stage passes `prompt_dir` to the loader, so each prompt a model call
 is built from is read from the overlay when the overlay has it: the
@@ -2439,3 +2467,13 @@ render, and the next run would use it. `--overwrite` replaces them
 A `taxonomy_dir` of your own that still holds `content_moderation_categories.json`
 serves it for `harmful`, with a `DeprecationWarning`, for one release; rename
 the file `harmful.json`.
+
+A category's name is a folder name on disk (`constitution_inputs/<category>/`),
+and a run folder may be copied to another machine, so a name that cannot name
+a folder on every platform is refused before any call: a path separator, one
+of `<>:"|?*`, a control character, a trailing dot or space, an empty name, or
+a Windows device name such as `CON` or `NUL`. The constitution checks the
+categories it plans, the inputs stage every `source_category`, and
+`create_taxonomy` every category it writes. `create_taxonomy` also refuses
+(`FileExistsError`) to write over `harmful` or `benign` in the packaged
+folder unless `overwrite=True`; give it a `taxonomy_dir` of your own.
