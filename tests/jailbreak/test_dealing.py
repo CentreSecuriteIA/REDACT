@@ -297,8 +297,14 @@ def test_the_default_attacks_draw_every_technique_of_their_pool(section):
     holds them all. The first eval release's rules left the ten heavy full-text
     encodings 5 draws in all under the unit budget and 10 under the group
     budget, five and two of them never, until they got a dealing slot of
-    their own (``sampling.HEAVY_ENCODINGS``)."""
-    units = 4000
+    their own (``sampling.HEAVY_ENCODINGS``). Spec 1.5's three new obfuscation
+    families (semantic_reencoding, translationese, sociolect) share the layer's
+    family-first picks, so the rarest members need more units to come up: at
+    4,000 two heavy ``to_sensitive_words_encode_*`` went undrawn under the
+    group budget, and the count moves to 5,000, where every technique of both
+    pools is drawn. The pool grows with each release, so this number grows
+    with it; it is a coverage floor, not a tuning figure."""
+    units = 5000
     drawn, pool = simulate.deal_kind(section, units, groups=3, seed=42)
     table = simulate.shares(drawn, pool)
     texts = simulate.inputs(units, groups=3)["prompt"]
@@ -583,7 +589,9 @@ _BUDGETS = [
 # the translation model under the switch, which these draws have on) moved it
 # again: it joins the obfuscation family-first picks, and 6 of the 200 undealt
 # draws now hold it.
-_PINNED_DRAWS = "143759b9805301cd55b07e256613eeb9937699f35e2c0a467d2c14152ac4bf0d"
+# Spec 1.5's five sociolects (a third new obfuscation family, on the generation
+# model) moved it once more, the same way: 11 of the 200 undealt draws hold one.
+_PINNED_DRAWS = "4526a794f489d3b997b906219faed13d0a30896b769936d962fd770307434921"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

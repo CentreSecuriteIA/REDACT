@@ -123,6 +123,16 @@
       "calls": [3, 16],
       "cross_incompatible_with": ["ascii_art", "encode", "sensitive_words", "tokenbreak", "word_art", "wording", "typos", "casual_writing", "noise", "payload_split", "translation", "dialect", "code_switching", "transliteration", "romanization", "semantic_reencoding"]
     },
+    "sociolect": {
+      "description": "A model rewrites the prompt in an English sociolect or variety (African American English, Singlish, Indian English, Jamaican English, Scottish English), keeping the meaning, one technique per row of sociolect_varieties.json. A whole-text rewrite at the front of the obfuscations, on the generation model (not the translation model, so no switch gates it); a code gate checks the output is not empty, not the original unchanged and within a length band, then the check model reads it for meaning (check meaning). GlotLID reads only the language (English), not the variety, so the variety itself is not verified here and no native speaker has read any of it: the varieties exist to measure classifier robustness to dialect cues, not to caricature (see the literature blockers). It refuses the same obfuscation families a translation does, translation itself, the language-mix families and the other semantic-reencoding families semantic_reencoding and translationese. Spec 1.5; adversarial only.",
+      "layer": "obfuscation",
+      "dimension": "language",
+      "kinds": ["adversarial"],
+      "within_layer_order": 17,
+      "check": "meaning",
+      "calls": [2, 4],
+      "cross_incompatible_with": ["ascii_art", "encode", "sensitive_words", "tokenbreak", "word_art", "wording", "typos", "casual_writing", "noise", "payload_split", "translation", "dialect", "code_switching", "transliteration", "romanization", "semantic_reencoding", "translationese"]
+    },
     "typos": {
       "description": "LLM-rewritten prompt with varying typo density",
       "layer": "obfuscation",
@@ -402,7 +412,8 @@
     "suffixes":        { "file": "obfuscation/suffix_strings.json", "name": "to_adversarial_suffix_{slug}", "complexity": 1, "requires_llm": false, "kinds": ["adversarial"], "cross_incompatible_with": ["ascii_art"] },
     "code_switching":  { "file": "code_switch_languages.json", "name": "to_code_switch_{slug}", "requires_llm": true, "complexity": 2 },
     "romanization":    { "file": "romanization_languages.json", "name": "to_romanize_{slug}", "requires_llm": true, "complexity": 2 },
-    "dialect":         { "file": "dialect_variants.json", "name": "to_dialect_{slug}", "requires_llm": true, "complexity": 2 }
+    "dialect":         { "file": "dialect_variants.json", "name": "to_dialect_{slug}", "requires_llm": true, "complexity": 2 },
+    "sociolect":       { "file": "sociolect_varieties.json", "name": "to_sociolect_{slug}", "requires_llm": true, "complexity": 2 }
   },
 
   "techniques": {

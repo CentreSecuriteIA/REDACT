@@ -1,0 +1,10 @@
+{
+  "_comment": "English sociolects and varieties for the sociolect family (spec 1.5, jailbreak/obfuscation/sociolect.py). One row per technique (to_sociolect_<slug>): a model rewrites the prompt in that variety, keeping the meaning. 'name' is shown to the model and in the row's info; 'slug' names the technique; 'since' is the spec version that added it. The varieties exist to measure classifier robustness to dialect cues, not to caricature; their fidelity cannot be verified here (no native speaker, and GlotLID reads only the language, not the variety). Add a row to add a technique; import fails while this file and the spec disagree.",
+  "rows": [
+    {"name": "African American English", "slug": "african_american_english", "since": "1.5"},
+    {"name": "Singlish (Singaporean colloquial English)", "slug": "singlish", "since": "1.5"},
+    {"name": "Indian English", "slug": "indian_english", "since": "1.5"},
+    {"name": "Jamaican English (Patois-influenced English)", "slug": "jamaican_english", "since": "1.5"},
+    {"name": "Scottish English", "slug": "scottish_english", "since": "1.5"}
+  ]
+}
