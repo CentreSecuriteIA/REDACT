@@ -18,6 +18,7 @@ import itertools
 import logging
 import multiprocessing
 import os
+import re
 import threading
 import time
 from collections.abc import Collection, Mapping
@@ -91,6 +92,30 @@ _GRACE_S = 10.0
 _exit_hook_registered = False
 # Numbers the requests: an engine needs each id unique in the process.
 _request_ids = itertools.count()
+# What vLLM's validation error says of a prompt that leaves no room for a
+# reply, whatever parameter it names. Longer than the context, it names
+# input_tokens ("This model's maximum context length is 384 tokens.
+# However, ... your prompt contains at least 385 input tokens"); exactly as
+# long as the context, vLLM 0.31 names none ("The decoder prompt (length
+# 384) plus the number of requested output tokens (at least 1) is longer
+# than the max ..."). An older vLLM said "The decoder prompt (length N) is
+# longer than the maximum model length of M" in a ValueError.
+_PROMPT_TOO_LONG = re.compile(
+    r"\bprompt \(length \d+\).*\bis longer than the max"
+    r"|\bmaximum context length is \d+ tokens\b.*\bprompt contains\b",
+    re.DOTALL | re.IGNORECASE)
+
+
+def _is_prompt_too_long(exc: BaseException) -> bool:
+    """Whether the engine failed a request because its prompt fills or
+    exceeds the model's context: an error on the parameter ``input_tokens``,
+    or a validation error (a ``ValueError``, as vLLM's
+    ``VLLMValidationError`` is) whose message says so
+    (:data:`_PROMPT_TOO_LONG`), whatever parameter it names. Any other
+    error is not, a validation error that says something else among them."""
+    if getattr(exc, "parameter", None) == "input_tokens":
+        return True
+    return isinstance(exc, ValueError) and bool(_PROMPT_TOO_LONG.search(str(exc)))
 # Seconds between two stats lines of an engine built with disable_log_stats
 # false, as often as vLLM's own server logs them.
 _STATS_INTERVAL_S = 10.0
@@ -873,7 +898,8 @@ class VLLMBackend(LLMBackend):
             The reply's text.
 
         Raises:
-            PromptTooLongError: The prompt is longer than the model's context.
+            PromptTooLongError: The prompt fills the model's context or is
+                longer, leaving no room for a reply.
             RuntimeError: The engine was released, sent no output, or
                 aborted the request and sent only part of a reply.
         """
@@ -929,9 +955,10 @@ class VLLMBackend(LLMBackend):
                 temperature=temp, error=f"{type(exc).__name__}: {exc}",
             )
             # The engine fails this one request and goes on with the others.
-            # Read off the error itself: vLLM's validation error names the
-            # parameter it rejected, and older versions have no such class.
-            if getattr(exc, "parameter", None) == "input_tokens":
+            # Read off the error itself: a prompt longer than the context is
+            # a validation error on input_tokens, one exactly as long names
+            # no parameter and is told by its message.
+            if _is_prompt_too_long(exc):
                 raise PromptTooLongError(str(exc)) from exc
             raise
         reply = final.outputs[0]

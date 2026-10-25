@@ -1072,6 +1072,50 @@ class TestVLLMAgenerate:
         assert str(raised.value) == str(error) and raised.value.__cause__ is error
         assert [event["error"] for event in events] == [f"VLLMValidationError: {error}"]
 
+    @pytest.mark.parametrize("error", [
+        # vLLM 0.31, a prompt exactly as long as the context: no parameter.
+        VLLMValidationError(
+            "The decoder prompt (length 384) plus the number of requested output "
+            "tokens (at least 1) is longer than the max model length of 384."),
+        # An older vLLM: a ValueError with no parameter at all.
+        ValueError(
+            "The decoder prompt (length 9000) is longer than the maximum model "
+            "length of 8192. Make sure that `max_model_len` is no smaller than "
+            "the number of text tokens."),
+        # The message alone, whatever parameter it names.
+        VLLMValidationError(
+            "This model's maximum context length is 384 tokens. However, you "
+            "requested 0 output tokens and your prompt contains at least 385 "
+            "input tokens", parameter="prompt"),
+    ], ids=["at_the_limit", "older_vllm", "by_message"])
+    def test_a_prompt_that_fills_the_context_raises_prompt_too_long(
+            self, monkeypatch, events, error):
+        """A prompt of exactly ``max_model_len`` tokens leaves no room for a
+        reply: the engine fails it with a validation error that names no
+        parameter, told by its message (seen on a pod: 384 tokens of a
+        384-token model), so it is isolated per unit as a longer one is."""
+        backend, _ = _vllm_backend(monkeypatch, {}, _Script(["hi"], fail={"hi": error}))
+        with pytest.raises(PromptTooLongError) as raised:
+            aio.run(backend.agenerate(_ask("hi")))
+        assert str(raised.value) == str(error) and raised.value.__cause__ is error
+        assert [event["error"] for event in events] == [
+            f"{type(error).__name__}: {error}"]
+
+    @pytest.mark.parametrize("error", [
+        VLLMValidationError("temperature must be non-negative, got -1.0."),
+        VLLMValidationError("The prompt is empty.", parameter="prompt"),
+        RuntimeError("The decoder prompt (length 384) is longer than the max "
+                     "model length of 384."),
+    ], ids=["another_validation", "empty_prompt", "not_a_validation_error"])
+    def test_another_error_that_names_no_parameter_stays_as_it_is(
+            self, monkeypatch, events, error):
+        """Only a too-long prompt is mapped: another validation error, or an
+        error that is no validation error whatever it says, propagates."""
+        backend, _ = _vllm_backend(monkeypatch, {}, _Script(["hi"], fail={"hi": error}))
+        with pytest.raises(type(error)) as raised:
+            aio.run(backend.agenerate(_ask("hi")))
+        assert raised.value is error
+
     def test_a_validation_error_on_another_parameter_stays_as_it_is(
             self, monkeypatch, events):
         error = VLLMValidationError(

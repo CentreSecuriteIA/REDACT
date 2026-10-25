@@ -160,8 +160,12 @@ down and its memory freed, and a client built on it raises on its next call.
   calls the engine's `do_log_stats()` every 10 s, so vLLM prints its stats
   line, the prefix-cache hit rate among them; a failed call is logged at
   DEBUG, and the task stops when the engine is released and at exit.
-- A prompt longer than the context raises `PromptTooLongError` for that
-  request only. A request aborted because its engine is released raises.
+- A prompt that fills the context or is longer raises
+  `PromptTooLongError` for that request only: vLLM's validation error on
+  `input_tokens`, or one whose message says the prompt is too long
+  (`_is_prompt_too_long`), as vLLM 0.31's is for a prompt of exactly
+  `max_model_len` tokens, which names no parameter. Any other validation
+  error propagates. A request aborted because its engine is released raises.
 - Every request records one `call` event, a failed or cancelled one too
   (with `error`): when one request of a `generate()` fails, the others are
   cancelled and each records its event.
