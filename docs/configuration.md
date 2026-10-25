@@ -1706,6 +1706,21 @@ holds an id over more keys, so its first resume gives the one WARNING; a
 plan drawn by these rules has none of its pending units refused, and can be
 resumed as it is.
 
+**Release note: the family and layer columns.** A build writes two more
+columns on its jailbreak and variation rows, read from `technique` through
+the library's registry: `families`, the first family of each technique, and
+`layers`, its layer, each `+`-joined in the order of `technique`, so a
+dataset can be split per family or per layer; a name the library does not
+register reads `?<name>` and `?`, and the build goes on
+([build](stages/build.md#the-families-and-layers-columns)).
+`complete_dataset.csv` has them after the jailbreak file's columns, and
+`eval_jailbreaks.csv` right after `technique`: an eval file built from now on
+has two more columns than one built before, so a reader that takes its
+columns by position, or compares two eval releases' headers, sees them. The
+stage files keep their columns, and nothing needs to run again: build again
+to get the columns. The build's run record now holds `spec_version`, the
+spec they were read off.
+
 ## The model registry
 
 `configs/llm/models.json` holds one entry per model, keyed by its registry

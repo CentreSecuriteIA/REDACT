@@ -217,7 +217,9 @@ tied to code, so they come from the package only.
    `config_dir` that folder and `config_files`, and for the jailbreak stage
    `spec_version`, `rules` (`stages.jailbreak_rules`: the `rules` id each
    kind's plan file records, by kind) and the resolved `augmentation`
-   section ([running.md](../running.md#what-lands-on-disk)). Leaving
+   section, and for the build `spec_version`, the spec its rows' `families`
+   and `layers` were read off
+   ([running.md](../running.md#what-lands-on-disk)). Leaving
    `telemetry.stage` logs the stage's replies cut at the token limit, per
    model.
 9. `finally`: clear the run's serving. When the run has a plan: join the

@@ -511,3 +511,35 @@ def test_a_name_the_spec_and_the_registry_do_not_share_raises(
 
     with pytest.raises(ValueError, match=missing):
         JPool._check_against_spec(techniques)
+
+
+# --- a row's families and layers ------------------------------------------------
+
+def _registry() -> dict:
+    return JPool.registry(JPool.all_techniques())
+
+
+def test_chain_tags_give_each_technique_its_first_family_and_layer_in_order():
+    """``to_sensitive_words_encode_base64`` is a ``sensitive_words`` and an
+    ``encode`` technique: its first family is the one its row names."""
+    chain = "to_hypothetical_framing+to_sensitive_words_encode_base64+to_rot13"
+    assert JPool.chain_tags(chain, _registry()) == (
+        "cognitive+sensitive_words+encode", "hacking+obfuscation+obfuscation")
+
+
+def test_chain_tags_read_a_retired_technique_as_any_other():
+    registry = _registry()
+    assert registry["to_politician_persona"].deprecated == "1.1"
+    assert JPool.chain_tags("to_politician_persona", registry) == (
+        "persona", "hacking")
+
+
+@pytest.mark.parametrize("chain, expected", [
+    ("to_not_a_technique", ("?to_not_a_technique", "?")),
+    ("to_rot13+to_not_a_technique+to_summarize",
+     ("encode+?to_not_a_technique+indirect", "obfuscation+?+requests")),
+    ("", ("", "")),
+    ("identity", ("", "")),
+])
+def test_chain_tags_mark_an_unregistered_name_and_never_raise(chain, expected):
+    assert JPool.chain_tags(chain, _registry()) == expected

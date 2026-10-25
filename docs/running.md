@@ -513,7 +513,9 @@ id of the type file the run read), with a `config_dir` that folder and
 `spec_version` (the library's), `rules` (the `rules` id each kind's plan
 file records, by kind, `null` for a kind without one: it tells files drawn
 before and after a change of the rules apart while the spec version stays)
-and the resolved `augmentation` section.
+and the resolved `augmentation` section, and for the build `spec_version`
+too: the spec its rows' `families` and `layers` columns were read off
+([build](stages/build.md#the-families-and-layers-columns)).
 
 ## Telemetry and cost
 

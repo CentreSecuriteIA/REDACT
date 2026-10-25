@@ -557,11 +557,13 @@ def run_pipeline(
                 if stage.extra_counts is not None:
                     counts.update(stage.extra_counts(ctx))
                 jailbreaks = name == "jailbreaks"
+                # The build reads its rows' families and layers off the spec.
                 path = write_record(
                     name, data_dir=ctx.data_dir, params=stage.params(ctx),
                     models=ctx.models, counts=counts,
                     sources=[str(p) for p in stage.sources(ctx) if p.exists()],
-                    spec_version=load_spec().get("version", "") if jailbreaks else None,
+                    spec_version=(load_spec().get("version", "")
+                                  if name in ("jailbreaks", "build") else None),
                     rules=jailbreak_rules(ctx) if jailbreaks else None,
                     extra={"serving": {role: served[role] for role, _ in stage.roles},
                            **noted,

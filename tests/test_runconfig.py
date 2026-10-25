@@ -1881,12 +1881,23 @@ def test_run_pipeline_eval_jailbreaks_and_build(tmp_path, monkeypatch):
     # build stage wrote the inputs and the attacks into the eval files, and
     # counted their rows
     assert not paths.complete_dataset_csv(tmp_path).exists()
-    assert read_record("build", tmp_path) is not None
+    # The build records the spec its rows' families and layers were read off.
+    from redact.jailbreak.technique import load_spec
+    assert read_record("build", tmp_path)["spec_version"] == load_spec()["version"]
     written = [pd.read_csv(path(tmp_path)) for path in (
         paths.eval_inputs_csv, paths.eval_outputs_csv, paths.eval_jailbreaks_csv)]
     assert [len(rows) for rows in written[:2]] == [3, 0]
     assert summary["stages"]["build"]["counts"] == {
         "rows": sum(len(rows) for rows in written)}
+    # Every attack names registered techniques: a family and a layer each.
+    attacks = written[2][written[2]["is_jailbreak"]]
+    assert len(attacks)
+    for chain, families, layers in zip(
+            attacks["technique"], attacks["families"], attacks["layers"]):
+        assert len(chain.split("+")) == len(families.split("+")) == len(
+            layers.split("+"))
+        assert "?" not in families + layers and set(layers.split("+")) == {
+            "obfuscation"}
 
 
 def test_a_training_run_reads_the_inputs_it_seeded(tmp_path, monkeypatch):
