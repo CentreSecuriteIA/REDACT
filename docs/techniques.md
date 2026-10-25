@@ -1456,7 +1456,10 @@ directive and variant of a fault. A pool should hold at least 8 variants
 (a request or framing directive, a container, a fake turn, the payload split's reassembly, the
 word art's decoding, the wording's key and puzzles), 12 for a benign role, 20 for small talk, 6 for the
 persona templates' mechanics and 4 for an encoding's decode hints;
-None of the 95 pools is below its floor today. The pools of the eval-pool
+None of the 106 pools is below its floor today (spec 1.5's literature-gap
+template families added eleven: policy_framing 2, code_framing 2, fallacy 1,
+reasoning_injection 1, bijection 1, unicode_smuggling 2 and special_tokens 2,
+each at the floor of 8). The pools of the eval-pool
 techniques that were (the five framing, the four continuation,
 `refusal_then_comply` and `past_tense`, each with 4) have 8 since the second
 eval release, which changed the eval text and pinned it again; the structural
