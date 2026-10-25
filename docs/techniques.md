@@ -102,7 +102,7 @@ that call a model call the generation model.
 | hacking | `persona` | `role_framing` |  | 14 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona`, `to_mercenary_persona`, `to_underground_hacker_persona`, `to_anarchist_philosopher_persona` |
 | hacking | `persona_template` | `role_framing` |  | 23 | no | no | `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template`, `to_caring_grandma_persona_template`, `to_worried_parent_persona_template`, `to_loyal_friend_persona_template`, `to_licensed_professional_persona_template`, `to_official_investigator_persona_template`, `to_research_scientist_persona_template`, `to_game_engine_persona_template`, `to_terminal_simulator_persona_template`, `to_simulation_rules_persona_template`, `to_penalty_game_persona_template`, `to_tagged_speaker_persona_template`, `to_character_reset_persona_template` |
 | obfuscation | `translation` | `language` | 10 | 24 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_chinese`, `to_hindi`, `to_yoruba`, `to_amharic` |
-| obfuscation | `dialect` | `language` | 11 | 6 | yes | no | `to_dialect_brazilian_portuguese`, `to_dialect_mexican_spanish`, `to_dialect_canadian_french`, `to_dialect_egyptian_arabic`, `to_dialect_swiss_german`, `to_dialect_traditional_chinese` |
+| obfuscation | `dialect` | `language` | 11 | 6 | yes | no | `to_dialect_brazilian_portuguese`, `to_dialect_mexican_spanish`, `to_dialect_canadian_french`, `to_dialect_egyptian_arabic`, `to_dialect_german_switzerland`, `to_dialect_traditional_chinese` |
 | obfuscation | `code_switching` | `language` | 12 | 10 | yes | no | `to_code_switch_spanish`, `to_code_switch_french`, `to_code_switch_german`, `to_code_switch_portuguese`, `to_code_switch_swahili`, `to_code_switch_russian`, `to_code_switch_arabic`, `to_code_switch_hindi`, `to_code_switch_chinese`, `to_code_switch_japanese` |
 | obfuscation | `transliteration` | `encoding` | 13 | 4 | no | no | `to_cyrillic_transliteration`, `to_greek_transliteration`, `to_devanagari_transliteration`, `to_arabic_transliteration` |
 | obfuscation | `romanization` | `language` | 14 | 10 | yes | no | `to_romanize_hindi`, `to_romanize_urdu`, `to_romanize_bengali`, `to_romanize_marathi`, `to_romanize_tamil`, `to_romanize_telugu`, `to_romanize_gujarati`, `to_romanize_punjabi`, `to_romanize_nepali`, `to_romanize_arabic` |
@@ -795,8 +795,12 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   `["adversarial", "natural"]`.
 - `dialect` (6, `to_dialect_<slug>`) translates the prompt into a regional
   variant: Brazilian Portuguese, Mexican Spanish, Canadian French, Egyptian
-  Arabic, Swiss German or Traditional Chinese, one technique per row of
-  `configs/jailbreak/dialect_variants.json`. It reuses the translation path
+  Arabic, German (Switzerland) or Traditional Chinese, one technique per row
+  of `configs/jailbreak/dialect_variants.json`. German (Switzerland),
+  `to_dialect_german_switzerland` (`de-CH`), writes standard German as used
+  in Switzerland; the Swiss German dialects (Schweizerdeutsch) are not
+  covered (not built: no model is known to write them, and nothing could
+  check them automatically). It reuses the translation path
   of `obfuscation/translation.py` (the piece-by-piece machine translation
   with the back-translation judge, or the chat path by the variant's name),
   and on a machine translator the variant's region or script code is sent.
@@ -805,8 +809,8 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   holds one plans that model. The code checks what GlotLID and the
   characters can tell: the base language's labels, a length band, for
   Traditional Chinese a share of Traditional over Simplified characters
-  (`simplified`), and for Swiss German no sharp s (`ß` or `ẞ`; Swiss
-  Standard German writes `ss`), a piece holding one rejected (`eszett`) and
+  (`simplified`), and for German (Switzerland) no sharp s (`ß` or `ẞ`;
+  Swiss Standard German writes `ss`), a piece holding one rejected (`eszett`) and
   translated again, as a piece failing any check is; these character checks
   run on a machine translator, while a chat translator's output is read by
   its check model alone. GlotLID tells the base language, not the region, so

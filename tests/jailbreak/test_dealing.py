@@ -563,7 +563,12 @@ _BUDGETS = [
 # draws): in groups of 30 units the slot takes its first pick early and its
 # next only after more units than the group has, so any weight from 0.2 to
 # 0.3 deals it on the same units (a weight of 1 moves 120 of the 240).
-_PINNED_DRAWS = "af558c1b95335e0bd4f8ac058beebf25b0e94f5be45d8865ad46a0f223c83623"
+# Renaming the de-CH dialect from to_dialect_swiss_german to
+# to_dialect_german_switzerland (standard German as written in Switzerland,
+# not the Swiss German dialects) moved it by the name alone: the draws are
+# the same, with the new name in the 5 of the 240 dealt units and the 2 of
+# the 200 undealt draws that held the technique (its row keeps its place).
+_PINNED_DRAWS = "ca39fc158e15fa9ab4ec9b1afa893de5e5c58693f878c64562291ef39ed379a2"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

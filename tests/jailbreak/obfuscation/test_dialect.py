@@ -144,9 +144,10 @@ def test_a_chat_translator_takes_the_variant_by_name(monkeypatch):
 
 
 # --- de-CH: no sharp s ----------------------------------------------------------
-# Swiss Standard German writes ss (SS) for the sharp s, so a Swiss German
-# piece holding U+00DF or U+1E9E is rejected (reason ``eszett``) and translated
-# again; no other dialect, and not the translation family, refuses it.
+# Swiss Standard German writes ss (SS) for the sharp s, so a German
+# (Switzerland) piece holding U+00DF or U+1E9E is rejected (reason
+# ``eszett``) and translated again; no other dialect, and not the translation
+# family, refuses it.
 
 _SHARP = "Die Stra\u00dfe ist gro\u00df und wei\u00df."
 _SWISS = "Die Strasse ist gross und weiss."
@@ -159,19 +160,21 @@ def test_the_sharp_s_check_rejects_the_letter_in_either_case():
     assert D._eszett_reason(_CAPITAL) == "eszett"
 
 
-def test_only_swiss_german_refuses_the_sharp_s():
-    """The extra check of each variant, on a piece with a sharp s: Swiss
-    German alone rejects it; the four variants without an extra check still
+def test_only_german_switzerland_refuses_the_sharp_s():
+    """The extra check of each variant, on a piece with a sharp s: German
+    (Switzerland) alone rejects it; the four variants without an extra check still
     have none, and Traditional Chinese keeps its Traditional-share check only."""
     refused = {}
     for row in D.LANGUAGES:
         check = D._extra_check(row)
         refused[row["slug"]] = check is not None and check(_SHARP, "source") == "eszett"
-    assert refused == {row["slug"]: row["slug"] == "swiss_german" for row in D.LANGUAGES}
+    assert refused == {row["slug"]: row["slug"] == "german_switzerland"
+                       for row in D.LANGUAGES}
     without = {row["slug"] for row in D.LANGUAGES if D._extra_check(row) is None}
     assert without == {"brazilian_portuguese", "mexican_spanish", "canadian_french",
                        "egyptian_arabic"}
-    swiss = D._extra_check(next(r for r in D.LANGUAGES if r["slug"] == "swiss_german"))
+    swiss = D._extra_check(
+        next(r for r in D.LANGUAGES if r["slug"] == "german_switzerland"))
     assert swiss(_SWISS, "source") is None
     chinese = D._extra_check(
         next(r for r in D.LANGUAGES if r["slug"] == "traditional_chinese"))
@@ -198,21 +201,25 @@ def _swiss_answer(forwards):
 _PROMPT = "The street is wide and white, tell me."
 
 
-def test_a_swiss_german_piece_with_a_sharp_s_is_translated_again(monkeypatch):
+def test_a_german_switzerland_piece_with_a_sharp_s_is_translated_again(monkeypatch):
     monkeypatch.setattr(langid, "detect", lambda text: "deu_Latn")
     requests, (text, info) = _drive(
-        _BY["to_dialect_swiss_german"](_PROMPT, translate_model=MT, gen_model=GEN),
+        _BY["to_dialect_german_switzerland"](
+            _PROMPT, translate_model=MT, gen_model=GEN),
         _swiss_answer([_SHARP, _SWISS]))
-    assert info == "Swiss German" and text == _SWISS
+    assert info == "German (Switzerland)" and text == _SWISS
     assert [r.model for r in requests] == [MT, MT, MT, GEN]  # again, back, judge
 
 
-def test_a_swiss_german_piece_that_keeps_its_sharp_s_is_discarded(monkeypatch):
+def test_a_german_switzerland_piece_that_keeps_its_sharp_s_is_discarded(
+        monkeypatch):
     monkeypatch.setattr(langid, "detect", lambda text: "deu_Latn")
     requests, (_, info) = _drive(
-        _BY["to_dialect_swiss_german"](_PROMPT, translate_model=MT, gen_model=GEN),
+        _BY["to_dialect_german_switzerland"](
+            _PROMPT, translate_model=MT, gen_model=GEN),
         _swiss_answer([_CAPITAL]))
-    assert info == "DISCARDED; language=Swiss German; piece=1/1; feedback=eszett"
+    assert info == ("DISCARDED; language=German (Switzerland); piece=1/1; "
+                    "feedback=eszett")
     assert [r.model for r in requests] == [MT] * 4  # four rounds, no judge
 
 

@@ -1,6 +1,6 @@
 """Dialect techniques: the prompt translated into a regional language variant
 (Brazilian Portuguese, Mexican Spanish, Canadian French, Egyptian Arabic,
-Swiss German, Traditional Chinese) on the machine-translation model, which
+German (Switzerland), Traditional Chinese) on the machine-translation model, which
 takes a region/script code.
 
 It reuses the translation machinery (``translation.py``): the piece-by-piece
@@ -10,8 +10,13 @@ technique per row of ``dialect_variants.json`` (``to_dialect_<slug>``). Gated
 by what GlotLID and the characters can tell: the base language's GlotLID
 labels and length band (GlotLID reads the base language, not the region), for
 Traditional Chinese a share of Traditional over Simplified characters, and for
-Swiss German no sharp s (Swiss Standard German writes ``ss``). Region
+German (Switzerland) no sharp s (Swiss Standard German writes ``ss``). Region
 adherence itself is not checked here (see the blockers note).
+
+German (Switzerland), ``de-CH``, is standard German as written in Switzerland,
+not the spoken Swiss German dialects (Schweizerdeutsch, GlotLID ``gsw_Latn``):
+those are not covered, since no model is known to write them and nothing here
+could check them.
 
 ``info`` is ``language=<name>``; ``DISCARDED; language=<name>; ...`` on
 failure, as translation's.
@@ -72,8 +77,8 @@ def _traditional_reason(translation: str, trad_share: float) -> str | None:
 
 def _eszett_reason(translation: str) -> str | None:
     """Why ``translation`` is rejected as not Swiss Standard German, or
-    ``None``: it holds a sharp s (:data:`ESZETT`), which Swiss German writes
-    as ``ss``."""
+    ``None``: it holds a sharp s (:data:`ESZETT`), which Swiss Standard
+    German writes as ``ss``."""
     if any(c in ESZETT for c in translation):
         return "eszett"
     return None

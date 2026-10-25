@@ -729,10 +729,10 @@ the default) and in `params["jailbreaks"]`.
   are marked adversarial and natural, so the packaged natural kind allows
   them. `dialect` translates the prompt into a regional variant
   (Brazilian Portuguese, Mexican Spanish, Canadian French, Egyptian Arabic,
-  Swiss German, Traditional Chinese) on the translation model, with the
+  German (Switzerland), Traditional Chinese) on the translation model, with the
   translation machinery and its checks (on a machine translator also a
   Traditional-character share for Traditional Chinese and no sharp s for
-  Swiss German, reasons `simplified` and `eszett`), so it follows the kind's
+  German (Switzerland), reasons `simplified` and `eszett`), so it follows the kind's
   `translation` switch (`false` removes it) and plans the translation model.
   `code_switching` and `romanization` are rewrites by the generation model
   (a second language mixed into the English prompt; a non-Latin language
