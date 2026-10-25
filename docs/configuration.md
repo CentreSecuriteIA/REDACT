@@ -164,7 +164,6 @@ names of the last two, are read for this release with a
 
 | Key | Default | Meaning |
 |---|---|---|
-| `style` | `"long"` | The prompt under `prompts/input/generation/from_constitution/<style>/`: `long` or `short`. With axes, the length axis sets each sample's length |
 | `samples_per_entry` | `3` | Samples per constitution entry: that many units, one sample per call. A whole number of at least 1 |
 | `entry_types` | `null` | Use only the constitution entries of these entry types |
 | `axes` | `null`: the table's | The [generation axes](#the-generation-axes) each unit is dealt a value of: `{axis: {value: weight}}` over the table's `inputs` section, an axis as `null` to leave it out; `false` for none. The `eval` type pins `directness` |
@@ -173,6 +172,28 @@ names of the last two, are read for this release with a
 | `batch_size` | `32` | Requests per grouped call; the stage keeps twice as many units live, or the widest async lane when larger |
 | `max_attempts` | `3` | Generations of a unit before a reply without its `[END]` marker, or with another number of samples than one, is given up |
 | `check_max_tokens` | `null` | Reply limit of a check call; `null` for the checker's default |
+
+#### Short inputs only
+
+The inputs stage has one generation template, and the `length` axis sets
+each sample's length. For short inputs only (what the former `short` style
+gave), give the long lengths weight 0:
+
+```json
+"inputs": {"axes": {"length": {"long": 0, "very_long": 0}}}
+```
+
+The overlay is value by value within an axis, so `fragment`, `one_liner` and
+`short` keep their weights; log weighting keeps a weight of 0 at 0; and
+`length` still varies, so the
+[dimension check](#dimensions-and-the-runs-check) passes. A params file's
+`inputs.axes` replaces the dataset type's `axes` key whole, so an `eval` run
+writes the type's `directness` pin again:
+
+```json
+"inputs": {"axes": {"directness": {"explicit": 1, "implicit": 0, "euphemistic": 0},
+                    "length": {"long": 0, "very_long": 0}}}
+```
 
 ### `outputs`
 
@@ -1926,6 +1947,12 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 `generate_attacks`, `score_attacks`, `optimize_attack`, `optimize`), take
 `prompt_dir` as a keyword.
 
+The words of a spec, the lines `{sample_spec}` and `{response_spec}` show
+(each axis's label, each value's label and hint), are not under `prompts/`:
+they live in `configs/generation_axes.json`, beside the weights, and a
+recipe's `config_dir` overlays that file whole
+([the generation axes](#the-generation-axes)).
+
 ### Prompt files
 
 ```json
@@ -1957,7 +1984,7 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 | Pipeline | Prompts |
 |---|---|
 | `constitution` | `harmful`, `dual_use_harmful`, `dual_use_benign`, `benign`, `general_benign` |
-| `input` | `generation/from_constitution/long`, `generation/from_constitution/short`, `quality_check` |
+| `input` | `generation`, `quality_check` |
 | `output` | `generation/harmful`, `generation/helpful`, `quality_check/harmful`, `quality_check/helpful`: one generation prompt and one checker per [answer mode](stages/outputs.md#answer-modes) |
 | `paraphrase` | `generation`, `generation/<model>` (a paraphraser's own, when it has one; the directory is the registry name), `check` |
 | `jailbreak` | `scenario_generation`, `persona_invention`, `persona_scenario_generation`, `jailbreak_construction`, `payload_split_semantic`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `pseudonym`, `word_game`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `persuasion_rewrite`, `tense_rewrite`, `model_distractor`, `preserve_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |

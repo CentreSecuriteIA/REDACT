@@ -155,7 +155,8 @@ def constitution_inputs_dir(root: str | Path | None = None) -> Path:
 
 
 def constitution_inputs_merged_csv(root: str | Path | None = None) -> Path:
-    """The accepted seeded inputs of every style, in one file for ``build_dataset``."""
+    """The accepted seeded inputs of every category, in one file for
+    ``build_dataset``."""
     return datasets(root) / CONSTITUTION_INPUTS_MERGED_FILENAME
 
 

@@ -76,17 +76,17 @@ class TestReadCategoryCsv:
 
 class TestSampleRow:
     _EXTRA = {"entry_type": "harmful", "subcategory": "Sub", "reasoning": "fine",
-              "template_style": "long", "rejection_reason": ""}
+              "iteration": 0, "rejection_reason": ""}
 
     def test_the_sample_columns_come_first_then_the_extra_ones(self):
         row = sample_row("a text", "Cyber", turn=2, accepted=False,
                          source="constitution", extra=self._EXTRA)
-        assert list(row) == [*SAMPLE_COLUMNS, "reasoning", "template_style"]
+        assert list(row) == [*SAMPLE_COLUMNS, "reasoning", "iteration"]
         assert row == {
             "sample_id": content_id("a text"), "sample": "a text", "category": "Cyber",
             "subcategory": "Sub", "entry_type": "harmful", "turn": 2, "accepted": False,
             "rejection_reason": "", "source": "constitution", "reasoning": "fine",
-            "template_style": "long"}
+            "iteration": 0}
 
     def test_a_sample_column_nothing_gives_is_empty(self):
         row = sample_row("a text", "Cyber", turn=0)

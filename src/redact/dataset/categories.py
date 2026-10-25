@@ -2,8 +2,8 @@
 ``Datasets/constitution_inputs/{category}/samples.csv``: its rows, read back,
 merged, capped per group.
 
-A category CSV may hold columns beyond ``SAMPLE_COLUMNS`` (template_style,
-rejection_reason, ...); they are kept on read.
+A category CSV may hold columns beyond ``SAMPLE_COLUMNS`` (rejection_reason,
+iteration, ...); they are kept on read.
 """
 
 from collections.abc import Mapping

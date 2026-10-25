@@ -66,7 +66,7 @@ def test_gen_captures_each_unit_of_an_entry_apart(tmp_path):
     pipe = _pipeline(tmp_path, gen_backend=gen)
     pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=2, verbose=False)
 
-    entry = content_id("desc one:harmful:")
+    entry = content_id("desc one:harmful")
     assert {c["internals_id"] for c in gen.calls} >= {
         f"{entry}/0/input", f"{entry}/1/input"}
     assert len({c["internals_id"] for c in gen.calls}) == 4
@@ -79,22 +79,8 @@ def test_gen_internals_id_is_entry_hash_slash_iteration_slash_input(tmp_path):
 
     seen = {c["internals_id"] for c in gen.calls}
     expected = {
-        f'{content_id("desc one:harmful:")}/0/input',
-        f'{content_id("desc two:benign:")}/0/input',
-    }
-    assert seen == expected
-
-
-def test_gen_internals_id_includes_style_suffix(tmp_path):
-    gen = _InternalsBackend([one("alpha sample"), one("beta sample")])
-    pipe = _pipeline(tmp_path, gen_backend=gen)
-    pipe.run_from_constitution(_const_df(), _PROMPT, samples_per_entry=1,
-                               style="long", verbose=False)
-
-    seen = {c["internals_id"] for c in gen.calls}
-    expected = {
-        f'{content_id("desc one:harmful:long")}/0/input_long',
-        f'{content_id("desc two:benign:long")}/0/input_long',
+        f'{content_id("desc one:harmful")}/0/input',
+        f'{content_id("desc two:benign")}/0/input',
     }
     assert seen == expected
 

@@ -52,7 +52,7 @@ and calls one core, then returns what the core returns.
 | Front | Core | Returns |
 |---|---|---|
 | `generate_constitution` | `ConstitutionPipeline.run` | the saved constitution |
-| `generate_inputs` | `InputPipeline.run_from_constitution` | the accepted inputs of the current style |
+| `generate_inputs` | `InputPipeline.run_from_constitution` | the accepted inputs |
 | `generate_outputs` | `content_moderation.run_output_generation` | the rows of `output_responses.csv` |
 | `generate_paraphrases` | `content_moderation.paraphrase.run_paraphrase_target`, per target | a frame per target that ran: `{"inputs": ...}` by default, `{"inputs": ..., "outputs": ...}` for `target="both"` |
 | `generate_jailbreaks` | `jailbreak.pipeline.run_augmentation`, per kind | the rows of `jailbreaks.csv` |
@@ -92,8 +92,8 @@ pipeline = InputPipeline(gen=client, check=client,
                          dataset_dir="./runs/eval/Datasets/constitution_inputs")
 result = pipeline.run_from_constitution(
     constitution_df=constitution,                     # from generate_constitution()
-    prompt_config=load_prompt("input", "generation/from_constitution/long"),
-    samples_per_entry=3, style="long",
+    prompt_config=load_prompt("input", "generation"),
+    samples_per_entry=3,
 )
 print(f"{result.total_prompts_accepted} accepted samples")
 ```
@@ -124,7 +124,7 @@ the params.
 | Stage | Roles | Files counted | Sources |
 |---|---|---|---|
 | `constitution` | `constitution` -> `constitution_gen` | `Data_cache/constitution/merged.csv` | the taxonomy file, and the benign taxonomy's with `include_general_benign` |
-| `inputs` | `gen`, `check` -> `uncensored_gen` | the category files of `constitution_inputs/`; accepted rows of the current style | the saved constitution, `merged.csv` |
+| `inputs` | `gen`, `check` -> `uncensored_gen` | the category files of `constitution_inputs/`; accepted rows | the saved constitution, `merged.csv` |
 | `outputs` | `gen`, `check` -> `uncensored_gen` | `output_responses.csv`, or its `output_path` | the input category files (`dataset.input_files`) |
 | `paraphrase` | `paraphraser` -> `paraphraser`, `paraphrase_check` -> `uncensored_gen` | the files of the target(s) (`inputs` by default), plus `skipped` from their ledgers | the input category files and `output_responses.csv`, per target |
 | `jailbreaks` | `gen`, `check` -> `uncensored_gen`, `translation` -> `translation` | `jailbreaks.csv` and `variations.csv`, each when its kind is on | the input category files |
@@ -333,7 +333,7 @@ How each stage departs from this:
 | Stage | Difference |
 |---|---|
 | constitution | `resume_state(artifact=<constitution folder>, pattern="*.csv", units_in=...)`: locked, every CSV's size recorded with each save, cut back on a resume; a fresh run's `resume_state` removes the CSVs. It saves after every unit (`every=1`), runs one unit at a time (`pool_size=1`), and reads back through `read_constitution` |
-| inputs | A tree of files: `artifact=folder, pattern="*/samples.csv"`, sidecars named `constitution_inputs.*` in the folder, `drop_units` for a fresh run of one style. Returns `ConstitutionInputResult`; the front reads the tree |
+| inputs | A tree of files: `artifact=folder, pattern="*/samples.csv"`, sidecars named `constitution_inputs.*` in the folder; a fresh run clears the whole tree. Returns `ConstitutionInputResult`; the front reads the tree |
 | outputs | Before step 3 it checks the inputs' entry types and renders its prompts and checkers; between steps 3 and 4 it stops on an old folder and on a changed plan file, then deals each unit an answer mode (a done unit keeping its ack's) and a spec |
 | paraphrase | Before step 3 the front checks every paraphraser's fingerprinted prompt and the core builds its checker; after step 4 the units of texts under `min_words` words are acked `skipped`, with no call; steps 5 and 6 run once per paraphraser, with the stage's own residency plan and an unload between paraphrasers that do not co-fit, in one `CommitBuffer` |
 | jailbreaks | Steps 2 to 7 run once per kind; the plan is reused on resume |

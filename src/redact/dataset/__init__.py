@@ -41,9 +41,6 @@ from .categories import (
 # Rows before acks
 from .save import CommitBuffer, commit
 
-# Starting part of a stage over
-from .drop import drop_units
-
 # What an eval build leaves out
 from .exclusion import Exclusion, exclusion_files
 
@@ -93,7 +90,6 @@ __all__ = [
     "count_rows",
     "create_taxonomy",
     "discover_categories",
-    "drop_units",
     "exclusion_files",
     "has_rows",
     "input_files",

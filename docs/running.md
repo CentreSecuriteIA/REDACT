@@ -126,7 +126,7 @@ the stage's name.
 ```json
 {
   "constitution": {"num_taxonomy_categories": 3, "num_categories": 10},
-  "inputs": {"samples_per_entry": 3, "style": "long"},
+  "inputs": {"samples_per_entry": 3},
   "outputs": {"max_per_category": 20},
   "jailbreaks": {"seed": 42}
 }
@@ -383,11 +383,8 @@ and ran the other 400. It ended with 432 rows, 433 ledger lines (the opening
 removes the stage's output, its `.cut` and `.tmp` files, its ledger and its
 manifest (and for each jailbreak kind its `.coverage.csv`, `.plan.json` and
 `.variants.csv`),
-then plans anew. The exceptions:
-
-- The `inputs` stage starts over only its current `style`. The rows and
-  acks of other styles stay.
-- The `constitution` stage removes every CSV in `Data_cache/constitution/`.
+then plans anew. The `inputs` stage removes its whole tree of category
+files, and the `constitution` stage every CSV in `Data_cache/constitution/`.
 
 The benign data (`Data_cache/benign/benign_samples.csv`) is never cleared:
 it always resumes from its ledger, generating only the units (one subcategory
@@ -446,21 +443,30 @@ in its pool, is skipped with a WARNING and cleared the same way.
   with a `ValueError` that names the keys (`Inputs: this run's [...] differ
   ...`, `Outputs: this run's [...] differ ...`); run the stage with
   `"resume": false`, or with the settings the plan was made with.
-- The inputs plan file holds one record per style, `{"styles": {<style>:
-  {seed, samples_per_entry, axes}}}`. A resume compares only its own style's
-  record, and only when that style has a done unit; a fresh run of one style
-  keeps the other styles' records. A one-record file an earlier version
-  wrote counts for every style with done units.
+- The inputs plan file holds one record, `{seed, samples_per_entry,
+  axes}`, as the outputs' does. A resume of the inputs compares it only
+  once the folder has a done unit: a run that stopped before its first save
+  goes on with its own settings and writes the record anew. The outputs
+  stage compares on every resume.
 - A plan file that holds no record (not JSON, or not an object, as one an
   earlier version cut off mid-write) stops a resume of the inputs, outputs
   or jailbreak stage before anything is cut, and gives the lock back. Delete
   it (the resume then runs unchecked, with a WARNING) or run with
-  `"resume": false`; a fresh run of one input style replaces it, with a
-  WARNING.
+  `"resume": false`, which writes it anew.
 - A rejected unit is acked and not retried: a constitution unit or a seeded
   entry rejected on every attempt, a rejected output, a dropped paraphrase.
-  Start the stage over to try them again.
+  Start the stage over to try them again; for the inputs that generates the
+  accepted inputs again too, with new ids, so the later stages start over
+  on them. A seeded entry's unit acked `rejected` with no row can also be
+  tried again alone, by deleting its line from the ledger.
 - A file you edited stops the resume (see the table below).
+- An inputs folder written before the stage had one generation template
+  (when a `style` picked one of two) is not supported: start a new
+  `data_dir`. Its rows carried a `template_style` column, which no file has
+  now: the input rows, the merged inputs file, the jailbreak and variation
+  rows and a training run's `complete_dataset.csv` carry the input axis
+  columns (`length` to `focus`) as they did, and a reader of
+  `complete_dataset.csv` must not require `template_style`.
 
 **Folders and setups from before the answer modes of the outputs stage.**
 
@@ -528,9 +534,8 @@ Other files you may see:
 |---|---|
 | `<ledger>.lock` | The stage's lock. The operating system holds it, so a run that died holds nothing; the file itself may stay |
 | `<output>.cut` | Bytes a resume cut off an output: the tail of a save that did not finish |
-| `<ledger>.dropping` | A fresh run of one seeded-inputs style that did not finish. Run it again |
 | `<kind>.plan.json` | What a jailbreak kind's plan was made with: `seed`, `rounds`, `pool`, `family_weights`, `layer_rates`, `spec_version`, `rules`. A resume compares them with the run's, the pool against what the library added or retired after `spec_version`, and warns when `spec_version` or `rules` is not today's |
-| `constitution_inputs.plan.json`, `output_responses.plan.json` | What the deal of the generation axes was made with: `seed`, the axes' weights, for the inputs `samples_per_entry` (one record per style, under `styles`), and for the outputs `outputs_per_input` and `modes` (the answer modes of every entry type). A resume compares them with the run's |
+| `constitution_inputs.plan.json`, `output_responses.plan.json` | What the deal of the generation axes was made with, one record: `seed`, the axes' weights, for the inputs `samples_per_entry`, and for the outputs `outputs_per_input` and `modes` (the answer modes of every entry type). A resume compares them with the run's (the inputs' once the folder has a done unit) |
 | `constitution_inputs.coverage.csv`, `output_responses.coverage.csv` | Per axis value, the specs planned and accepted per category and entry type; the outputs' also per answer mode (`axis` `mode`) |
 | `<kind>.coverage.csv` | Per layer, family and technique of a kind's plan, the count per category, entry type and iteration, with a zero row for each pool technique never drawn |
 | `<kind>.variants.csv` | Per template technique and variant, the rows of a kind's CSV that drew it, written after each run, with a zero row for each variant of the pool never drawn ([stages/jailbreaks.md](stages/jailbreaks.md#files)) |
@@ -541,7 +546,7 @@ A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`
 entry over them), `models` (the recipe's role names, its comment keys left
 out),
 `counts` (`rows`, and `accepted` when the files have that column; the inputs
-stage counts only the accepted rows of its `style`; an eval build with
+stage counts only the accepted rows of its category files; an eval build with
 `exclude_from` adds `excluded`; the paraphrase stage adds `skipped`: the units
 under `min_words` words, per reason), `sources` (the files the stage
 read its inputs from: the taxonomy file for the constitution, and the benign
@@ -623,7 +628,6 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `RuntimeError: ... is locked: another run, or this same process, is writing this stage's output` | Two runs on one output | Stop the other run, or use another `data_dir` |
 | `RuntimeError: Cannot resume <file>: <ledger> recorded N bytes of it and the file is missing / is M bytes / holds other bytes there` | The output has been replaced, edited or copied incompletely since its last save | Restore the file; or delete the ledger, and the next resume takes over the rows in the file; or start the stage over |
 | `RuntimeError: <file> is N bytes and <ledger> recorded M bytes after the last save: something else changed the file` | Another writer touched the output during the run | Stop the other writer, then resume |
-| `RuntimeError: A fresh run of 'long' did not finish in ...` | A fresh run of one seeded-inputs style stopped half way | Run that style again with `resume: false` |
 | ERROR `[residency] ...` with `PROBLEM:` lines | The local models of a stage do not fit the cards | Follow the plan's advice; the run continues and may run out of memory at load |
 | ERROR `[preload] <model> failed to load` | A background load failed | The stage that needs the model fails when it calls it, with the cause in the log |
 | WARNING `[vllm] The engine of ... failed to build with N copies ...; loading one copy on ... instead` | The engine failed to build with copies | The run goes on with one copy; set `"copies": 1` for that role to skip the attempt |
@@ -646,8 +650,8 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | WARNING `augmentations.adversarial.techniques.allow names ... (1.1), which the spec retired ...` (and a `DeprecationWarning`) | A kind's `techniques.allow` names a retired technique, which it still draws for this release | Take the name out of `techniques.allow` |
 | WARNING `jailbreak: the plan ... has no jailbreaks.plan.json beside it ...` | A plan made before plan files were written; its section and seed are not checked | Nothing, or `"resume": false` to plan again |
 | `ValueError: .../output_responses.state.jsonl acks units without an iteration ...` or `Cannot append to .../output_responses.csv: its header has no column 'iteration', 'response_mode', ... It was written before an input had several responses, each in an answer mode.` | A resume onto an outputs folder written when a unit was an input, before the answer modes | Run the outputs stage with `"resume": false`, or in a new `data_dir` |
-| `ValueError: Inputs: this run's ['samples_per_entry'] differ from those the units of style 'long' in constitution_inputs were dealt with ...` (or `['seed']`, `['axes']`) | A resume of a style with done units with another `samples_per_entry`, seed or axes' weights (another `axes_weighting` too) than the plan file's record for that style; a folder written by the fronts' defaults, then run as a `training` type (log weights), is one | Run the inputs stage with `"resume": false` (it starts that style over), or with the plan's settings |
-| `ValueError: The plan file <path> holds no plan record (...). Delete it ..., or run with resume=False ...` | A resume of the inputs, outputs or jailbreak stage found a plan file that is not a JSON object, such as one an earlier version cut off mid-write; nothing was cut, and the lock is given back | Delete the file (the resume then runs unchecked, with a WARNING), or `"resume": false`; a fresh run of one input style removes it itself, with a WARNING |
+| `ValueError: Inputs: this run's ['samples_per_entry'] differ from those the units in constitution_inputs were dealt with ...` (or `['seed']`, `['axes']`) | A resume of an inputs folder with done units with another `samples_per_entry`, seed or axes' weights (another `axes_weighting` too) than its plan file's record; a folder written by the fronts' defaults, then run as a `training` type (log weights), is one | Run the inputs stage with `"resume": false` (it starts the stage over), or with the plan's settings |
+| `ValueError: The plan file <path> holds no plan record (...). Delete it ..., or run with resume=False ...` | A resume of the inputs, outputs or jailbreak stage found a plan file that is not a JSON object, such as one an earlier version cut off mid-write; nothing was cut, and the lock is given back | Delete the file (the resume then runs unchecked, with a WARNING), or `"resume": false`, which writes it anew |
 | `RuntimeError: Cannot resume .../merged.csv: constitution.state.jsonl recorded ...` | A constitution CSV is missing, or was edited or replaced since its last save | Restore the file; or delete the ledger, and the next resume takes over the units whose rows are in `merged.csv`; or `"resume": false` |
 | `ValueError: Category name '...' cannot name a folder: ...` | A taxonomy (or constitution) category with a path separator, one of `<>:"?*` or the vertical bar, a control character, a trailing dot or space, an empty name, or a Windows device name (`CON`, `NUL`, `COM1`, ...); raised by the constitution or the inputs stage before any call | Rename the category in the taxonomy |
 | `ValueError: Outputs: this run's ['outputs_per_input'] differ from those the responses in output_responses.csv were dealt with ...` (or `['modes']`) | A resume with another `outputs.outputs_per_input` or `outputs.modes` (or seed, or axes' weights) than the plan file's; a training folder of one response per input resumed with the type's 2 is one | Run the outputs stage with `"resume": false`, or with the plan's settings |

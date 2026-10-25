@@ -208,7 +208,6 @@ def generate_inputs(
     prompt_dir: str | Path | None = None,
     resume: bool = True,
     verbose: bool = True,
-    style: str = "long",
     samples_per_entry: int = 3,
     entry_types: list[str] | None = None,
     batch_size: int = 32,
@@ -240,10 +239,9 @@ def generate_inputs(
             check prompts. ``None`` (default) falls back to the bundled
             ``prompts/``.
         resume: When True (default), skip the units ``(entry, iteration)``
-            already acked in the ledger. When False, start this style over.
+            already acked in the ledger. When False, start the stage over:
+            the whole tree of category files is removed.
         verbose: Log progress.
-        style: Template style (``"long"`` / ``"short"`` / any directory under
-            ``prompts/input/generation/from_constitution/``).
         samples_per_entry: Samples per constitution entry, one call each.
         entry_types: Filter constitution entries to these types
             (e.g. ``["harmful", "benign"]``). None = all.
@@ -257,8 +255,7 @@ def generate_inputs(
             ``inputs`` section of ``configs/generation_axes.json``: ``None``
             for those, ``False`` for none, or ``{axis: {value: weight}}``
             over them, an axis as ``None`` to leave it out. With axes the
-            length axis sets each sample's length; ``style`` picks the
-            prompt only.
+            length axis sets each sample's length.
         axes_weighting: ``"table"`` deals the axes' weights as they are,
             ``"log"`` spreads them more evenly over each axis's values
             (:func:`redact.content_moderation.axes.resolve`).
@@ -269,7 +266,7 @@ def generate_inputs(
         read_back: False returns an empty DataFrame and reads no sample back.
 
     Returns:
-        Merged DataFrame of accepted samples of ``style``.
+        Merged DataFrame of the accepted samples under ``data_dir``.
 
     Raises:
         ValueError: ``constitution_df`` is None and no constitution is saved
@@ -303,14 +300,12 @@ def generate_inputs(
             constitution_df["entry_type"].isin(entry_types)
         ].reset_index(drop=True)
 
-    prompt_config = load_prompt(
-        "input", f"generation/from_constitution/{style}", prompt_dir=prompt_dir
-    )
+    prompt_config = load_prompt("input", "generation", prompt_dir=prompt_dir)
 
     if verbose:
         logger.info("Generate Inputs (constitution-seeded)")
-        logger.info("Entries: %d | Style: %s | Samples/entry: %d | Batch: %d",
-                    len(constitution_df), style, samples_per_entry, batch_size)
+        logger.info("Entries: %d | Samples/entry: %d | Batch: %d",
+                    len(constitution_df), samples_per_entry, batch_size)
 
     result = pipeline.run_from_constitution(
         constitution_df=constitution_df,
@@ -320,7 +315,6 @@ def generate_inputs(
         verbose=verbose,
         batch_size=batch_size,
         resume=resume,
-        style=style,
         max_attempts=max_attempts,
         check_max_tokens=check_max_tokens,
         axes=axes,
@@ -331,7 +325,7 @@ def generate_inputs(
             result.total_prompts_accepted, result.total_prompts_generated)
 
     # The merged file build_dataset() reads: the accepted rows of every
-    # style under this data_dir, copied from the category files in chunks;
+    # category under this data_dir, copied from the category files in chunks;
     # removed when no sample is accepted, so the build takes no row the files
     # no longer hold.
     files = (paths.category_csv(c, root=ds_dir)
@@ -346,10 +340,7 @@ def generate_inputs(
         merged.unlink(missing_ok=True)
     if not read_back:
         return pd.DataFrame()
-    result = merge_all(ds_dir, accepted_only=True)
-    if style and not result.empty and "template_style" in result.columns:
-        result = result[result["template_style"] == style].reset_index(drop=True)
-    return result
+    return merge_all(ds_dir, accepted_only=True)
 
 
 def generate_outputs(
@@ -1315,9 +1306,15 @@ class _NaturalVariations:
 _EVAL_FILES = {"inputs": paths.eval_inputs_csv, "outputs": paths.eval_outputs_csv,
                "jailbreaks": paths.eval_jailbreaks_csv}
 
+#: The generation axis columns the eval files carry: an input's spec, and a
+#: response's (``content_moderation.axes.spec_columns`` of the packaged
+#: table's ``inputs`` and ``outputs`` sections).
+_INPUT_AXES = ("length", "register", "writer", "framing", "directness", "focus")
+_RESPONSE_AXES = ("response_length", "response_format", "response_register")
+
 #: The columns a derived eval row takes from its input when its own stage
 #: file lacks them.
-_FROM_INPUT = ("subcategory", "source_taxonomy")
+_FROM_INPUT = ("subcategory", "source_taxonomy", *_INPUT_AXES)
 
 
 def _build_eval(
@@ -1352,7 +1349,10 @@ def _eval_parts(parts: dict[str, Part]) -> dict[str, list[Part]]:
     mapped onto the file's columns.
 
     A stage part the build did not find is one without rows, so each file
-    has its columns whatever the run made.
+    has its columns whatever the run made. The generation axis columns are
+    an input's own on an input and a bare benign input, the input's on a
+    response and an attack, and a response's own on a response; a
+    paraphrase has none (the paraphraser rewrote what the spec asked for).
     """
     by_input = _by_input(parts.get("inputs"), _FROM_INPUT)
 
@@ -1364,26 +1364,32 @@ def _eval_parts(parts: dict[str, Part]) -> dict[str, list[Part]]:
               "subcategory": "subcategory", "source_taxonomy": "source_taxonomy"}
     derived = {**origin, **{column: _of_input(column, by_input[column])
                             for column in _FROM_INPUT}}
+    own_axes = {column: column for column in _INPUT_AXES}
     inputs = {"sample_id": "sample_id", "text": "sample", "label": "entry_type",
               "paraphrased": False, "input_id": None, "paraphrase_model": None,
-              **origin}
+              **origin, **own_axes}
+    # A paraphrase's own file has no axis column: without these Nones,
+    # _of_input would give it its input's spec.
     input_paraphrases = {**inputs, "paraphrased": True, "input_id": "input_id",
-                         "paraphrase_model": "paraphrase_model", **derived}
+                         "paraphrase_model": "paraphrase_model", **derived,
+                         **dict.fromkeys(_INPUT_AXES)}
     outputs = {"sample_id": "sample_id", "text": "output_response",
                "label": _response_label("Outputs"), "output_label": "output_label",
                "paraphrased": False, "input_id": "input_id", "model": "model",
-               "paraphrase_model": None, **derived}
+               "paraphrase_model": None, **derived,
+               **{column: column for column in _RESPONSE_AXES}}
     output_paraphrases = {**outputs, "text": "sample",
                           "label": _response_label("Output paraphrases"),
                           "paraphrased": True, "model": None,
-                          "paraphrase_model": "paraphrase_model"}
+                          "paraphrase_model": "paraphrase_model",
+                          **dict.fromkeys((*_INPUT_AXES, *_RESPONSE_AXES))}
     attacks = {"sample_id": "sample_id", "text": "jailbreak", "label": "entry_type",
                "is_jailbreak": True, "technique": "technique",
                "complexity": "complexity", "num_techniques": "num_techniques",
                "iteration": "iteration", "input_id": "input_id", **derived}
     negatives = {**attacks, "text": "sample", "is_jailbreak": False,
                  "technique": None, "complexity": None, "num_techniques": None,
-                 "iteration": None, "input_id": None, **origin}
+                 "iteration": None, "input_id": None, **origin, **own_axes}
     return {
         "inputs": [part("inputs", columns=inputs),
                    part("paraphrases_inputs", columns=input_paraphrases)],
@@ -1749,12 +1755,7 @@ def _run_inputs(ctx: RunContext) -> list[Path]:
 def _inputs_files(ctx: RunContext) -> tuple[list[Path], dict]:
     tree = paths.constitution_inputs_dir(ctx.data_dir)
     files = [paths.category_csv(c, root=tree) for c in discover_categories(tree)]
-    keep = {"accepted": True}
-    # Inputs of another style may share the tree.
-    style = _params(ctx, "inputs").get("style", "long")
-    if style:
-        keep["template_style"] = style
-    return files, keep
+    return files, {"accepted": True}
 
 
 def _outputs_kwargs(ctx: RunContext) -> dict:
