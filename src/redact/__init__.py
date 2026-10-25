@@ -66,7 +66,7 @@ from .driver import (  # noqa: E402
     write_manifest,
     write_record,
 )
-from .jailbreak import default_escalation_schedule  # noqa: E402
+from .jailbreak import default_escalation_schedule, search_combinations  # noqa: E402
 from .llms.prompting import scaffold_setup  # noqa: E402
 from .multi_turn import evaluate_conversations, generate_conversations  # noqa: E402
 from .recipe import load_params, load_recipe  # noqa: E402
@@ -114,6 +114,7 @@ __all__ = [
     "residency",
     "run_pipeline",
     "scaffold_setup",
+    "search_combinations",
     "set_seed",
     "telemetry",
     "write_manifest",
