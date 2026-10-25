@@ -9,7 +9,7 @@ Augment the accepted inputs with technique combinations, in two kinds:
 
 | Kind | Writes | Default |
 |---|---|---|
-| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from 251 techniques in 29 families, the 24 translations among them: the 281 active techniques less the 16 of the `rewrite` layer (off by default), the nine `casual_writing` ones and the five natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
+| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from 255 techniques in 30 families, the 24 translations among them: the 285 active techniques less the 16 of the `rewrite` layer (off by default), the nine `casual_writing` ones and the five natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
 | `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 72 techniques (96 with `"translation": true`, which adds the 24 translations) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
@@ -44,8 +44,8 @@ in [techniques.md](../techniques.md).
 - With no input file the front raises `No input samples found`; with no
   accepted input it warns `jailbreaks skipped: ...` and writes nothing. With
   `resume: false` it also removes the files of each kind that is on: CSV,
-  `.cut` and `.tmp` files, ledger, manifest, plan file, coverage table and
-  variants table (`dataset.clear_stage`).
+  `.cut` and `.tmp` files, ledger, manifest, plan file, coverage table,
+  variants table and scenarios table (`dataset.clear_stage`).
 
 ## Models
 
@@ -98,8 +98,9 @@ its own manifest, plan file, ledger, coverage table and variants table.
 | `Datasets/jailbreaks.state.jsonl` | Its ledger |
 | `Datasets/jailbreaks.coverage.csv` | What its plan drew |
 | `Datasets/jailbreaks.variants.csv` | Which template variants its rows drew, written after each run |
+| `Datasets/jailbreaks.scenarios.csv` | With `scenarios` on: the scene each cognitive or persona technique built its row on ([below](#the-scenarios-table)) |
 | `Datasets/jailbreaks.plan.json` | What its plan was made with: `seed`, `rounds`, `pool` (the technique names), `family_weights`, `layer_rates`, `spec_version` (the spec's `version`, which dates the pool), `rules` (a content id of the rules the pool was drawn by) |
-| `Datasets/variations.csv` and its five sidecars | The same for the natural kind |
+| `Datasets/variations.csv` and its sidecars | The same for the natural kind |
 | `Data_cache/benign/benign_samples.csv` | The benign data, shared by both kinds, with its `.manifest.jsonl` and `.state.jsonl` |
 
 `variations.csv` goes to `variations_path` when given, else beside
@@ -158,6 +159,37 @@ continuation writes `style=<name>`, read as its variant, and keeps it while
 the eval pool is pinned ([techniques.md](../techniques.md#the-eval-pool));
 the structural techniques write `variant=<name>` after the fields they drew
 (`to_json`'s priority and format, `to_xml`'s policy id).
+
+## The scenarios table
+
+A `cognitive` or `persona` technique has a model write a scenario, checks
+it, then has the model build the prompt on it
+([techniques.md](../techniques.md)): the row holds the built prompt, and its
+`technique_info` names the category only (`category=<key>`). With the
+stage's `scenarios` key on (`"jailbreaks": {"scenarios": true}` in a params
+file; off by default), each kind keeps the scenes in
+`<stem>.scenarios.csv` beside its manifest, so they can be read without
+growing the info column:
+
+| Column | Value |
+|---|---|
+| `input_id`, `iteration` | the unit's |
+| `sample_id` | the row's own, as in the kind's CSV: `jailbreak` of that row is the prompt built on the scene |
+| `technique` | the cognitive or persona technique that wrote it |
+| `scenario` | the scene the construction was built on: the one the check accepted |
+
+A unit records one scene per such technique (the hacking layer holds one),
+a rejected row's too (a later step may reject what was built on it); a
+scenario the check rejects every time, or that never came, records none.
+The scene goes to the table in the save of its unit's row, after the row
+and before the unit's ack. The table is not one of the stage's checked
+files: when the units are done, it is cut to the rows whose `(input_id,
+iteration, sample_id)` the kind's CSV holds, the last of a row repeated, so
+a save that stopped between the rows and the acks leaves no scene of a unit
+that ran again. A resumed run keeps the scenes of earlier runs, whether or
+not it records any itself; a fresh run (`resume: false`) removes the table,
+as it does the variants table. The eval type draws no cognitive or persona
+technique, and the natural kind never does, so their tables stay empty.
 
 ## The benign data
 
@@ -250,8 +282,8 @@ names a technique no registered function implements raises a `ValueError`
 naming `resume=False` when that unit is built, which stops the stage. Inputs
 added since the plan get no unit; a WARNING counts them and names
 `resume=False`. `resume: false` removes that kind's CSV, `.cut` and `.tmp`
-files, ledger, manifest, plan file, coverage table and variants table, then
-plans again. A
+files, ledger, manifest, plan file, coverage table, variants table and
+scenarios table, then plans again. A
 kind that is off is not touched ([running.md](../running.md#resume-fresh-runs-and-a-kill-partway-through)
 says how to plan one kind again and keep the other).
 
@@ -289,11 +321,12 @@ two wording techniques, three personas and four translations); a natural
 plan names the urgent ask alone, and the four translations too when its
 `translation` switch is on. The sixteen techniques of the `rewrite` layer
 are off by default, in no kind's pool, so no plan names them. Spec 1.4
-adds 37 techniques to the adversarial pool: twelve more persona templates
+adds 41 techniques to the adversarial pool: twelve more persona templates
 (emotional and family appeals, legitimate experts and authorities,
 simulated systems and games, and one frame each built around a point and
 penalty system, a persona-tagged opening and a stay-in-character reset),
-the 24 published adversarial suffixes and the Yoruba translation. An
+the 24 published adversarial suffixes, the Yoruba translation, the letter
+spacing and the three guardrail-address techniques. An
 adversarial plan kept from an earlier spec resumes with the growth WARNING
 naming them; a natural plan names Yoruba only when its `translation` switch
 is on, and the eval type's pool does not change.

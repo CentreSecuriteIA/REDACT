@@ -30,6 +30,7 @@ from redact.jailbreak.obfuscation.encoding import (
     to_leetspeak_advanced,
     to_leetspeak_basic,
     to_leetspeak_intermediate,
+    to_letter_spacing,
     to_lookalike_letters,
     to_math_styled,
     to_morse,
@@ -133,6 +134,34 @@ class TestSeparator:
         family = chr(0x1F468) + chr(0x200D) + chr(0x1F469)   # joined by a ZWJ
         text, info = to_separator(f"{accented}{family}!", rng=random.Random(0))
         assert text.split(info.removeprefix("sep=")) == [accented, family, "!"]
+
+
+class TestLetterSpacing:
+    def test_a_space_goes_between_every_two_characters(self):
+        text, info = to_letter_spacing("abc")
+        assert text == "a b c" and info == ""
+
+    def test_the_reference_output_for_a_plain_text(self):
+        """``" ".join(prompt)``: a word gap becomes three spaces, so the
+        words stay apart, and a line break gets a space on each side."""
+        prompt = "hi there\nyou"
+        assert to_letter_spacing(prompt) == (" ".join(prompt), "")
+
+    def test_a_mark_or_a_joined_sequence_stays_with_its_character(self):
+        accented = "e" + chr(0x301)
+        family = chr(0x1F468) + chr(0x200D) + chr(0x1F469)
+        text, _ = to_letter_spacing(f"{accented}{family}!")
+        assert text.split(" ") == [accented, family, "!"]
+
+    def test_it_spaces_out_any_script(self):
+        """No ``needs_latin``: the characters of another script are spaced too."""
+        text, _ = to_letter_spacing("日本a")
+        assert text == "日 本 a"
+
+    def test_a_word_gap_becomes_three_spaces_so_the_words_stay_apart(self):
+        text, _ = to_letter_spacing("ab cd")
+        assert text == "a b   c d"
+        assert text.split("   ") == ["a b", "c d"]
 
 
 THUMB = chr(0x1F44D)
@@ -425,7 +454,7 @@ class TestAllEncodings:
             assert len(result) == 2
 
     def test_get_encoding_functions_count(self):
-        assert len(get_encoding_functions()) == 27
+        assert len(get_encoding_functions()) == 28
 
     def test_output_differs_from_input(self):
         for fn in get_encoding_functions():

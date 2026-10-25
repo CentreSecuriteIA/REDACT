@@ -11,7 +11,9 @@ description for the prompt (``persona_invention``), as ``Name: ...`` then
 ``Description: ...``, and asked again, up to 3 replies, for any other form
 (:func:`_persona_of`); a prompt whose replies never took it is discarded
 (:data:`MALFORMED_PERSONA`). The persona scenario then goes as for a named
-persona, with the invented name and description.
+persona, with the invented name and description. As for the cognitive
+techniques, a ``record_scenario`` given is called with the scene the
+construction is built on.
 """
 
 import re
@@ -91,6 +93,7 @@ def _persona_gen(
     check_attempts: int = 2,
     scenario: str | None = None,
     prompt_dir=None,
+    record_scenario: Callable[[str], None] | None = None,
     **kwargs,
 ) -> TechniqueGen:
     """Yield the persona-scenario requests (``cognitive._scenario_gen``: the
@@ -101,7 +104,8 @@ def _persona_gen(
     :func:`display_name`, the info by its key. A scenario that no attempt
     parses or the check rejects every time returns the prompt with the discard
     info (:data:`~redact.jailbreak.hacking.cognitive.MALFORMED_SCENARIO`,
-    ``scenario check failed``).
+    ``scenario check failed``). ``record_scenario`` is called with the scene
+    the construction is built on, the one given or the one the check accepted.
     """
     if scenario is None:
         scenario, discard = yield from _scenario_gen(
@@ -113,6 +117,8 @@ def _persona_gen(
             check_attempts=check_attempts, prompt_dir=prompt_dir)
         if scenario is None:
             return prompt, discard
+    if record_scenario is not None:
+        record_scenario(scenario)
     jailbreak = yield LLMRequest(
         gen_model,
         _construction_messages(

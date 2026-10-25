@@ -41,7 +41,9 @@ def unit_gen(
     a unit with no seed leaves them to the global ``random``. With ``capture``
     the unit's LLM calls are tagged for internals capture under a provisional
     ``{id}/{label}/attempt_{iteration}`` root, which :func:`row_of` relabels to
-    the final ``sample_id`` once it is known.
+    the final ``sample_id`` once it is known. A unit with a ``scenarios``
+    list collects in it the scene each of its techniques built on
+    (:func:`~redact.jailbreak.chain.run_chain`).
     """
     root = None
     if capture:
@@ -54,6 +56,7 @@ def unit_gen(
         gen_model=gen_model, translate_model=translate_model,
         check_model=check_model,
         benign_data=benign_data, prompt_dir=prompt_dir, internals_root=root,
+        scenarios=unit.get("scenarios"),
         rng_seed=(
             None if unit.get("seed") is None
             else (unit["seed"], label, unit["id"], unit["iteration"])
@@ -68,6 +71,7 @@ def pending_units(
     completed: set,
     registry: dict[str, Callable],
     live: dict[int, dict],
+    scenarios: bool = False,
     **gen_kwargs,
 ) -> Iterator[tuple[int, Iterator]]:
     """Yield ``(i, generator)`` for each planned unit of these inputs not finished.
@@ -75,7 +79,8 @@ def pending_units(
     Each unit is keyed by its place among the pending units, so two plan rows
     with one ``(input_id, iteration)`` stay two units, and is recorded in
     ``live`` for :func:`row_of` to read when it finishes. A unit is built only
-    as the driver takes it, and carries the seed its plan row was drawn with.
+    as the driver takes it, and carries the seed its plan row was drawn with,
+    and with ``scenarios`` a list its techniques' scenes are collected in.
     ``gen_kwargs`` go to :func:`unit_gen`.
     """
     pending = (r for r in plan if is_pending(r, position, completed))
@@ -87,6 +92,7 @@ def pending_units(
             "combination": combination_of(r["combination"], registry),
             "iteration": int(r["iteration"]),
             "seed": (r.get("settings") or {}).get("seed"),
+            "scenarios": [] if scenarios else None,
         }
         live[i] = unit
         yield i, unit_gen(unit, **gen_kwargs)

@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 281 active techniques in 5 layers and 36
+The jailbreak stage draws from 285 active techniques in 5 layers and 37
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -72,10 +72,10 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 47 | at most 1 |
-| `obfuscation` | 14 | 135 | no cap |
-| `requests` | 12 | 68 | at most 1 |
+| `obfuscation` | 14 | 136 | no cap |
+| `requests` | 13 | 71 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| all | 36 | 281 | |
+| all | 37 | 285 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -108,7 +108,7 @@ that call a model call the generation model.
 | obfuscation | `word_art` | `encoding` | 55 | 1 | yes | no | `to_word_art` |
 | obfuscation | `suffixes` | `surface_noise` | 60 | 28 | no | no | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_fragments`, `to_adversarial_suffix_unicode`, `to_adversarial_suffix_emoji`, `to_adversarial_suffix_gcg_site_example`, `to_adversarial_suffix_gcg_repo_demo_llama2`, `to_adversarial_suffix_gcg_smoothllm_llama2_1`, `to_adversarial_suffix_gcg_smoothllm_llama2_2`, `to_adversarial_suffix_gcg_smoothllm_vicuna_1`, `to_adversarial_suffix_gcg_smoothllm_vicuna_2`, `to_adversarial_suffix_gcg_jbb_llama2_65`, `to_adversarial_suffix_gcg_jbb_llama2_75`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_78`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_86`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_1`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_48`, `to_adversarial_suffix_gcg_jbb_vicuna_2`, `to_adversarial_suffix_gcg_jbb_vicuna_6`, `to_adversarial_suffix_gcg_jbb_vicuna_26`, `to_adversarial_suffix_gcg_jbb_vicuna_32`, `to_adversarial_suffix_gcg_jbb_vicuna_38`, `to_adversarial_suffix_gcg_jbb_vicuna_45`, `to_adversarial_suffix_gcg_jbb_vicuna_54`, `to_adversarial_suffix_gcg_jbb_vicuna_76`, `to_adversarial_suffix_gcg_jbb_vicuna_77`, `to_adversarial_suffix_gcg_jbb_vicuna_90`, `to_adversarial_suffix_gcg_jbb_vicuna_95`, `to_adversarial_suffix_gcg_jbb_vicuna_97` |
 | obfuscation | `payload_split` | `encoding` | 65 | 2 | `to_payload_split_semantic` | no | `to_payload_split`, `to_payload_split_semantic` |
-| obfuscation | `encode` | `encoding` | 70 | 27 | no | no | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_basic`, `to_leetspeak_intermediate`, `to_leetspeak_advanced`, `to_morse`, `to_braille`, `to_reversed_characters`, `to_reversed_words`, `to_reversed_word_order`, `to_lookalike_letters`, `to_zero_width_noise`, `to_hex`, `to_binary`, `to_url_encoding`, `to_html_entities`, `to_base32`, `to_base85`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth`, `to_math_styled` |
+| obfuscation | `encode` | `encoding` | 70 | 28 | no | no | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_basic`, `to_leetspeak_intermediate`, `to_leetspeak_advanced`, `to_morse`, `to_braille`, `to_reversed_characters`, `to_reversed_words`, `to_reversed_word_order`, `to_lookalike_letters`, `to_zero_width_noise`, `to_hex`, `to_binary`, `to_url_encoding`, `to_html_entities`, `to_base32`, `to_base85`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth`, `to_math_styled`, `to_letter_spacing` |
 | obfuscation | `neutral_container` | `container` | 80 | 6 | no | no | `to_code_comment`, `to_yaml_document`, `to_csv_row`, `to_email_message`, `to_transcript_line`, `to_log_entry` |
 | obfuscation | `structural` | `container` | 80 | 3 | no | no | `to_json`, `to_xml`, `to_markdown` |
 | obfuscation | `ascii_art` | `encoding` | 90 | 1 | no | no | `to_ascii_art` |
@@ -119,6 +119,7 @@ that call a model call the generation model.
 | requests | `continuation` | `request_shape` |  | 4 | no | no | `to_continue_passage`, `to_complete_story`, `to_fill_in_blank`, `to_continue_instructions` |
 | requests | `distractor_prefix` | `request_shape` |  | 3 | no | no | `to_distractor_prefix_related`, `to_distractor_prefix_unrelated`, `to_distractor_prefix_task` |
 | requests | `distractor_suffix` | `request_shape` |  | 3 | no | no | `to_distractor_suffix_related`, `to_distractor_suffix_unrelated`, `to_distractor_suffix_task` |
+| requests | `guardrail_address` | `request_shape` |  | 3 | no | no | `to_guardrail_block_question`, `to_guardrail_classify_benign`, `to_guardrail_security_override` |
 | requests | `impersonation` | `role_framing` |  | 3 | no | no | `to_impersonate_good_person`, `to_impersonate_authority`, `to_impersonate_developer` |
 | requests | `indirect` | `request_shape` |  | 6 | no | no | `to_summarize`, `to_proofread`, `to_critique`, `to_translate_task`, `to_explain_to_child`, `to_rewrite` |
 | requests | `smalltalk_prefix` | `request_shape` |  | 1 | no | no | `to_smalltalk_prefix` |
@@ -141,8 +142,8 @@ belong to `encode`, so one of them blocks both families.
 `encode` techniques carry an `encode_weight`: `light` for `to_rot13`,
 `to_rot18`, `to_rot47`, `to_separator`, the three `to_leetspeak_*`, the
 three reversals, `to_lookalike_letters`, `to_zero_width_noise`,
-`to_url_encoding`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth` and
-`to_math_styled`; `heavy` for `to_base64`, `to_unicode_escape`,
+`to_url_encoding`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth`,
+`to_math_styled` and `to_letter_spacing`; `heavy` for `to_base64`, `to_unicode_escape`,
 `to_ascii_ordinal`, `to_hex`, `to_binary`, `to_html_entities`, `to_base32`,
 `to_base85`, `to_morse`, `to_braille` (each a code for every character, of
 complexity 3). The ten `to_sensitive_words_encode_*`
@@ -885,9 +886,20 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   and fullwidth and math-styled Unicode (math-styled drawing one
   Mathematical Alphanumeric style per call, reported in `math_style=<name>`).
   Hex, binary, HTML entities, base32 and base85 are `heavy`, the rest `light`.
-  Spec version 1.3 gives 21 of the 27 encodings *decode hints*, and the
-  second eval release the five heavy encodings of the eval pool too, 26 in
-  all: at the spec's
+  Spec version 1.4 adds `to_letter_spacing`, pure and `light`: a space
+  between every two characters a reader sees (the clusters the separator
+  keeps), so a space between two words becomes three and the words stay
+  apart. It is the `space_between_letters` attack of the BELLS guardrail
+  benchmark (`" ".join(prompt)`), whose output it gives for a text without a
+  combining mark or a joined sequence; the reference joins code points and
+  would set a mark apart from its letter. It spaces out any script, so it
+  has no `needs_latin`, and like every encoding it is kept from a
+  translation; it may sit with ASCII art (spaces draw) and with fsh, dap and
+  the fake turns (it is light). It is an attack only, and the eval type
+  denies it by name, so the pinned eval pool does not draw it.
+  Spec version 1.3 gives 21 of the 27 encodings *decode hints*, the
+  second eval release the five heavy encodings of the eval pool too, and
+  spec 1.4's letter spacing has four, 27 of the 28 in all: at the spec's
   `decode_hint_rate` (0.5), such an encoding writes one of four hints around
   the encoded text, drawn by `rng` after the encoding, which says how to
   decode it (the Caesar cipher's states the shift that call used). The hints
@@ -1047,6 +1059,32 @@ variation, so it takes its family's kinds. The
 `eval` type names `to_use_past_tense` alone of `temporal`, not the family,
 so its pool does not change.
 
+Spec version 1.4 adds the request family `guardrail_address` (BELLS audit
+M4): a sentence or block addressed to a content classifier or supervisor,
+before or after the prompt, saying the message is benign, already approved,
+or should be classified safe. The dataset's targets are such supervisors, so
+this aims at them rather than at the model. It is the
+`benign_instruction_for_classifier` transformation of the BELLS guardrail
+attacks, whose three formats are the three techniques, one each, the first
+variant of each copied from the reference:
+`to_guardrail_block_question` puts a block after the prompt that asks whether
+to block it and answers no; `to_guardrail_classify_benign` puts a line before
+the prompt telling the classifier to label it benign, the prompt in a tag;
+`to_guardrail_security_override` puts a block after the prompt claiming a
+prior review cleared it. Each draws one of eight variants of its pool in
+`requests/guardrail_templates.json` (its floor); the info is
+`guardrail=<directive>;variant=<name>`, and the prompt is kept as it is.
+They are attack only (their family's `kinds`), and the plan draws them for
+every input but an absolutely benign one (`requests/guardrail_address.py`
+carries an applicability on the entry type, the mirror of the benign roles):
+a note that a message is benign makes sense on a harmful or borderline
+input, not on one already benign, where it would label noise. Their
+dimension is `request_shape`, as the distractors', which also place text
+before or after the prompt; being a request-layer family, one is drawn per
+combination (the layer cap), competing with the other requests through the
+dealer as the distractors do, so a row carries one request frame. The eval
+type does not allow the family, so the pinned eval pool does not draw one.
+
 Three request families of spec version 1.2 are for natural variations only
 (their `kinds` are `["natural"]`, so no attack draws them): ordinary,
 harmless text that real users put around a request, which a classifier
@@ -1168,4 +1206,6 @@ Also beyond the reference list:
   penalty system, a persona-tagged opening and a stay-in-character reset;
   and 24 adversarial suffixes published with GCG and its follow-ups (the
   paper's project page, its repository's demo, SmoothLLM's and
-  JailbreakBench's artifacts), as published, beside the four noise suffixes.
+  JailbreakBench's artifacts), as published, beside the four noise suffixes;
+  and, from the BELLS guardrail attacks, the letter spacing (1) and the
+  guardrail address (3: a line or block addressed to the classifier).

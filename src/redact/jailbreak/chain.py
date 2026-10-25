@@ -6,6 +6,7 @@ import dataclasses
 import inspect
 import random
 from collections.abc import Callable, Iterable
+from functools import partial
 from pathlib import Path
 
 from redact.dataset.dealing import stable_seed
@@ -58,12 +59,18 @@ def _wrap(gen: TechniqueGen, limit: int | None, root: str | None) -> TechniqueGe
             return stop.value
 
 
+def _record(scenarios: list, technique: str, scene: str) -> None:
+    """Append ``technique``'s ``scene`` to ``scenarios``."""
+    scenarios.append((technique, scene))
+
+
 def run_chain(
     techniques: list[Callable],
     text: str,
     *,
     internals_root: str | None = None,
     rng_seed: tuple | None = None,
+    scenarios: list | None = None,
     **kwargs,
 ) -> TechniqueGen:
     """Run ``text`` through ``techniques`` in order, yielding each model call.
@@ -82,6 +89,12 @@ def run_chain(
     variant, applied last, picks its examples' subcategory on it and inserts
     the finished text among them.
 
+    With ``scenarios``, a list, each technique that takes it (or
+    ``**kwargs``) also gets ``record_scenario``, a callable that appends
+    ``(technique name, scene)`` to the list: a cognitive or persona
+    technique calls it with the scene it builds the prompt on
+    (:mod:`redact.jailbreak.scenarios`). Without one, no technique gets it.
+
     Returns ``(text, info)``: the steps' infos joined by ``;``, a step that
     left the text unchanged as ``noop=<name>``. The first rejection stops the
     chain and returns the text before it, with an info naming the technique;
@@ -95,6 +108,8 @@ def run_chain(
     for technique in techniques:
         if rng_seed is not None:
             kwargs["rng"] = random.Random(stable_seed(*rng_seed, technique.__name__))
+        if scenarios is not None:
+            kwargs["record_scenario"] = partial(_record, scenarios, technique.__name__)
         tech_kwargs = _select_kwargs(technique, kwargs)
         if inspect.isgeneratorfunction(technique):
             gen = technique(result, **tech_kwargs)

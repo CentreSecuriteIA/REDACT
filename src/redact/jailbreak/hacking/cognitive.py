@@ -7,7 +7,9 @@ The five techniques are the categories of
 :func:`~redact.llm_pipeline.extracted`'s attempts, then the prompt is
 discarded (:data:`MALFORMED_SCENARIO`); a scenario the check rejects is made
 again once with the verdict, then discarded (``reason=scenario check
-failed``).
+failed``). Given ``record_scenario`` (the chain's, when the stage records
+the scenarios), a technique calls it with the scene it builds the prompt on,
+once, before the construction request.
 """
 
 import re
@@ -127,6 +129,7 @@ def _cognitive_gen(
     check_attempts: int = 2,
     scenario: str | None = None,
     prompt_dir=None,
+    record_scenario: Callable[[str], None] | None = None,
     **kwargs,
 ) -> TechniqueGen:
     """Yield the scenario requests (:func:`_scenario_gen`), then the
@@ -136,6 +139,8 @@ def _cognitive_gen(
     A given ``scenario`` skips the scenario and its check. A scenario that no
     attempt parses or the check rejects every time returns the prompt with the
     discard info (:data:`MALFORMED_SCENARIO`, ``scenario check failed``).
+    ``record_scenario`` is called with the scene the construction is built
+    on, the one given or the one the check accepted.
     """
     if scenario is None:
         scenario, discard = yield from _scenario_gen(
@@ -144,6 +149,8 @@ def _cognitive_gen(
             prompt_dir=prompt_dir)
         if scenario is None:
             return prompt, discard
+    if record_scenario is not None:
+        record_scenario(scenario)
     technique = _TECHNIQUES[key]
     jailbreak = yield LLMRequest(gen_model, _construction_messages(
         prompt, technique["display_name"], technique["description"],

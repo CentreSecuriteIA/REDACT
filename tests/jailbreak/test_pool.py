@@ -166,7 +166,7 @@ def test_the_default_variation_pool_is_the_72_pinned_natural_techniques():
         "suffixes"}
 
 
-def test_the_default_attack_pool_is_251_techniques_in_29_families():
+def test_the_default_attack_pool_is_255_techniques_in_30_families():
     """Every active technique but casual writing and the natural-only
     families: the 24 translations included, now the packaged adversarial
     kind has its translation switch on (the four spec 1.3 ones are Hmong,
@@ -177,25 +177,25 @@ def test_the_default_attack_pool_is_251_techniques_in_29_families():
     persona templates, the three spec 1.3 answer formats, the three spec 1.3
     fake turns, the seven spec 1.3 members of the thin request families and
     the two spec 1.3 payload splits, the spec 1.3 word art and the three
-    spec 1.3 persona archetypes, the two spec 1.3 wording techniques, the
-    twelve spec 1.4 persona templates and the 24 spec 1.4 published suffixes
-    in.
-    Small talk and the benign roles leave it as it was."""
+    spec 1.3 persona archetypes, the two spec 1.3 wording techniques, and
+    spec 1.4's twelve persona templates, 24 published suffixes, letter
+    spacing and three guardrail-address techniques in. Small talk and the
+    benign roles leave it as it was."""
     pool = technique_pool(resolve(None, "adversarial"))
-    assert len(pool) == 251     # noqa: PLR2004
-    assert len({fn.families[0] for fn in pool}) == 29     # noqa: PLR2004
+    assert len(pool) == 255     # noqa: PLR2004
+    assert len({fn.families[0] for fn in pool}) == 30     # noqa: PLR2004
 
 
 def test_the_rewrite_layer_is_off_by_default_and_layers_allow_adds_its_16_techniques():
     """The spec has the layer off by default, so the default attack pool is
-    the 251 and no other pool holds a rewrite technique; a section that allows
+    the 255 and no other pool holds a rewrite technique; a section that allows
     the layer gains the 16 of its three families, and nothing else leaves or
     joins."""
     default = technique_pool(resolve(None, "adversarial"))
     allowed = technique_pool(resolve(
         {"adversarial": {"layers": {"allow": ["rewrite"]}}}, "adversarial"))
     gained = [fn for fn in allowed if fn not in default]
-    assert (len(default), len(allowed), len(gained)) == (251, 267, 16)   # noqa: PLR2004
+    assert (len(default), len(allowed), len(gained)) == (255, 271, 16)   # noqa: PLR2004
     assert gained == _rewrites(all_techniques())
     assert {fn.families[0] for fn in gained} == {
         "persuasion", "tense_rewrite", "model_distractors"}
@@ -527,3 +527,35 @@ def test_a_name_the_spec_and_the_registry_do_not_share_raises(
 
     with pytest.raises(ValueError, match=missing):
         JPool._check_against_spec(techniques)
+
+
+# --- a row's families and layers ------------------------------------------------
+
+def _registry() -> dict:
+    return JPool.registry(JPool.all_techniques())
+
+
+def test_chain_tags_give_each_technique_its_first_family_and_layer_in_order():
+    """``to_sensitive_words_encode_base64`` is a ``sensitive_words`` and an
+    ``encode`` technique: its first family is the one its row names."""
+    chain = "to_hypothetical_framing+to_sensitive_words_encode_base64+to_rot13"
+    assert JPool.chain_tags(chain, _registry()) == (
+        "cognitive+sensitive_words+encode", "hacking+obfuscation+obfuscation")
+
+
+def test_chain_tags_read_a_retired_technique_as_any_other():
+    registry = _registry()
+    assert registry["to_politician_persona"].deprecated == "1.1"
+    assert JPool.chain_tags("to_politician_persona", registry) == (
+        "persona", "hacking")
+
+
+@pytest.mark.parametrize("chain, expected", [
+    ("to_not_a_technique", ("?to_not_a_technique", "?")),
+    ("to_rot13+to_not_a_technique+to_summarize",
+     ("encode+?to_not_a_technique+indirect", "obfuscation+?+requests")),
+    ("", ("", "")),
+    ("identity", ("", "")),
+])
+def test_chain_tags_mark_an_unregistered_name_and_never_raise(chain, expected):
+    assert JPool.chain_tags(chain, _registry()) == expected

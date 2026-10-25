@@ -208,6 +208,7 @@ names of the last two, are read for this release with a
 | `variations_path` | beside `output_path`, else `Datasets/variations.csv` | The natural kind's file |
 | `manifest_path` | `jailbreaks.manifest.jsonl` beside the output | The adversarial kind's plan, with its plan file `<stem>.plan.json`, coverage table and variants table beside it |
 | `benign_path` | `Data_cache/benign/benign_samples.csv` | The benign data, with its manifest and ledger beside it |
+| `scenarios` | `false` | Keep the scene each cognitive or persona technique built its prompt on in `<stem>.scenarios.csv` beside each kind's manifest ([the scenarios table](stages/jailbreaks.md#the-scenarios-table)) |
 
 The run passes the recipe's `gen`, `check` and `translation` models as
 `model`, `check_model` and `translation_model`: the `check` model checks
@@ -690,16 +691,23 @@ the default) and in `params["jailbreaks"]`.
 
 **Spec version 1.4.** What changes for a run you already have:
 
-- **Thirty-seven techniques.** Spec 1.4 adds twelve persona templates and
-  the 24 published adversarial suffixes, both attack only, and the Yoruba
-  translation: the library has 281 active techniques (288
-  registered, 7 retired) in 36 families, the default attack pool goes from
-  214 to 251 techniques in 29 families, the natural pool stays at 72 (96
+- **Forty-one techniques.** Spec 1.4 adds twelve persona templates, the 24
+  published adversarial suffixes, the letter spacing and the three
+  techniques of a new request family, `guardrail_address`, all attack only,
+  and the Yoruba translation: the library has 285 active techniques (292
+  registered, 7 retired) in 37 families, the default attack pool goes from
+  214 to 255 techniques in 30 families, the natural pool stays at 72 (96
   with `"translation": true`, which adds Yoruba), and the `eval` type's pool
-  is unchanged (36). An attack plan kept from 1.3 resumes with the growth
-  WARNING naming them and does not draw them until planned again with
-  `resume=False`; a fresh plan with the same seed draws differently, since
-  three families are larger.
+  is unchanged (36: it allows none of the new families and denies
+  `to_letter_spacing` by name). An attack plan kept from 1.3 resumes with
+  the growth WARNING naming them and does not draw them until planned again
+  with `resume=False`; a fresh plan with the same seed draws differently,
+  since four families are larger and the request layer has one more.
+- **Twelve persona templates.** `persona_template` has 23 frames now, each
+  drawing one of the same six mechanics: three each of emotional and family
+  appeals, legitimate experts and authorities, and simulated systems and
+  games, and one each built around a point and penalty system, a
+  persona-tagged opening and a stay-in-character reset.
 - **The Yoruba translation.** `to_yoruba` (its row of `languages.json` says
   `"translation_since": "1.4"`) joins the default attack pool and the
   natural pool with `"translation": true`. Yoruba is on watch: in the
@@ -719,8 +727,19 @@ the default) and in `params["jailbreaks"]`.
   `configs/jailbreak/obfuscation/suffix_strings.json`: 24 strings copied
   from public GCG artifacts, each with its source and the model it was
   optimized against, a technique per row (`to_adversarial_suffix_<slug>`,
-  the suffix appended after a space), attack only; the four noise suffixes
-  stay.
+  the suffix appended after a space, the info `slug=<slug>`), attack only,
+  each refusing `ascii_art` as the unicode and emoji ones do; the four noise
+  suffixes stay.
+- **Two techniques from the BELLS guardrail attacks.** `to_letter_spacing`
+  (the `encode` family, light, with four decode hints) puts a space between
+  every two characters a reader sees, the reference `space_between_letters`.
+  `guardrail_address` is a new request family of three techniques, the
+  reference `benign_instruction_for_classifier`: a line or block addressed
+  to a content classifier or supervisor, before or after the prompt, saying
+  the message is benign or already approved. It is a request-layer family
+  (one request per combination, competing with the others), and the plan
+  draws it for every input but an absolutely benign one
+  ([techniques.md](techniques.md)).
 
 **Upgrading from spec version 1.0 to 1.3.** The
 jailbreak library grew from 151 techniques in 23 families to 244 active ones
@@ -1018,17 +1037,6 @@ and dual-use benign variations such a plan made with a technique the natural
 kind no longer draws, with one WARNING that counts them. A `config_dir` copy
 of `augmentations.json` whose natural `families.allow` names one of these
 families raises ([overlay rules](#overlay-rules)).
-
-**Release note: the techniques spec 1.4 adds.** Twelve pure persona
-templates join `persona_template` (23 frames now, each drawing one of the
-same six mechanics): three each of emotional and family appeals, legitimate
-experts and authorities, and simulated systems and games, and one each built
-around a point and penalty system, a persona-tagged opening and a
-stay-in-character reset. They are attack-only, so neither the natural pool
-(72) nor the `eval` type's pool (36) changes. An adversarial plan kept from
-spec 1.3 resumes with the growth WARNING naming them; a fresh one draws
-differently, since the family is larger. (The default attack pool and the
-other techniques of spec 1.4 are in the note on spec version 1.4, above.)
 
 **Release note: the techniques spec 1.3 adds.** Twenty-four pure template
 techniques, attack-only but the urgent ask, whose text the maintainers wrote
@@ -1381,12 +1389,12 @@ application costs 2 to 4 calls; a distractor costs 1 to 3 (a reply with no
 text is asked for again), and no check reads it. They add no model role.
 
 The layer is off, so a run that does not allow it changes nowhere: the
-default attack pool is still 251 techniques in 29 families, the natural pool
+default attack pool is still 255 techniques in 30 families, the natural pool
 the 72 (every rewrite technique says `["adversarial"]`), and the `eval`
 type's pool and draws are unchanged (36 techniques; its allow lists name no rewrite
 family, so allowing the layer there adds nothing to its pool or its rounds
 until the families are allowed too). A kind that allows the layer draws them: the packaged
-adversarial kind's pool is then 267 techniques in 32 families, its rounds say
+adversarial kind's pool is then 271 techniques in 33 families, its rounds say
 `include_rewrite: true` (an adversarial plan kept from a section that allowed
 the layer before its pool held a technique raises on resume naming `rounds`), a
 budget round deals the layer at `layer_rates.rewrite` (the spec's 0, with a
@@ -1760,6 +1768,32 @@ written before the id was narrowed (by an earlier build of this release)
 holds an id over more keys, so its first resume gives the one WARNING; a
 plan drawn by these rules has none of its pending units refused, and can be
 resumed as it is.
+
+**Release note: the family and layer columns.** A build writes two more
+columns on its jailbreak and variation rows, read from `technique` through
+the library's registry: `families`, the first family of each technique, and
+`layers`, its layer, each `+`-joined in the order of `technique`, so a
+dataset can be split per family or per layer; a name the library does not
+register reads `?<name>` and `?`, and the build goes on
+([build](stages/build.md#the-families-and-layers-columns)).
+`complete_dataset.csv` has them after the jailbreak file's columns, and
+`eval_jailbreaks.csv` right after `technique`: an eval file built from now on
+has two more columns than one built before, so a reader that takes its
+columns by position, or compares two eval releases' headers, sees them. The
+stage files keep their columns, and nothing needs to run again: build again
+to get the columns. The build's run record now holds `spec_version`, the
+spec they were read off.
+
+**Release note: the scenarios table.** The jailbreak stage takes
+`scenarios` (a params key under `jailbreaks`; off by default): on, each kind
+keeps the scene each cognitive or persona technique built its prompt on in
+`<stem>.scenarios.csv` beside its manifest (`input_id`, `iteration`,
+`sample_id`, `technique`, `scenario`), so the model-written scenarios can
+be read beside the rows without growing `technique_info`, which still names
+the category only ([the scenarios table](stages/jailbreaks.md#the-scenarios-table)).
+Turning it on changes no row and no plan: a kept plan resumes with it, and
+the table holds the scenes of the units that run from then on. A fresh run
+removes the table with the kind's other files.
 
 ## The model registry
 

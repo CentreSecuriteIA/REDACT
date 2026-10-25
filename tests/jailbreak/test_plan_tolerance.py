@@ -616,8 +616,10 @@ _FOUR_TRANSLATIONS = ["to_amharic", "to_chinese", "to_hindi", "to_hmong"]
 
 
 #: What spec 1.4 added to the attack pool, by family: twelve persona
-#: templates, the 24 published suffixes and the Yoruba translation.
-SPEC_1_4_ADDED = {"persona_template": 12, "suffixes": 24, "translation": 1}
+#: templates, the 24 published suffixes, the Yoruba translation, the letter
+#: spacing and the three guardrail-address techniques.
+SPEC_1_4_ADDED = {"persona_template": 12, "suffixes": 24, "translation": 1,
+                  "encode": 1, "guardrail_address": 3}
 
 
 def _by_family(names: list[str]) -> dict[str, int]:
@@ -633,9 +635,9 @@ def _growth_since_1_2(key: str, pool: list) -> tuple[list[str], list[str]] | Non
 
 
 def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
-    """The attack pool of a plan made at 1.2 differs from today's by 73 names,
+    """The attack pool of a plan made at 1.2 differs from today's by 77 names,
     none retired: 36 dated 1.3 (the four translations switched on among them)
-    and the 37 dated 1.4 (:data:`SPEC_1_4_ADDED`). The library added them
+    and the 41 dated 1.4 (:data:`SPEC_1_4_ADDED`). The library added them
     after the plan, so the plan is kept and the run warns."""
     added, retired = _growth_since_1_2(
         "adversarial", technique_pool(resolve(None, "adversarial")))
@@ -645,9 +647,10 @@ def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
         for version in {by_name[name].since for name in added}}
     assert retired == []
     assert {version: len(names) for version, names in by_version.items()} == {
-        "1.3": 36, "1.4": 37}
+        "1.3": 36, "1.4": 41}
     assert set(_FOUR_TRANSLATIONS) <= set(by_version["1.3"])
     assert _by_family(by_version["1.4"]) == SPEC_1_4_ADDED
+    assert "to_letter_spacing" in by_version["1.4"]
 
 
 def test_a_natural_plan_of_spec_1_2_finds_the_urgent_ask_as_the_library_s_growth():
@@ -672,9 +675,10 @@ def _growth_since_1_3(key: str, pool: list) -> tuple[list[str], list[str]] | Non
 
 def test_an_attack_plan_of_spec_1_3_finds_what_spec_1_4_added_as_growth():
     """Spec 1.4 switched Yoruba's translation on and added twelve persona
-    templates and the 24 published suffixes: a plan kept from 1.3 finds the
-    37 as the library's growth, retiring nothing, so the plan is kept and the
-    run warns."""
+    templates, the 24 published suffixes, the letter spacing and three
+    guardrail-address techniques: a plan kept from 1.3 finds the 41 as the
+    library's growth, retiring nothing, so the plan is kept and the run
+    warns."""
     added, retired = _growth_since_1_3(
         "adversarial", technique_pool(resolve(None, "adversarial")))
     assert "to_yoruba" in added and retired == []

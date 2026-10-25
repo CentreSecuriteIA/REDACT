@@ -60,6 +60,7 @@ FLOORS = {
     "continuation": 8,
     "distractor_prefix": 8,
     "distractor_suffix": 8,
+    "guardrail_address": 8,
     "impersonation": 8,
     "indirect": 8,
     "temporal": 8,

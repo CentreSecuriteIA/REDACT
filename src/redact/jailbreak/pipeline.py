@@ -24,7 +24,13 @@ from redact.dataset import (
     resume_state,
     row_ids,
 )
-from redact.dataset.planfile import changed_plan, plan_path, read_plan, variants_path
+from redact.dataset.planfile import (
+    changed_plan,
+    plan_path,
+    read_plan,
+    scenarios_path,
+    variants_path,
+)
 from redact.llm_pipeline import drive_units, pool_size
 from redact.llms.client import ModelClient
 
@@ -32,11 +38,17 @@ from . import pool as pool_module
 from .manipulation import get_or_generate_benign_data
 from .plan import coverage_path, plan_inputs, plan_run, rules_id
 from .rules import after_request_obfuscation, compatible
+from .scenarios import rows_of as scenario_rows
+from .scenarios import write_scenarios
 from .technique import FIRST_VERSION, load_spec, version_key
 from .units import error_row_of, is_pending, pending_units, row_of
 from .variants import write_variants
 
 logger = logging.getLogger(__name__)
+
+#: Where a row carries its unit's scenario rows to the save, which takes
+#: them out before the row is written.
+_SCENES = "_scenarios"
 
 
 def run_augmentation(
@@ -63,6 +75,7 @@ def run_augmentation(
     read_back: bool = True,
     label: str = "jailbreak",
     accept_noop: bool = True,
+    scenarios: bool = False,
 ) -> pd.DataFrame:
     """Augment the inputs with ``pool``'s techniques, appended to ``out_path``.
 
@@ -89,6 +102,15 @@ def run_augmentation(
     internals-capture root, and part of the techniques' random seed and of an
     error row's id. With ``accept_noop`` False, a row whose text
     is its input's is not accepted.
+
+    With ``scenarios``, the scene each cognitive or persona technique built
+    its prompt on goes to ``<stem>.scenarios.csv`` beside the manifest
+    (:mod:`redact.jailbreak.scenarios`): ``input_id``, ``iteration``,
+    ``sample_id`` (its row's), ``technique``, ``scenario``, appended in the
+    save of the unit's row, after it and before its ack. When the units are
+    done the table keeps only the rows whose output row ``out_path`` holds
+    (:func:`~redact.jailbreak.scenarios.write_scenarios`), whether this run
+    recorded scenes or not; a fresh run (``resume=False``) removes it.
 
     Each input's id is its ``sample_id`` when it has one, else the content id
     of its prompt. Of rows that share an id, the last is kept, with a
@@ -158,6 +180,9 @@ def run_augmentation(
     manifest = Manifest(man_path)
     completed = resume_state(
         ledger, resume=resume, artifact=out_path, manifest=manifest)
+    scenes_path = scenarios_path(man_path)
+    if not resume:
+        scenes_path.unlink(missing_ok=True)
 
     reused = resume and man_path.exists()
     # The spec version the plan was drawn at, which its rows record: this
@@ -272,7 +297,12 @@ def run_augmentation(
 
     def _append(rows: list[dict]) -> dict[Path, int]:
         nonlocal written
+        # The scenes after their rows: a save stopped between the two runs
+        # its units again, and the table is kept to the output at the end.
+        scenes = [scene for row in rows for scene in row.pop(_SCENES, ())]
         sizes = append_rows(out_path, rows)
+        if scenes:
+            append_rows(scenes_path, scenes)
         written += len(rows)
         if verbose:
             n_acc = sum(1 for x in rows if x.get("accepted"))
@@ -284,8 +314,11 @@ def run_augmentation(
 
     def _row(unit: dict, make: Callable) -> None:
         input_row = inputs.iloc[position[unit["id"]]].to_dict()
-        buf.add([make(unit, input_row)], {"input_id": str(unit["id"]),
-                                          "iteration": int(unit["iteration"])})
+        row = make(unit, input_row)
+        if unit.get("scenarios"):
+            row[_SCENES] = scenario_rows(unit, row["sample_id"])
+        buf.add([row], {"input_id": str(unit["id"]),
+                        "iteration": int(unit["iteration"])})
 
     def _on_done(i, value):
         _row(live.pop(i),
@@ -306,7 +339,7 @@ def run_augmentation(
                 gen_model=client.model, translate_model=translation_model,
                 check_model=check.model,
                 benign_data=benign_data, prompt_dir=prompt_dir,
-                capture=capture, label=label,
+                capture=capture, label=label, scenarios=scenarios,
             )
 
     # A unit whose chain raises gets an error row and is acked. The buffer
@@ -324,6 +357,7 @@ def run_augmentation(
     # Read from the file, rows of earlier runs included: the natural kind
     # runs with read_back False.
     variants = write_variants(out_path, man_path, pool, registry)
+    scenes = write_scenarios(out_path, scenes_path)
     rows = read_rows(out_path) if read_back else pd.DataFrame()
 
     if verbose:
@@ -337,8 +371,9 @@ def run_augmentation(
             logger.info("Accepted: %d | Rejected: %d",
                         n_accepted, len(rows) - n_accepted)
             logger.info("No-ops: %d", n_noop)
-        logger.info("Manifest: %s | Saved to: %s | Variants: %s",
-                    man_path, out_path, variants)
+        logger.info("Manifest: %s | Saved to: %s | Variants: %s%s",
+                    man_path, out_path, variants,
+                    f" | Scenarios: {scenes}" if scenes else "")
 
     return rows
 

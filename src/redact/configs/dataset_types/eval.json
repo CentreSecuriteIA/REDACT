@@ -30,7 +30,7 @@
                  "to_zero_width_noise", "to_hex", "to_binary",
                  "to_url_encoding", "to_html_entities", "to_base32",
                  "to_base85", "to_caesar_cipher", "to_atbash",
-                 "to_fullwidth", "to_math_styled",
+                 "to_fullwidth", "to_math_styled", "to_letter_spacing",
                  "to_fsh_random_many", "to_fsh_selected_many",
                  "to_dap_random_many", "to_dap_selected_many"]
       },

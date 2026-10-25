@@ -80,8 +80,10 @@ def never(monkeypatch, stand_in_hints):
 
 # --- the hints file and which encodings have them -------------------------------
 
-def test_twenty_six_encodings_have_four_hints_each():
-    assert len(E._HINTS) == 26  # noqa: PLR2004
+def test_twenty_seven_encodings_have_four_hints_each():
+    """The eval pool's five heavy encodings (eval release 2) and spec 1.4's
+    letter spacing are the last six."""
+    assert len(E._HINTS) == 27  # noqa: PLR2004
     assert all(len(pool) == 4 for pool in E._HINTS.values())  # noqa: PLR2004
     assert sorted(E._HINTS) == HINTED
 

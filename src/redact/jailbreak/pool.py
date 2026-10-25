@@ -172,6 +172,37 @@ def registry(techniques: list[Callable]) -> dict[str, Callable]:
     return {fn.__name__: fn for fn in techniques}
 
 
+#: What a row's ``families`` and ``layers`` cells hold for a technique no
+#: registered one is named: ``?<name>`` and ``?``.
+UNKNOWN = "?"
+
+#: The ``technique`` cell of a row whose combination holds no technique.
+IDENTITY = "identity"
+
+
+def chain_tags(chain: str, techniques: dict[str, Callable]) -> tuple[str, str]:
+    """The ``families`` and ``layers`` cells of a row whose ``technique``
+    cell is ``chain``: the first family and the layer of each of its
+    techniques (names joined by ``+``, in the order they applied), joined by
+    ``+`` in the same order, so the n-th of each cell is the n-th
+    technique's.
+
+    ``techniques`` is the registry the names are read in (:func:`registry`
+    of every technique: a retired one keeps its family). A name it lacks,
+    which a row written by another version of the library may hold, gives
+    ``?<name>`` and ``?`` (:data:`UNKNOWN`), never an error. An empty cell
+    or the identity combination (:data:`IDENTITY`) gives two empty cells.
+    """
+    if not chain or chain == IDENTITY:
+        return "", ""
+    families, layers = [], []
+    for name in chain.split("+"):
+        fn = techniques.get(name)
+        families.append(fn.families[0] if fn is not None else f"{UNKNOWN}{name}")
+        layers.append(fn.layer if fn is not None else UNKNOWN)
+    return "+".join(families), "+".join(layers)
+
+
 def uses_translation(pool: list[Callable]) -> bool:
     """Whether ``pool`` holds a translation technique, which the translation
     model serves. Any other technique that calls a model, a rewrite among

@@ -39,15 +39,16 @@ the technique names are in [techniques.md](../techniques.md).
 |---|---|
 | `technique.py` | The technique contract, `load_spec` and `read_spec` (the spec, its generators expanded), `data_rows`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds`, `FIRST_VERSION`, `version_key`, `decode_hint_rate` (the spec's share of hinted encodings written with a hint), `heavy_encoding_weight` (the spec's weight of the heavy full-text encodings' slot) |
 | `rewrite/`, `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` and `smalltalk.py` each hold both families of their pair), each with a getter; `get_all_rewrite_functions` (16), `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage; `all_techniques` joins the rewrite layer last, so the others keep their registry order. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)`; the fake turns (`manipulation/fake_turns.py`) need none. `hacking/persona_templates.py` checks its persona frames at import (`check_pools`): a frame is its technique's own text, and only the mechanics are its `variant_pool` |
-| `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `uses_translation`, `uses_check` (whether a pool holds a technique the check model checks), `uses_check_model` (that, or a technique that needs the benign data, whose pairs the check model reads), `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
+| `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `chain_tags` (a row's `families` and `layers` from its `technique`, which the build writes; `?<name>` and `?` for a name no registered technique has), `uses_translation`, `uses_check` (whether a pool holds a technique the check model checks), `uses_check_model` (that, or a technique that needs the benign data, whose pairs the check model reads), `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates`, `after_request_obfuscation` (what may still join once a pick is the request obfuscation) |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family`, `deal_key` (the name a dealer counts a technique under), `is_heavy_encoding`, `REQUEST_SCOPE`, `HEAVY_ENCODINGS` |
 | `plan.py` | `plan_run`, `assign_combination` (with the opt-in group budget: `_allowance`, `UNIT_HEADROOM`), `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written through `dataset/planfile.py`, its `spec_version` dating the pool and its `rules` the rules it was drawn by, `rules_id`), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
-| `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination` |
-| `units.py` | `pending_units`, `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
+| `chain.py` | `run_chain` (with `scenarios`, a list, it hands each technique that takes it a `record_scenario` of its own), `combine_techniques`, `in_layer_order`, `apply_combination` |
+| `units.py` | `pending_units` (with `scenarios`, each unit collects its scenes), `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
 | `pipeline.py` | `run_augmentation`, the stage core; `_library_change`, the kept plan's pool against what the library added and retired since |
 | `variants.py` | `variants_of` (a row's template variants, paired by position), `write_variants` (the kind's `<stem>.variants.csv`), `COLUMNS` |
+| `scenarios.py` | `rows_of` (a finished unit's scene rows), `write_scenarios` (the kind's `<stem>.scenarios.csv` kept to its rows), `COLUMNS` |
 | `directives.py` | The variant pools of the pure techniques: `read_pools` (a template file's pools by directive, whatever its shape), `PoolRef` and `uses_pool` (the pool a technique draws from, set as its `variant_pool`), `check_pools` (called by `pool.py` at import), `enabled`, `draw_variant`, `apply_template_directive`; `load_templates` (a file as written) |
 
 ## Techniques
@@ -245,7 +246,9 @@ core, called once per kind:
    path (Anthropic, introspection) a failed `generate()`, a too-long prompt
    included, propagates and stops the stage.
 7. **Count the variants.** `write_variants` reads the kind's CSV in chunks
-   and writes `<stem>.variants.csv` beside the manifest (below).
+   and writes `<stem>.variants.csv` beside the manifest (below). When the
+   kind has a `<stem>.scenarios.csv`, `write_scenarios` keeps it to the
+   rows the CSV holds (below).
 8. **Read back** when asked.
 
 A planned unit whose input is not in the frame is skipped; an input that is
@@ -565,6 +568,23 @@ technique gets a row, 0 when none drew it; a technique outside the pool
 that a row drew (a kept plan's) is added after. No technique's info
 changed for the table: continuation, which the eval pool draws, keeps its
 `style=` info while the eval pool is pinned.
+
+With `run_augmentation(scenarios=True)` (the front's `scenarios`), each
+pending unit carries a `scenarios` list, which `unit_gen` hands to
+`run_chain`. The chain gives each technique that takes `record_scenario`
+(or `**kwargs`) a callable bound to its name; `cognitive._cognitive_gen`
+and `personas._persona_gen` call it with the scene the construction is
+built on, after the check accepted it, so a discarded scenario records
+nothing. `_row` puts the unit's scene rows (`scenarios.rows_of`: `input_id`,
+`iteration`, the row's `sample_id`, `technique`, `scenario`) on its row
+under a private key, which the save's `_append` takes off and appends to
+`<stem>.scenarios.csv` after the rows and before the acks. The table is
+not in the ledger's `_saved`: `scenarios.write_scenarios(out_path, path)`,
+after the units, keeps the rows whose `(input_id, iteration, sample_id)`
+the kind's CSV holds, the last of a repeated one, and writes the table
+again (`write_concat`) only when one goes; a fresh run removes it, and
+`stages._kind_files` lists it for `clear_stage`. Recording changes no row:
+a test runs the default attack pool both ways and compares the CSVs.
 
 ## The augmentation section in code
 

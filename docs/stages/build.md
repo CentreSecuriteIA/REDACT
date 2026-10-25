@@ -90,11 +90,47 @@ with its answer mode in `response_mode` and the mode's label in
 empty on the rows of the other parts, except a paraphrase of a response,
 which carries its response's.
 
+The jailbreak and variation rows also carry `families` and `layers`, right
+after the jailbreak file's own columns
+([below](#the-families-and-layers-columns)); they are empty on the rows of
+the other parts.
+
+## The families and layers columns
+
+A jailbreak or variation row names its combination in `technique`, its
+techniques joined by `+` in the order they applied. The build adds two
+columns read from it through the library's registry
+(`jailbreak.pool.chain_tags`), for robustness per family or per layer:
+
+| Column | Value |
+|---|---|
+| `families` | the first family of each technique, `+`-joined in the order of `technique`, so the n-th family is the n-th technique's: `cognitive+sensitive_words+answer_format+fsh` |
+| `layers` | the layer of each technique, in the same order: `hacking+obfuscation+requests+manipulation` |
+
+A technique of several families gives its first, the one that places it
+(`to_sensitive_words_encode_base64` is a `sensitive_words` and an `encode`
+technique: `sensitive_words`). A retired technique is still registered and
+gives its own family. A name no registered technique has, which a row
+written by another version of the library may hold, gives `?<name>` in
+`families` and `?` in `layers` (`encode+?to_some_technique`,
+`obfuscation+?`); the build never stops on it, and with `verbose` it logs
+one INFO line naming those techniques (`Build: N jailbreak or variation rows
+name a technique this library does not register (...)`). A row of the
+identity combination (`technique` `identity`, no technique) has both
+columns empty.
+
+The columns are read when the build runs, not when the row was made: the
+build's run record holds the `spec_version` they were read off. They are
+not in the stage files: `jailbreaks.csv` and `variations.csv` keep their
+columns.
+
 ## Eval mode
 
 An eval build writes no `complete_dataset.csv` (an `output_path` raises)
 and no separate paraphrase file. It writes three files, each with a fixed
-set of columns, whatever columns the stage files have:
+set of columns, whatever columns the stage files have (`eval_jailbreaks.csv`
+gained `families` and `layers` in the release of spec 1.4: a file built
+before has two columns fewer):
 
 | File | Rows, in order | Read by |
 |---|---|---|
@@ -137,6 +173,7 @@ set of columns, whatever columns the stage files have:
 | `label` | the entry type of the content: `harmful` for an attack on a harmful input, `benign` for a negative |
 | `is_jailbreak` | `True` for an attack, `False` for a bare input |
 | `technique` | the combination, `+`-joined; empty for a negative |
+| `families`, `layers` | the first family and the layer of each technique, `+`-joined in the order of `technique` ([the columns](#the-families-and-layers-columns)); empty for a negative |
 | `complexity`, `num_techniques`, `iteration` | the attack's; empty for a negative |
 | `input_id` | for an attack, the input attacked; empty for a negative |
 | `entry_type`, `category`, `subcategory`, `source_taxonomy` | the input's |
@@ -229,4 +266,5 @@ files on disk. The run record counts the rows of the files of the run's
 dataset type, and the accepted rows of a training build, which are the same
 number unless a part has no `accepted` column; an eval build with
 `exclude_from` adds `excluded`, and lists the files it read among its
-`sources`.
+`sources`. The record's `spec_version` is the library's spec, which the
+`families` and `layers` columns were read off.

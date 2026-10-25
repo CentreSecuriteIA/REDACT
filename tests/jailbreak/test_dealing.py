@@ -532,7 +532,14 @@ _BUDGETS = [
 # an undealt draw that took a published suffix first no longer has ascii_art
 # among its candidates, so the rng's next picks land elsewhere (1 of the 200
 # undealt draws; none of the 240 dealt units, and no draw held both before).
-_PINNED_DRAWS = "2a6d123f4419bf053ac1fca52ff3c73fccfa7d24d6a84a7ea7194858375b0fe8"
+# Spec 1.4's to_letter_spacing (a light encode member, so encode's members
+# are dealt among more) and guardrail_address (a new request-layer family of
+# three attack-only techniques, so the request layer's families are dealt
+# among one more) moved it again: the request each unit takes and, through
+# its rng and its group's counts, the rest of its draw change (189 of the 240
+# dealt units, 19 of them holding one of the four new techniques; 46 of the
+# 200 undealt draws, 17 holding one).
+_PINNED_DRAWS = "3cac096a06fe4fcc655e516263a81dfc27e2da2092d51e049ab31bff1ee8b430"
 
 
 def test_the_budget_draws_are_the_pinned_ones():
