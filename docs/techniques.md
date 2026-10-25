@@ -572,7 +572,14 @@ generation model.
   jailbreak built on it: 3 to 9 model calls (the spec's `calls`). A named persona grounds the scenario in the
   persona's character first; the prompt names it by its `display_name`
   (`Someone from the Future`), the info by its key
-  (`category=someone_from_the_future_persona`). Spec version 1.3 added
+  (`category=someone_from_the_future_persona`). The persona is the one who
+  **answers**: the scene (`persona_scenario_generation`) has a user put the
+  text to the persona, which answers in character, and the construction is a
+  prompt of its own (`jailbreak/persona_construction`, given the persona's
+  name and description, the scene and the text) that asks the target to play
+  the persona. The cognitive techniques, `to_persona_roleplay` among them,
+  keep `scenario_generation` and `jailbreak_construction`, filled with their
+  category's name and description. Spec version 1.3 added
   three named personas, `mercenary`, `underground_hacker` and
   `anarchist_philosopher` (attack only, like the rest of the family). The
   scenario prompts ask
@@ -588,8 +595,8 @@ generation model.
   check failed`). The definitions live in
   `configs/jailbreak/hacking/cognitive_techniques.json` and `personas.json`,
   editable without touching code. `to_invented_persona` first asks the model
-  for a persona for the text (the `persona_invention` prompt): a name and a
-  description, as a `Name:` line and then a `Description:`, and nothing else
+  for a character who would answer the text (the `persona_invention` prompt):
+  a name and a description, as a `Name:` line and then a `Description:`, and nothing else
   but blank lines (markdown labels, a missing or empty field and two
   personas are other forms). A reply in another form is asked for again, up
   to three replies in all, and then rejects the result (`DISCARDED;

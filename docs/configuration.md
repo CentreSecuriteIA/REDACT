@@ -1119,6 +1119,28 @@ seed. A plan kept from before resumes with the growth WARNING, which names
 them, and does not draw them until it is planned again with `resume=False`.
 The `eval` and natural kinds do not draw them.
 
+**Release note: the persona is the answerer.** The `persona` techniques
+(the adversarial kind only; the `eval` type draws none) asked the model for a
+scene in which the persona would *ask* the text, and gave the construction the
+persona's description but never its name, so whether the final text asked the
+target to *play* the persona was left to the construction model. The scene
+prompt (`persona_scenario_generation`) now has a user put the text to the
+persona, which answers in character; `persona_invention` asks for a character
+who would answer it; and the construction is a prompt of its own,
+`jailbreak/persona_construction`, given the persona's `display_name` (the
+invented name for `to_invented_persona`), its description, the scene and the
+text, which asks the target to play the persona. The `cognitive` techniques,
+`to_persona_roleplay` among them, keep `scenario_generation` and
+`jailbreak_construction`. The calls (3 to 9; 4 to 12 for the invented
+persona), the info, the checks and the plan are unchanged: no plan raises or
+warns, and no pure technique's draw moves. Fresh plans and the pending units
+of a kept plan use the new prompts; finished rows keep their texts. An
+overlay of `jailbreak_construction` no longer reaches the persona
+techniques: copy `persona_construction` to change theirs. How the scenario
+check takes the new scenes, and how often the construction is discarded, is
+not measured yet: `scripts/persona_smoke.py` counts acceptance and discards
+per technique on a model.
+
 **Release note: the techniques spec 1.2 adds.** Forty-eight techniques in
 six groups, below. A fresh plan draws them; since each adds members to deal,
 or a family, some units of a fresh plan draw other techniques than they did
@@ -1951,7 +1973,7 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 | `input` | `generation/from_constitution/long`, `generation/from_constitution/short`, `quality_check` |
 | `output` | `generation/harmful`, `generation/helpful`, `quality_check/harmful`, `quality_check/helpful`: one generation prompt and one checker per [answer mode](stages/outputs.md#answer-modes) |
 | `paraphrase` | `generation`, `generation/<model>` (a paraphraser's own, when it has one; the directory is the registry name), `check` |
-| `jailbreak` | `scenario_generation`, `persona_invention`, `persona_scenario_generation`, `jailbreak_construction`, `payload_split_semantic`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `pseudonym`, `word_game`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `persuasion_rewrite`, `tense_rewrite`, `model_distractor`, `preserve_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
+| `jailbreak` | `scenario_generation`, `persona_invention`, `persona_scenario_generation`, `persona_construction`, `jailbreak_construction`, `payload_split_semantic`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `pseudonym`, `word_game`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `persuasion_rewrite`, `tense_rewrite`, `model_distractor`, `preserve_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
 | `conversation` | `judge`, `success_judge`, `pair_attacker` |
 | `format_instructions` | `numbered`, `structured_qa` |
 
