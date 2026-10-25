@@ -13,7 +13,6 @@ import gc
 import logging
 import os
 import sys
-import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -26,10 +25,6 @@ if TYPE_CHECKING:
     from ..model_config import ModelConfig
 
 logger = logging.getLogger(__name__)
-
-# (stage, model) of each model whose first cut reply in a stage was warned about.
-_cut_warned: set[tuple[str | None, str]] = set()
-_cut_lock = threading.Lock()
 
 # Retries of a failed hosted call: the openai and anthropic SDKs' own default.
 DEFAULT_MAX_RETRIES = 2
@@ -102,10 +97,11 @@ def extract_system_prompt(messages: list[dict]) -> tuple[str | None, list[dict]]
 
     Returns:
         ``(system_prompt, rest)``. ``system_prompt`` is the content of every
-        system message joined with a blank line, or ``None`` if there is
-        none. ``rest`` is the non-system messages, in order.
+        non-empty system message joined with a blank line, or ``None`` if
+        there is none. ``rest`` is the non-system messages, in order.
     """
-    system_parts = [m["content"] for m in messages if m.get("role") == "system"]
+    system_parts = [m["content"] for m in messages
+                    if m.get("role") == "system" and m["content"]]
     rest = [m for m in messages if m.get("role") != "system"]
     system_prompt = "\n\n".join(system_parts) if system_parts else None
     return system_prompt, rest
@@ -207,6 +203,7 @@ class LLMBackend(ABC):
         supports_system_prompt: bool = True,
         rpm: int | None = None,
         max_workers: int = 1,
+        supports_temperature: bool = True,
     ):
         """Bind the model-level settings that stay fixed between calls.
 
@@ -221,11 +218,15 @@ class LLMBackend(ABC):
             rpm: Requests-per-minute budget, or ``None`` for no rate limiting.
             max_workers: Requested concurrency. Clamped to 1 when the class
                 has ``supports_parallel_calls=False``.
+            supports_temperature: False for a model that rejects sampling
+                settings: a temperature a call passes is then dropped, and
+                ``default_temperature`` applies.
         """
         self.model = model
         self.default_max_tokens = default_max_tokens
         self.default_temperature = default_temperature
         self.supports_system_prompt = supports_system_prompt
+        self.supports_temperature = supports_temperature
         self.rpm = rpm
         self.max_workers = (
             max_workers if self.compute_config.supports_parallel_calls else 1
@@ -250,6 +251,7 @@ class LLMBackend(ABC):
             "default_max_tokens": config.default_max_tokens,
             "default_temperature": config.default_temperature,
             "supports_system_prompt": config.supports_system_prompt,
+            "supports_temperature": config.supports_temperature,
         }
 
     @staticmethod
@@ -315,7 +317,8 @@ class LLMBackend(ABC):
         provider's reason the reply ended, when it reports one. ``cut`` says
         the reply stopped at the token limit, as each backend reads its
         provider's reason: the event then carries ``cut``, which telemetry
-        counts per stage, and the model's first cut reply in a stage warns.
+        counts per stage, and the model's first cut reply in a stage run
+        warns (:func:`observe.first_in_stage`).
         A cut reply is returned as it is.
         """
         event = {
@@ -337,27 +340,28 @@ class LLMBackend(ABC):
         if cut:
             event["cut"] = True
         observe.record(event)
-        if cut:
-            key = (observe.current_stage(), self.model)
-            with _cut_lock:
-                first = key not in _cut_warned
-                _cut_warned.add(key)
-            if first:
-                logger.warning(
-                    "%s: a reply was cut at the token limit (max_tokens=%s) and "
-                    "is incomplete; raise max_tokens or the context length "
-                    "(max_model_len), or ask for shorter replies. Later ones are "
-                    "only counted: see the stage's end and the telemetry summary.",
-                    self.model, max_tokens,
-                )
+        if cut and observe.first_in_stage(("cut", self.model)):
+            logger.warning(
+                "%s: a reply was cut at the token limit (max_tokens=%s) and "
+                "is incomplete; raise max_tokens or the context length "
+                "(max_model_len), or ask for shorter replies. Later ones are "
+                "only counted: see the stage's end and the telemetry summary.",
+                self.model, max_tokens,
+            )
 
     def _resolve(
         self, max_tokens: int | None, temperature: float | None
     ) -> tuple[int, float | None]:
-        """Fill unset overrides from the model's defaults."""
+        """Fill unset overrides from the model's defaults.
+
+        A model without ``supports_temperature`` keeps its default, ``None``
+        for a hosted one: the call's temperature is not sent.
+        """
+        if temperature is None or not self.supports_temperature:
+            temperature = self.default_temperature
         return (
             max_tokens if max_tokens is not None else self.default_max_tokens,
-            temperature if temperature is not None else self.default_temperature,
+            temperature,
         )
 
     @abstractmethod

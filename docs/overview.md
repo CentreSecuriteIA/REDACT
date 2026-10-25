@@ -116,8 +116,12 @@ summary = run_pipeline("src/redact/configs/runs/training_example.json")
 
 `recipe.load_params` reads the params file, resolved against the recipe's
 folder. It refuses a key that is not a stage name (a key starting with `_`
-is a comment), and a `jailbreaks` key that belongs in the augmentation
-section.
+is a comment), a `jailbreaks` key that belongs in the augmentation section,
+and a value a stage would refuse once it ran: the generation axes and seeds,
+the outputs' `modes` and `outputs_per_input`, `samples_per_entry`, and the
+paraphrase `target`, `paraphrases_per_sample` and `min_words`
+([configuration.md](configuration.md#params-keys-per-stage)).
+`load_recipe` also refuses a build `exclude_from` in a training run.
 
 ### 2. The driver sets the run up
 
@@ -222,8 +226,9 @@ flat schema instead (below). [stages/build.md](stages/build.md)
 
 In a `finally` block the driver clears the run's serving choices. When the
 run has local models it waits at most 60 seconds for a preload still
-running, unloads the engines the run loaded (those loaded before it, such as
-a notebook's, stay), and clears the planned shares and cards. It then rolls
+running, unloads the engines the run loaded, also after a planning error
+(those loaded before it, such as a notebook's, stay), and clears the
+planned shares and cards. It then rolls
 up telemetry (tokens, engine time, cost). `run_pipeline`
 returns a summary: `dataset_type`, `data_dir`, `stages` (counts and record
 path per stage), `serving`, `telemetry` (with `cut`, the replies cut at the
@@ -260,10 +265,11 @@ six stages as a training run, with these differences:
   types, the clear ends, beside the general-benign part both types build
   from the benign taxonomy;
 - the jailbreak stage attacks the harmful inputs only, with a pool of hard
-  techniques whose label stays certain (the heavy encodings, `fsh`, `dap`,
-  `framing`, `structural`, `ascii_art`, `continuation`, `temporal`,
-  `to_refusal_then_comply` and eight low-resource translations), one
-  technique then two, with seed 43, and makes no natural variations;
+  techniques whose label stays certain (five heavy encodings, `fsh` and
+  `dap` less their many-shot variants, `framing`, `structural`,
+  `ascii_art`, `continuation`, `temporal`, `to_refusal_then_comply` and
+  eight low-resource translations), one technique then two, with seed 43,
+  and makes no natural variations;
 - the build runs in `eval` mode and writes no complete dataset: it writes
   three files with one `text` and one `label` column each, so an evaluation
   reads them without a join.
@@ -286,8 +292,8 @@ counted.
 | Package | What it is for |
 |---|---|
 | `multi_turn/` | Conversation datasets: a `Setting` of actors played on seeds (`generate_conversations`), scored by a judge (`evaluate_conversations`); a planned extension, not finished |
-| `multiturn_attacks/` | A `Setting` of an attacker and a target model (`generate_attacks`, `score_attacks`, `optimize_attack`), built on `multi_turn/` |
-| `optimization/` | A beam search over conversation moves scored by a judge (`optimize`) |
+| `multiturn_attacks/` | A `Setting` of an attacker and a target model (`generate_attacks`, `score_attacks`, `optimize_attack`), built on `multi_turn/`; a planned extension, not finished |
+| `optimization/` | A beam search over conversation moves scored by a judge (`optimize`); a planned extension, not finished |
 | `dataset/loading.py` | Load a published dataset from the HuggingFace Hub (`load_hf_dataset`, `load_from_config`) |
 
 ## Out of scope

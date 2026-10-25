@@ -4,8 +4,9 @@ These pages are generated from the docstrings in `src/redact/`. They cover
 the names a user of the library calls; the pages under Internals explain
 how the layers fit together.
 
-The stage functions, the recipe runner and the conversation functions are
-re-exported from the top-level package:
+The stage functions, the recipe runner and the conversation functions (a
+planned extension, not finished) are re-exported from the top-level
+package:
 
 ```python
 from redact import (
@@ -34,6 +35,7 @@ from redact import (
   the per-category tree.
 - [Jailbreak](jailbreak.md): the technique pool, combinations, the plan, and
   the augmentation core.
-- [Multi-turn](multi_turn.md): settings, actors and conversation datasets.
+- [Multi-turn](multi_turn.md): settings, actors and conversation datasets;
+  a planned extension, not finished.
 - [Residency](residency.md): `plan_residency`, the GPU planner.
 - [Telemetry](telemetry.md): the run trace and the cost roll-up.

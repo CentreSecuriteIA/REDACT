@@ -17,7 +17,7 @@ from ..dataset import (
 from ..llm_pipeline import drive_units, extracted
 from ..llms.client import ModelClient
 from ..types import EntryType
-from .units import _COLUMNS, Unit, file_of, messages_of, plan_units, rows_of
+from .units import _COLUMNS, Unit, file_of, key_of, messages_of, plan_units, rows_of
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,22 @@ logger = logging.getLogger(__name__)
 _REPLY_TOKENS = 10000
 # Generations of a unit before it is given up.
 _ATTEMPTS = 3
+
+
+def _units_in(path: Path) -> dict[str, tuple]:
+    """Each unit with rows in ``merged.csv``, by its ledger key.
+
+    Read once, when a folder whose ledger records no sizes, or has none, is
+    taken over. The other CSVs give no unit: a save writes ``merged.csv``
+    after them, so a unit is taken over only once its rows reached the file
+    the inputs stage reads.
+    """
+    if path.name != paths.CONSTITUTION_MERGED_FILENAME:
+        return {}
+    frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+    if not {"source_category", "entry_type", "source_taxonomy"} <= set(frame.columns):
+        return {}
+    return dict.fromkeys((key_of(row) for row in frame.to_dict("records")), ())
 
 
 def read_constitution(output_dir: str | Path) -> pd.DataFrame:
@@ -42,10 +58,11 @@ class ConstitutionPipeline:
     """Generate constitution entries from a taxonomy into ``output_dir``.
 
     Each unit's rows go to ``{entry_type}.csv``, or ``general_benign.csv``
-    for a benign-taxonomy unit, and to ``merged.csv``. The ledger
-    ``constitution.state.jsonl`` beside them is plain: no lock, no recorded
-    sizes. A crash between a unit's two appends leaves it un-acked, and the
-    next run appends its rows to the type's file again.
+    for a benign-taxonomy unit, and to ``merged.csv``, then the unit is
+    acked. The ledger ``constitution.state.jsonl`` beside them records each
+    CSV's size with every save, as every stage's does: a resume cuts back
+    what a save that did not finish left, so its unit runs again and no row
+    is written twice or torn.
     """
 
     def __init__(
@@ -75,16 +92,19 @@ class ConstitutionPipeline:
             max_tokens=_REPLY_TOKENS, max_attempts=_ATTEMPTS,
         )
 
-    def _append(self, rows: list[dict]) -> None:
+    def _append(self, rows: list[dict]) -> dict[Path, int]:
         """Append the rows to their own CSV (:func:`file_of`), then to
-        ``merged.csv``."""
+        ``merged.csv``; the size of each file written, by its path."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
         by_file: dict[str, list[dict]] = {}
         for row in rows:
             by_file.setdefault(file_of(row), []).append(row)
+        sizes: dict[Path, int] = {}
         for name, its_rows in by_file.items():
-            append_rows(self.output_dir / f"{name}.csv", its_rows)
-        append_rows(self.output_dir / paths.CONSTITUTION_MERGED_FILENAME, rows)
+            sizes.update(append_rows(self.output_dir / f"{name}.csv", its_rows))
+        sizes.update(
+            append_rows(self.output_dir / paths.CONSTITUTION_MERGED_FILENAME, rows))
+        return sizes
 
     def run(
         self,
@@ -108,7 +128,10 @@ class ConstitutionPipeline:
         saved to ``general_benign.csv``. Each taxonomy gives its first
         ``num_taxonomy_categories`` categories. ``resume=False`` removes the
         CSVs, the ledger and the plan first; a resume of a constitution
-        saved without a column the rows now have raises before any call.
+        saved without a column the rows now have raises before any call. A
+        resume checks every CSV against the size the ledger recorded and cuts
+        off what an unfinished save left (``dataset.resume_state``); a CSV
+        missing or changed since stops it, naming the remedies.
 
         The units run one at a time, in plan order. A reply without its
         ``[END]`` marker, or with no entry that parses, is rejected and the
@@ -135,11 +158,12 @@ class ConstitutionPipeline:
                                 name="constitution.state.jsonl")
         manifest = Manifest.sidecar(merged, name="constitution.manifest.jsonl")
 
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        if not resume:
-            for csv_file in self.output_dir.glob("*.csv"):
-                csv_file.unlink()
-        done = resume_state(ledger, resume=resume, manifest=manifest)
+        # Every CSV of the folder is the stage's: checked and cut back
+        # together on a resume, removed on a fresh run. It takes the lock,
+        # which the buffer gives back.
+        done = resume_state(
+            ledger, resume=resume, artifact=self.output_dir, pattern="*.csv",
+            manifest=manifest, units_in=_units_in)
         manifest.write(unit.manifest_row for unit in units)
         pending = [unit for unit in units if unit.key not in done]
 

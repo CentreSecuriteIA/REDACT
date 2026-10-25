@@ -143,6 +143,13 @@ only.
 `build_check_messages` is `(original, sample) -> messages`, the shape the
 checkers of `content_moderation/checker.py` build.
 
+`CHECK_TEMPERATURE` (0.15) is the temperature the stages' check requests
+ask for (inputs, outputs, paraphrase, and the jailbreak scenario and typo
+checks); the generations keep the model's default. A model registered with
+`supports_temperature` false (one that rejects sampling settings, such as
+`claude-opus-5-5`) is sent no temperature, the check's included
+([llms.md](llms.md#the-registry)).
+
 ## How the stages use it
 
 | Stage | Driver | `pool_size` | `cap` | Unit |

@@ -1,4 +1,4 @@
-"""Summarize the stage manifests of a completed (or in-progress) run.
+"""Summarize the stage run records of a completed (or in-progress) run.
 
     python scripts/inspect_run.py ./runs/my_run
 
@@ -14,7 +14,7 @@ from redact import STAGES, read_record
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Inspect a run's stage manifests.")
+    parser = argparse.ArgumentParser(description="Inspect a run's stage run records.")
     parser.add_argument("data_dir", help="The run's data_dir.")
     args = parser.parse_args(argv)
 
@@ -30,7 +30,7 @@ def main(argv=None) -> int:
         print(f"[{stage}] {ts}  counts={counts}  models={models or 'role-defaults'}")
 
     if not found:
-        print(f"No stage manifests found under {args.data_dir}/Datasets/.")
+        print(f"No stage run records found under {args.data_dir}/Datasets/.")
         return 1
     return 0
 

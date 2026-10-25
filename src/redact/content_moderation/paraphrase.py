@@ -72,6 +72,40 @@ DEFAULT_TARGET = "inputs"
 MIN_WORDS = 12
 
 
+#: The values of ``target``: the targets each stands for.
+TARGETS = {"inputs": ["inputs"], "outputs": ["outputs"], "both": ["inputs", "outputs"]}
+
+
+def check_settings(*, target: object = DEFAULT_TARGET,
+                   paraphrases_per_sample: object = 1,
+                   min_words: object = None) -> list[str]:
+    """Check the paraphrase stage's settings before anything runs, and give
+    the targets ``target`` stands for.
+
+    ``target`` is ``"inputs"``, ``"outputs"`` or ``"both"``,
+    ``paraphrases_per_sample`` a whole number of at least 1, and
+    ``min_words`` ``None`` (:data:`MIN_WORDS`) or a whole number of at
+    least 0. A recipe's params are checked with it when they load, so a typo
+    stops the run before its first stage.
+
+    Raises:
+        ValueError: The first setting that breaks its rule, named
+            ``paraphrase.<key>``.
+    """
+    if not isinstance(target, str) or target not in TARGETS:
+        raise ValueError(
+            f"paraphrase.target must be one of {list(TARGETS)}, got {target!r}.")
+    for key, value, least in (("paraphrases_per_sample", paraphrases_per_sample, 1),
+                              ("min_words", min_words, 0)):
+        if key == "min_words" and value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < least:
+            raise ValueError(
+                f"paraphrase.{key} must be a whole number of at least {least}, "
+                f"got {value!r}.")
+    return list(TARGETS[target])
+
+
 def skip_reason(text: str, *, min_words: int) -> str:
     """Why ``text`` gets no paraphrase: ``"short"`` when it has under
     ``min_words`` words (split on whitespace), else ``""``."""
@@ -412,7 +446,8 @@ def paraphrase_pool(paraphraser: str | None) -> list[str]:
 
 
 def _assign_paraphraser(base_id: str, k: int, pool: list[str], seed: int) -> str:
-    """Deterministic round-robin pick (content-hash of base_id + k + seed)."""
+    """The paraphraser of a unit: a pick from ``pool`` by a seeded hash of
+    ``(seed, base_id, k)``, the same in every process (not a round-robin)."""
     if len(pool) == 1:
         return pool[0]
     h = hashlib.sha256(f"{seed}:{base_id}:{k}".encode()).hexdigest()
@@ -528,6 +563,10 @@ def run_paraphrase_target(
         release_lock(ledger)
         return pd.DataFrame()
     # Read after the resume, which leaves only whole rows in the artifact.
+    #TODO(dataset): the whole artifact is read, on every run, for the texts
+    #   already in it, which the dedup needs. This goes when the ledger's
+    #   acks carry the content id of their unit's paraphrase, so a resume can
+    #   build the seen set from the acks alone.
     prev = read_rows(out_path)
     seen_texts: set[str] = (
         set(prev["sample"].astype(str))
@@ -552,18 +591,18 @@ def run_paraphrase_target(
 
         A unit is ``(base_id, iteration, model, original_text, category,
         entry_type, input_id, labels)``, ``labels`` the source's
-        ``response_mode``, ``output_label`` and ``response_label``.
-        No list of them is held: a pass over the units costs time, not memory.
+        ``response_mode``, ``output_label`` and ``response_label``; a
+        category or entry type the source lacks, or leaves empty, is ``""``,
+        never the text ``nan``. No list of them is held: a pass over the
+        units costs time, not memory.
         """
-        blank = repeat("")      # for a source without the column
-        categories = src.get("category", blank)
-        entry_types = src.get("entry_type", blank)
         labels = zip(*(_cells(column) for column in _LABEL_COLUMNS))
         for bid, otext, cat, et, iid, label in zip(
-                ids, src[text_col], categories, entry_types, input_ids, labels):
+                ids, src[text_col], _cells("category"), _cells("entry_type"),
+                input_ids, labels):
             for iteration in range(k):
                 yield (bid, iteration, _assign_paraphraser(bid, iteration, pool, seed),
-                       str(otext), str(cat), str(et), str(iid), label)
+                       str(otext), cat, et, str(iid), label)
 
     def _keyed(bid, iteration, iid) -> dict:
         """A unit's key fields, with the input answered for the outputs target."""

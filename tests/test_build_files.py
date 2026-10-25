@@ -34,21 +34,24 @@ spec marks natural (72 techniques, the low and medium noise, the neutral
 containers, six more answer languages, small talk and the benign roles
 among them since spec 1.2): one variation of the training run is a no-op the
 natural kind rejects, ``to_doubled_punctuation`` on a text with no full stop
-(31 of 32 jailbreak rows accepted). With the 66 techniques before small talk
+(21 of 22 jailbreak rows accepted). With the 66 techniques before small talk
 and the benign roles there were two, ``to_lowercase`` on a text in lower
 case already the other; the three request families dealt with the others
 gave that input ``to_code_comment``, and a dual-use benign input a benign
 role, ``to_benign_role_task_assistant``, which no harmful input of the run
-draws. Before the plan drew a technique only for the inputs it applies to,
-the two no-ops were ``to_abbreviations`` on a text with none of its words
-and ``to_stripped_accents`` on a text with no accent.
+draws. That input was one of the five an earlier call wrote from another
+template, which the run no longer holds (below), so no variation of the run
+is ``to_code_comment`` now. Before the plan drew a technique only for the
+inputs it applies to, the two no-ops were ``to_abbreviations`` on a text
+with none of its words and ``to_stripped_accents`` on a text with no accent.
 The training type answers each input twice
-(``outputs.outputs_per_input`` 2): 32 responses to 16 inputs, 28 accepted
-(the answers to the second samples of ``zq0`` are rejected), and 44
-paraphrases, of 16 inputs and 28 responses, 41 accepted. The build holds 16
-inputs, 16 jailbreaks, 15 variations, 28 responses and 41 paraphrases, and
-leaves nothing out: its count is 116, where it was 86 with one response per
-input and three responses equal to variations.
+(``outputs.outputs_per_input`` 2): 22 responses to 11 inputs, 20 accepted
+(the answers to the second sample of ``zq0`` are rejected), and 31
+paraphrases, of 11 inputs and 20 responses, 28 accepted. The build holds 11
+inputs, 11 jailbreaks, 10 variations, 20 responses and 28 paraphrases, and
+leaves nothing out: its count is 80, where it was 86 with one response per
+input and three responses equal to variations, and 116 with the five inputs
+of another template.
 
 The eval run is not that commit's: its inputs are seeded from a small
 constitution of placeholder entries, as every run's are.
@@ -56,10 +59,16 @@ constitution of placeholder entries, as every run's are.
 The merged inputs file of the training run ends in an ``iteration`` column
 and one column per input generation axis (``length`` to ``focus``), since
 each entry is a unit per sample, each dealt a spec; its other cells are as
-before. The training type deals the inputs' weights log-scaled, and so does
-the earlier call that leaves the other style's inputs, since the folder's
-plan file holds one deal's weights; on these groups of three the deal is the
-one the table's weights gave.
+before. The earlier call makes the inputs of the first two entries, and
+the run resumes them and generates for the other two only: the merged file
+holds the run's 11 inputs, where it held 16 when the earlier call wrote its
+five from another template, which the run's record did not count (it said
+11) and the build took. Since the inputs stage has one template, the merged
+file and the complete datasets have no column naming it; their other cells
+are as before. The training type deals the inputs'
+weights log-scaled, and so does the earlier call, since a resume deals as
+the folder's plan file says; on these groups of three the deal is the one
+the table's weights gave.
 
 An eval build writes three files of one flat schema, ``eval_inputs.csv``,
 ``eval_outputs.csv`` and ``eval_jailbreaks.csv``, in place of the complete
@@ -83,6 +92,15 @@ They follow the jailbreak file's columns in the complete dataset and
 fixture's other cells are as before. The stub jailbreaks name techniques
 no registered one is (``to_upper``, ``to_reversed``, ``ask_for_a_list``),
 whose cells read ``?<name>`` and ``?``; the variations name registered ones.
+
+The eval files carry the generation axis columns after ``source_taxonomy``:
+the six of an input (``length`` to ``focus``) in each file, and the three of
+a response (``response_length`` to ``response_register``) in
+``eval_outputs.csv``. The fixture's two eval builds write their inputs and
+responses with a spec each (``_INPUT_SPECS``, ``_RESPONSE_SPECS``); the
+training builds write none, so their files are as before. A response or an
+attack takes its input's spec, a paraphrase none; the other cells are as
+before.
 """
 
 import json
@@ -120,7 +138,6 @@ _INPUTS = pd.DataFrame({
     "source": ["constitution"] * 3,
     "subcategory": ["phishing", "", "cards"],
     "entry_type": ["harmful", "benign", "harmful"],
-    "template_style": ["long", "long", "short"],
 })
 
 _JAILBREAKS = pd.DataFrame({
@@ -132,7 +149,6 @@ _JAILBREAKS = pd.DataFrame({
     "source": ["constitution"] * 4,
     "subcategory": ["phishing", "", "cards", "phishing"],
     "entry_type": ["harmful", "benign", "harmful", "harmful"],
-    "template_style": ["long", "long", "short", "long"],
     "input_id": ["in-1", "in-2", "in-3", "in-1"],
     "jailbreak": ["FIRST INPUT, WITH A COMMA", "tupni dnoces", _TEXTS[2],
                   "First input?\nAnswer in a list."],
@@ -155,7 +171,6 @@ _VARIATIONS = pd.DataFrame({
     "source": ["constitution"] * 3,
     "subcategory": ["phishing", "", "cards"],
     "entry_type": ["harmful", "benign", "harmful"],
-    "template_style": ["long", "long", "short"],
     "input_id": ["in-1", "in-2", "in-3"],
     "jailbreak": ["first input, with a comma!!", "SECOND INPUT\nOF TWO LINES",
                   'Summarize: third "quoted" input, é'],
@@ -185,6 +200,22 @@ _OUTPUTS = pd.DataFrame({
     "output_label": ["harmful", "benign", "harmful"],
     "response_label": ["harmful_harmful", "benign_benign", "harmful_harmful"],
 })
+
+# The spec each input and each response was dealt, which the eval builds'
+# stage files hold.
+_INPUT_SPECS = {
+    "length": ["short", "fragment", "very_long"],
+    "register": ["casual", "neutral", "formal"],
+    "writer": ["student", "anonymous", "journalist"],
+    "framing": ["question", "direct_request", "advice"],
+    "directness": ["explicit", "implicit", "explicit"],
+    "focus": ["single"] * 3,
+}
+_RESPONSE_SPECS = {
+    "response_length": ["brief", "medium", "long"],
+    "response_format": ["prose", "list", "steps"],
+    "response_register": ["neutral", "friendly", "technical"],
+}
 
 _PARAPHRASED_INPUTS = pd.DataFrame({
     "sample_id": ["pi-1", "pi-2", "pi-3"],
@@ -217,7 +248,8 @@ _PARAPHRASED_OUTPUTS = pd.DataFrame({
 })
 
 
-def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = True):
+def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = True,
+                       specs: bool = False):
     """Write the stage files a build reads under ``data_dir``.
 
     Args:
@@ -226,13 +258,17 @@ def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = T
             rejected.
         rows: False leaves the jailbreaks, the variations, the outputs and
             the paraphrased inputs with a header and no row.
+        specs: True writes the inputs and the outputs with their specs
+            (``_INPUT_SPECS``, ``_RESPONSE_SPECS``).
     """
     datasets = paths.datasets(data_dir)
     datasets.mkdir(parents=True)
+    in_rows = _INPUTS.assign(**_INPUT_SPECS) if specs else _INPUTS
+    out_rows = _OUTPUTS.assign(**_RESPONSE_SPECS) if specs else _OUTPUTS
     if inputs == "merged":
-        _INPUTS.to_csv(datasets / "constitution_inputs_merged.csv", index=False)
+        in_rows.to_csv(datasets / "constitution_inputs_merged.csv", index=False)
     else:
-        tree = _INPUTS.drop(columns=["subcategory", "entry_type", "template_style"])
+        tree = in_rows.drop(columns=["subcategory", "entry_type"])
         tree = tree.assign(accepted=[True, False, True])
         for category, part in tree.groupby("category"):
             path = paths.category_csv(category,
@@ -242,7 +278,7 @@ def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = T
     keep = slice(None) if rows else slice(0)
     _JAILBREAKS.iloc[keep].to_csv(paths.jailbreaks_csv(data_dir), index=False)
     _VARIATIONS.iloc[keep].to_csv(paths.variations_csv(data_dir), index=False)
-    _OUTPUTS.iloc[keep].to_csv(paths.output_responses_csv(data_dir), index=False)
+    out_rows.iloc[keep].to_csv(paths.output_responses_csv(data_dir), index=False)
     paraphrased_inputs = _PARAPHRASED_INPUTS.iloc[keep]
     if not rows:
         # A column of its own, which a file without a row does not add.
@@ -256,8 +292,8 @@ _BUILDS = {
     "parts without rows": dict(mode="training", rows=False),
 }
 _EVAL_BUILDS = {
-    "eval": dict(mode="eval"),
-    "inputs tree": dict(mode="eval", inputs="tree"),
+    "eval": dict(mode="eval", specs=True),
+    "inputs tree": dict(mode="eval", inputs="tree", specs=True),
 }
 
 
@@ -558,18 +594,23 @@ def test_a_paraphrase_that_a_spreadsheet_marked_true_is_kept(tmp_path):
 
 # --- an eval build -------------------------------------------------------------
 
+_INPUT_AXES = list(_INPUT_SPECS)
+_RESPONSE_AXES = list(_RESPONSE_SPECS)
+
 _EVAL_HEADERS = {
     "eval_inputs.csv": [
         "sample_id", "text", "label", "paraphrased", "input_id", "paraphrase_model",
-        "entry_type", "category", "subcategory", "source_taxonomy", "dataset_type"],
+        "entry_type", "category", "subcategory", "source_taxonomy", *_INPUT_AXES,
+        "dataset_type"],
     "eval_jailbreaks.csv": [
         "sample_id", "text", "label", "is_jailbreak", "technique", "families",
         "layers", "complexity", "num_techniques", "iteration", "input_id",
-        "entry_type", "category", "subcategory", "source_taxonomy", "dataset_type"],
+        "entry_type", "category", "subcategory", "source_taxonomy", *_INPUT_AXES,
+        "dataset_type"],
     "eval_outputs.csv": [
         "sample_id", "text", "label", "output_label", "paraphrased", "input_id",
         "model", "paraphrase_model", "entry_type", "category", "subcategory",
-        "source_taxonomy", "dataset_type"],
+        "source_taxonomy", *_INPUT_AXES, *_RESPONSE_AXES, "dataset_type"],
 }
 
 
@@ -683,17 +724,18 @@ def test_the_jailbreak_file_holds_the_attacks_then_the_bare_benign_inputs(tmp_pa
     build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
     header, *rows = _files(paths.datasets(tmp_path))["eval_jailbreaks.csv"]
     assert header == _EVAL_HEADERS["eval_jailbreaks.csv"]
+    no_spec = [""] * len(_INPUT_AXES)       # the inputs here have none
     assert rows == [
         ["jb-1", "FIRST INPUT, WITH A COMMA", "harmful", "True", "to_upper",
          "?to_upper", "?", "1", "1", "0", "in-1", "harmful", "Cyber", "phishing", "",
-         "jailbreak"],
+         *no_spec, "jailbreak"],
         ["jb-2", "tupni dnoces", "benign", "True", "to_reversed", "?to_reversed", "?",
-         "3", "1", "0", "in-2", "benign", "Cyber", "", "", "jailbreak"],
+         "3", "1", "0", "in-2", "benign", "Cyber", "", "", *no_spec, "jailbreak"],
         ["jb-4", "First input?\nAnswer in a list.", "harmful", "True",
          "to_upper+ask_for_a_list", "?to_upper+?ask_for_a_list", "?+?", "2", "2",
-         "1", "in-1", "harmful", "Cyber", "phishing", "", "jailbreak"],
+         "1", "in-1", "harmful", "Cyber", "phishing", "", *no_spec, "jailbreak"],
         ["in-2", _TEXTS[1], "benign", "False", "", "", "", "", "", "", "", "benign",
-         "Cyber", "", "", "content_moderation_input"],
+         "Cyber", "", "", *no_spec, "content_moderation_input"],
     ]
 
 
@@ -724,6 +766,69 @@ def test_every_eval_row_carries_the_source_taxonomy_of_its_input(tmp_path):
     assert files["eval_outputs.csv"]["source_taxonomy"].tolist() == ["harmful"] * 3
     assert files["eval_jailbreaks.csv"]["source_taxonomy"].tolist() == [
         "harmful", "benign", "harmful", "benign"]
+
+
+def _specs(rows: pd.DataFrame, columns: list[str]) -> dict[str, list[str]]:
+    """Each row's cells of ``columns``, by its ``sample_id``."""
+    return {row["sample_id"]: [row[column] for column in columns]
+            for row in rows.to_dict("records")}
+
+
+def _spec_of(specs: dict, at: int) -> list[str]:
+    """The spec of the ``at``-th row of ``specs``."""
+    return [values[at] for values in specs.values()]
+
+
+def test_the_input_file_carries_each_inputs_spec_and_none_on_a_paraphrase(
+        tmp_path):
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path, specs=True)
+    build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
+    rows = _eval_files(tmp_path)["eval_inputs.csv"]
+    no_spec = [""] * len(_INPUT_AXES)
+    assert _specs(rows, _INPUT_AXES) == {
+        "in-1": _spec_of(_INPUT_SPECS, 0), "in-2": _spec_of(_INPUT_SPECS, 1),
+        "in-3": _spec_of(_INPUT_SPECS, 2), "pi-1": no_spec, "pi-3": no_spec}
+
+
+def test_the_output_file_carries_the_specs_of_the_input_and_of_the_response(
+        tmp_path):
+    """A paraphrase of a response carries neither."""
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path, specs=True)
+    build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
+    rows = _eval_files(tmp_path)["eval_outputs.csv"]
+    assert _specs(rows, [*_INPUT_AXES, *_RESPONSE_AXES]) == {
+        "out-1": _spec_of(_INPUT_SPECS, 0) + _spec_of(_RESPONSE_SPECS, 0),
+        "out-3": _spec_of(_INPUT_SPECS, 2) + _spec_of(_RESPONSE_SPECS, 2),
+        "po-2": [""] * (len(_INPUT_AXES) + len(_RESPONSE_AXES))}
+
+
+def test_an_attack_carries_its_inputs_spec_and_a_bare_input_its_own(tmp_path):
+    """The attack's values describe the input before the attack changed it."""
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path, specs=True)
+    build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
+    rows = _eval_files(tmp_path)["eval_jailbreaks.csv"]
+    assert _specs(rows, _INPUT_AXES) == {
+        "jb-1": _spec_of(_INPUT_SPECS, 0), "jb-2": _spec_of(_INPUT_SPECS, 1),
+        "jb-4": _spec_of(_INPUT_SPECS, 0), "in-2": _spec_of(_INPUT_SPECS, 1)}
+
+
+def test_the_eval_axis_columns_are_the_packaged_tables():
+    """The eval schema names the columns the stages write for a spec."""
+    from redact.content_moderation import axes as A
+    from redact.stages import _INPUT_AXES as EVAL_INPUT_AXES
+    from redact.stages import _RESPONSE_AXES as EVAL_RESPONSE_AXES
+
+    assert list(EVAL_INPUT_AXES) == list(A.spec_columns(A.resolve("inputs"), {}))
+    assert list(EVAL_RESPONSE_AXES) == list(A.spec_columns(
+        A.resolve("outputs"), {}, prefix="response_"))
+    assert list(EVAL_INPUT_AXES) == _INPUT_AXES
+    assert list(EVAL_RESPONSE_AXES) == _RESPONSE_AXES
 
 
 def test_an_eval_build_returns_the_rows_of_each_file(tmp_path):
@@ -973,24 +1078,26 @@ def test_a_build_takes_no_category_folder_outside_the_inputs_tree(tmp_path):
 
 # --- a run from the first stage to the build ----------------------------------
 
-# Today's flat form, read as the adversarial kind; the natural kind is the default.
-_PURE = {
-    "pure_only": True, "include_hacking": False, "include_manipulation": False,
-    "include_requests": False,
-}
+# Pure techniques of the obfuscation layer; the natural kind is the default.
+_PURE = {"adversarial": {
+    "pure_only": True,
+    "layers": {"deny": ["rewrite", "hacking", "manipulation", "requests"]},
+}}
 _MODELS = {"gen": "gen-model", "check": "check-model", "paraphraser": "para-model",
            "paraphrase_check": "check-model"}
 
 
-def _stub_models(monkeypatch) -> None:
+def _stub_models(monkeypatch) -> dict[str, int]:
     """Stub every model call of a run; a reply depends only on its request,
-    and an input's on how many requests of its entry and style came before.
+    and an input's on how many requests of its entry came before. Returns
+    those counts, by entry token, as the run makes them.
 
-    A sample reads ``<style> <ordinal> zqN sample``, the ordinal of the
-    entry's unit. A response reads ``<mode> answer to the <sample>
-    (<length>)``, its answer mode and the length its spec dealt, so no two
-    responses of one input share a text; any other request is answered
-    ``answer to the <sample>``, and a paraphrase reads ``reworded: <text>``.
+    A sample reads ``long <ordinal> zqN sample``, the ordinal of the entry's
+    unit (the word ``long`` keeps the ids the fixture holds). A response
+    reads ``<mode> answer to the <sample> (<length>)``, its answer mode and
+    the length its spec dealt, so no two responses of one input share a
+    text; any other request is answered ``answer to the <sample>``, and a
+    paraphrase reads ``reworded: <text>``.
     The third sample of ``zq1`` is rejected as an input, the answers to a
     second sample of ``zq0`` are rejected as outputs, and the paraphrases of a
     first sample of ``zq2`` are rejected.
@@ -998,15 +1105,13 @@ def _stub_models(monkeypatch) -> None:
     from redact.llms import ModelClient
     from tests.test_pipelines import _TokenBackend
 
-    units: dict[tuple[str, str], int] = {}
+    units: dict[str, int] = {}
 
     def write(token, text):
-        made = re.search(r"MAKE-INPUTS-(\w+)", text)
-        if made:
-            style = made.group(1).lower()
-            n = units[token, style] = units.get((token, style), 0) + 1
+        if "MAKE-INPUTS" in text:
+            n = units[token] = units.get(token, 0) + 1
             ordinal = ("first", "second", "third")[n - 1]
-            return f"1. {style} {ordinal} {token} sample\n[END]"
+            return f"1. long {ordinal} {token} sample\n[END]"
         sample = re.search(r"\w+ \w+ zq\d+ sample", text).group()
         answered = re.search(r"ANSWER-(HARMFUL|HELPFUL)", text)
         if answered:
@@ -1034,6 +1139,7 @@ def _stub_models(monkeypatch) -> None:
     monkeypatch.setattr(ModelClient, "create", lambda m: make_client(backends[m], m))
     monkeypatch.setattr("redact.llms.resources.estimate._load_config",
                         lambda _id, **kw: None)
+    return units
 
 
 def _counts(recipe: dict, before=None, params=None) -> dict:
@@ -1052,14 +1158,12 @@ def _counts(recipe: dict, before=None, params=None) -> dict:
 def _overlay(folder: Path) -> Path:
     """A prompt overlay whose generation templates the stub model knows."""
     overlay = folder / "prompts"
-    for style in ("long", "short"):
-        template = overlay / "input" / "generation" / "from_constitution" / style
-        template.mkdir(parents=True)
-        (template / "template.json").write_text(json.dumps({
-            "system_prompt": "sys",
-            "template": (f"MAKE-INPUTS-{style.upper()} about {{sample_description}}"
-                         "\n\n{sample_spec}"),
-        }), encoding="utf-8")
+    template = overlay / "input" / "generation"
+    template.mkdir(parents=True)
+    (template / "template.json").write_text(json.dumps({
+        "system_prompt": "sys",
+        "template": "MAKE-INPUTS about {sample_description}\n\n{sample_spec}",
+    }), encoding="utf-8")
     for mode in ("harmful", "helpful"):
         template = overlay / "output" / "generation" / mode
         template.mkdir(parents=True)
@@ -1085,7 +1189,8 @@ def _constitution_stage(monkeypatch, constitution: pd.DataFrame) -> None:
 
 
 def _training_run(folder: Path, monkeypatch, before=None) -> dict:
-    """A training run after an earlier call left inputs of another style."""
+    """A training run after an earlier call made the inputs of its first two
+    entries, which the run resumes."""
     from redact import generate_inputs
 
     overlay = _overlay(folder)
@@ -1096,19 +1201,23 @@ def _training_run(folder: Path, monkeypatch, before=None) -> dict:
             ("Cyber", "harmful"), ("Cyber", "benign"), ("Fraud", "harmful"),
             ("Fraud", "dual_use_benign")])
     ])
-    _stub_models(monkeypatch)
+    units = _stub_models(monkeypatch)
     _constitution_stage(monkeypatch, constitution)
 
     generate_inputs(
-        data_dir=folder, constitution_df=constitution.iloc[:2], style="short",
+        data_dir=folder, constitution_df=constitution.iloc[:2],
         model="gen-model", check_model="check-model", prompt_dir=overlay,
         axes_weighting="log", verbose=False)
+    made_before = dict(units)
     counts = _counts({
         "dataset_type": "training", "data_dir": str(folder), "prompt_dir": str(overlay),
         "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks",
                    "build"],
         "models": _MODELS, "augmentations": _PURE,
     }, before, params={"paraphrase": {"target": "both"}})   # the opt-in, too
+    # The run generated inputs only for the two entries the earlier call left.
+    assert {token for token, n in units.items()
+            if n > made_before.get(token, 0)} == {"zq2", "zq3"}
     merged = "constitution_inputs_merged.csv"
     return {"counts": counts, merged: _files(paths.datasets(folder))[merged]}
 
@@ -1134,12 +1243,12 @@ def _eval_run(folder: Path, monkeypatch, before=None) -> dict:
     return {"counts": counts}
 
 
-def _packaged(flat: dict) -> dict:
-    """The packaged section with ``flat`` over it, each kind whole, so the
+def _packaged(section: dict) -> dict:
+    """The packaged section with ``section`` over it, each kind whole, so the
     eval type's section does not apply."""
     from redact.recipe import augmentations_of
 
-    return augmentations_of({"augmentations": flat})
+    return augmentations_of({"augmentations": section})
 
 
 _RUNS = {"training": _training_run, "eval": _eval_run}

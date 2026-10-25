@@ -9,7 +9,10 @@ each cognitive or persona technique built on, when the stage records them.
 """
 
 import json
+import os
 from pathlib import Path
+
+from .rows import _write_atomic
 
 _MANIFEST = ".manifest.jsonl"
 
@@ -50,19 +53,41 @@ def plan_record(**made_with) -> dict:
 
 def write_plan(manifest_path, record: dict) -> Path:
     """Write ``record`` (:func:`plan_record`) as the plan file beside the
-    manifest at ``manifest_path``; returns its path."""
+    manifest at ``manifest_path``; returns its path.
+
+    The file goes through ``<name>.tmp``, synced, and a rename, so it holds
+    the old record or the new one. Its lines end as a text write ends them.
+    """
     path = plan_path(manifest_path)
-    path.write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8")
+    text = json.dumps(record, indent=1) + "\n"
+    _write_atomic(path, [text.replace("\n", os.linesep).encode("utf-8")])
     return path
 
 
 def read_plan(manifest_path) -> dict | None:
     """The record the plan file beside the manifest at ``manifest_path``
-    holds; ``None`` when there is no plan file."""
+    holds; ``None`` when there is no plan file.
+
+    Raises:
+        ValueError: The file holds no record: it is not JSON (cut off as an
+            earlier version wrote it, or edited), or not an object. The
+            message names the file and the remedies.
+    """
     path = plan_path(manifest_path)
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as error:     # not JSON, or not utf-8
+        found = f"it does not parse: {error}"
+    else:
+        if isinstance(record, dict):
+            return record
+        found = f"it holds a {type(record).__name__}, not an object"
+    raise ValueError(
+        f"The plan file {path} holds no plan record ({found}). Delete it to "
+        "resume without comparing this run's settings with the plan's (a "
+        "WARNING says so), or run with resume=False to start the stage over.")
 
 
 def changed_plan(manifest_path, current: dict) -> list[str] | None:

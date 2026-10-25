@@ -268,12 +268,12 @@
    "output_responses.plan.json": "{\n \"seed\": 42,\n \"outputs_per_input\": 1,\n \"modes\": {\n  \"harmful\": [\n   \"harmful\"\n  ],\n  \"dual_use_harmful\": [\n   \"harmful\",\n   \"helpful\"\n  ],\n  \"dual_use_benign\": [\n   \"harmful\",\n   \"helpful\"\n  ],\n  \"benign\": [\n   \"helpful\"\n  ]\n },\n \"axes\": {\n  \"length\": {\n   \"brief\": 0.2,\n   \"short\": 0.35,\n   \"medium\": 0.3,\n   \"long\": 0.15\n  },\n  \"format\": {\n   \"prose\": 0.35,\n   \"list\": 0.2,\n   \"steps\": 0.2,\n   \"sections\": 0.1,\n   \"table\": 0.05,\n   \"code\": 0.1\n  },\n  \"register\": {\n   \"neutral\": 0.4,\n   \"friendly\": 0.3,\n   \"formal\": 0.15,\n   \"technical\": 0.15\n  }\n }\n}\n",
    "output_responses.state.jsonl": [
     {},
-    {"input_id": "given-1", "iteration": 0, "mode": "harmful", "accepted": true},
-    {"input_id": "8067cf5991e9144b", "iteration": 0, "mode": "helpful", "accepted": false},
-    {"input_id": "padded", "iteration": 0, "mode": "harmful", "accepted": true},
-    {"input_id": "given-1", "iteration": 0, "mode": "harmful", "accepted": false},
-    {"input_id": "1d97520eca276324", "iteration": 0, "mode": "helpful", "accepted": true},
-    {"input_id": "77", "iteration": 0, "mode": "harmful", "accepted": false}
+    {"input_id": "given-1", "iteration": 0, "mode": "harmful", "spec": {"length": "brief", "format": "prose", "register": "friendly"}, "accepted": true},
+    {"input_id": "8067cf5991e9144b", "iteration": 0, "mode": "helpful", "spec": {"length": "brief", "format": "list", "register": "neutral"}, "accepted": false},
+    {"input_id": "padded", "iteration": 0, "mode": "harmful", "spec": {"length": "short", "format": "table", "register": "technical"}, "accepted": true},
+    {"input_id": "given-1", "iteration": 0, "mode": "harmful", "spec": {"length": "brief", "format": "list", "register": "friendly"}, "accepted": false},
+    {"input_id": "1d97520eca276324", "iteration": 0, "mode": "helpful", "spec": {"length": "short", "format": "steps", "register": "friendly"}, "accepted": true},
+    {"input_id": "77", "iteration": 0, "mode": "harmful", "spec": {"length": "long", "format": "code", "register": "formal"}, "accepted": false}
    ]
   },
   "stopped": {
@@ -295,10 +295,10 @@
    "output_responses.plan.json": "{\n \"seed\": 42,\n \"outputs_per_input\": 1,\n \"modes\": {\n  \"harmful\": [\n   \"harmful\"\n  ],\n  \"dual_use_harmful\": [\n   \"harmful\",\n   \"helpful\"\n  ],\n  \"dual_use_benign\": [\n   \"harmful\",\n   \"helpful\"\n  ],\n  \"benign\": [\n   \"helpful\"\n  ]\n },\n \"axes\": {\n  \"length\": {\n   \"brief\": 0.2,\n   \"short\": 0.35,\n   \"medium\": 0.3,\n   \"long\": 0.15\n  },\n  \"format\": {\n   \"prose\": 0.35,\n   \"list\": 0.2,\n   \"steps\": 0.2,\n   \"sections\": 0.1,\n   \"table\": 0.05,\n   \"code\": 0.1\n  },\n  \"register\": {\n   \"neutral\": 0.4,\n   \"friendly\": 0.3,\n   \"formal\": 0.15,\n   \"technical\": 0.15\n  }\n }\n}\n",
    "output_responses.state.jsonl": [
     {},
-    {"input_id": "given-1", "iteration": 0, "mode": "harmful", "accepted": true},
-    {"input_id": "8067cf5991e9144b", "iteration": 0, "mode": "helpful", "accepted": false},
-    {"input_id": "padded", "iteration": 0, "mode": "harmful", "accepted": true},
-    {"input_id": "given-1", "iteration": 0, "mode": "harmful", "accepted": false}
+    {"input_id": "given-1", "iteration": 0, "mode": "harmful", "spec": {"length": "brief", "format": "prose", "register": "friendly"}, "accepted": true},
+    {"input_id": "8067cf5991e9144b", "iteration": 0, "mode": "helpful", "spec": {"length": "brief", "format": "list", "register": "neutral"}, "accepted": false},
+    {"input_id": "padded", "iteration": 0, "mode": "harmful", "spec": {"length": "short", "format": "table", "register": "technical"}, "accepted": true},
+    {"input_id": "given-1", "iteration": 0, "mode": "harmful", "spec": {"length": "brief", "format": "list", "register": "friendly"}, "accepted": false}
    ]
   }
  },

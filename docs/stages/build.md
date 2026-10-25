@@ -38,11 +38,11 @@ input's `entry_type`, so in the dataset it would carry the wrong label; it
 stays in its stage file, where `rejection_reason` or `reasoning` says why. A
 file without an `accepted` column is copied whole.
 
-Each row is written once by `sample_id` in a file. A row whose `sample_id`
-an earlier part of the file wrote is left out, and the log counts them per
-part (`Jailbreaks: left out N rows whose sample_id an earlier part
-wrote.`). A row without a `sample_id` stays. Rows of one part are not
-compared with each other.
+A row whose `sample_id` an earlier part of the file wrote is left out, and
+the log counts them per part (`Jailbreaks: left out N rows whose sample_id
+an earlier part wrote.`). A row without a `sample_id` stays. Rows of one
+part are not compared with each other, so a part's own repeats stay: two
+sibling responses with one text are two rows with one `sample_id`.
 
 ## Mode
 
@@ -129,8 +129,9 @@ columns.
 An eval build writes no `complete_dataset.csv` (an `output_path` raises)
 and no separate paraphrase file. It writes three files, each with a fixed
 set of columns, whatever columns the stage files have (`eval_jailbreaks.csv`
-gained `families` and `layers` in the release of spec 1.4: a file built
-before has two columns fewer):
+gained `families` and `layers` in the release of spec 1.4, and each file the
+generation axis columns: a file built before either change lacks its
+columns):
 
 | File | Rows, in order | Read by |
 |---|---|---|
@@ -149,6 +150,7 @@ before has two columns fewer):
 | `input_id` | for a paraphrase, the input it rewords; empty for an input |
 | `paraphrase_model` | the paraphraser, for a paraphrase |
 | `entry_type`, `category`, `subcategory`, `source_taxonomy` | the input's |
+| `length`, `register`, `writer`, `framing`, `directness`, `focus` | the input's spec: the value of each [generation axis](../configuration.md#the-generation-axes) it was written to; empty for a paraphrase |
 | `dataset_type` | `content_moderation_input` or `content_moderation_paraphrase` |
 
 `eval_outputs.csv`:
@@ -163,6 +165,8 @@ before has two columns fewer):
 | `model` | the responding model; empty for a paraphrase |
 | `paraphrase_model` | the paraphraser, for a paraphrase |
 | `entry_type`, `category`, `subcategory`, `source_taxonomy` | the input's |
+| `length`, `register`, `writer`, `framing`, `directness`, `focus` | the spec of the input answered; empty for a paraphrase |
+| `response_length`, `response_format`, `response_register` | the response's spec; empty for a paraphrase |
 | `dataset_type` | `content_moderation_output` or `content_moderation_paraphrase` |
 
 `eval_jailbreaks.csv`:
@@ -177,6 +181,7 @@ before has two columns fewer):
 | `complexity`, `num_techniques`, `iteration` | the attack's; empty for a negative |
 | `input_id` | for an attack, the input attacked; empty for a negative |
 | `entry_type`, `category`, `subcategory`, `source_taxonomy` | the input's |
+| `length`, `register`, `writer`, `framing`, `directness`, `focus` | the input's spec; on an attack it describes the input before the attack changed it |
 | `dataset_type` | `jailbreak` or `content_moderation_input` |
 
 The files label in two vocabularies: `label` is an entry type in
@@ -194,6 +199,16 @@ which the eval run's jailbreak kind does not make by default, is a `benign`
 row with `is_jailbreak` `True`. A row's `subcategory` and `source_taxonomy`
 are its own when its stage file has the column, else those of the input its
 `input_id` names; `source_taxonomy` is empty when the inputs have none. The
+input's spec columns are taken the same way on a response and an attack, so
+with `include_inputs` false a response's input spec columns are empty, as its
+`source_taxonomy` is. A paraphrase carries no spec, its input's nor its
+response's, since the paraphraser rewrote what the spec asked for: its
+`input_id` finds its input's spec in `eval_inputs.csv`, while a response
+paraphrase's response spec is only in the stage files, as the eval files carry
+no `response_id`. The spec columns are empty when the inputs were made without
+axes (`axes: false`), and they are the packaged axis table's: an axis that a
+recipe's `config_dir` copy of `generation_axes.json` adds is not carried into
+the eval files, and one it drops leaves its column empty. The
 provenance columns (`technique_info`, `reasoning`, `rejection_reason`, the
 spec version) stay in the stage files, where a row is found by `sample_id`.
 The input's text is not repeated on derived rows: `input_id` finds it in

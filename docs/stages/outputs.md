@@ -100,13 +100,15 @@ A custom mapping, as `{"benign": ["harmful"]}`, gives the other two labels
 (`benign_harmful`, `harmful_benign`). The label names what was asked and
 how it was answered, and judges nothing.
 
-Each checker keeps the verdict wording, the reply shapes and criteria 2 to
-4 of the single checker it replaces, and differs in its semantics line and
-criterion 1: the harmful checker holds the harmful entry type's line of
-that checker, the helpful one asks for a normal, helpful, non-refusal
-answer to the request as it was asked, not a safer reinterpretation, with
-no moralising or unrequested disclaimers. A refusal is rejected in both. The
-checker is shown the category, not the input's entry type.
+The two checkers share the verdict wording, the reply shapes and the four
+criteria, the first of which asks that the response fit the answer mode;
+they differ in the mode's semantics line. The harmful checker asks that the
+response actually contain the harmful content requested, not a refusal or
+a moralising redirect; the helpful one asks for a normal, helpful,
+non-refusal answer to the request as it was asked, not a safer
+reinterpretation, with no moralising or unrequested disclaimers. A refusal
+is rejected in both. The checker is shown the category, not the input's
+entry type.
 
 The mode is not a generation axis: it picks the prompt, the checker and the
 label rather than adding a line to the spec, it holds with `axes: false`,
@@ -141,17 +143,19 @@ modes k / 2 times, so the group's counts are level at every input's first
 unit and an input's modes depend on its own key alone: inputs that join the
 group leave them as they were. At k = 1 and an odd k the group alternates,
 so inputs that join a dual-use group would deal the units before them
-again. A done unit keeps the mode its ack records instead: the deal counts
-it as dealt and deals the other units around it, so the manifest and the
-coverage table agree with the rows, and the new inputs balance the modes
-the rows have. An ack written without a mode (on this branch before the
-fix) leaves its unit to the deal. The specs of done units are dealt again
-as before; the rows keep theirs.
+again, and the specs of any group would move. A done unit keeps the mode
+and the spec its ack records instead: the deal counts them as dealt and
+deals the other units around them, so the manifest and the coverage table
+agree with the rows, and the new inputs balance the modes and the values
+the rows have. An ack written by an earlier version, without a mode or a
+spec, leaves its unit to the deal, and so does the spec of a key that two
+input rows share (one ack holds it). Rows keep what they were written with
+either way.
 
 | | Value |
 |---|---|
 | Ledger key | `(input_id, iteration)`: the input's `sample_id`, else the content id of its text, and which of its responses |
-| Ledger record | `{"input_id": ..., "iteration": ..., "mode": ..., "accepted": ...}`: the mode the row was written with, and the verdict on the last attempt |
+| Ledger record | `{"input_id": ..., "iteration": ..., "mode": ..., "spec": {...}, "accepted": ...}`: the mode and the spec the row was written with (no `spec` without axes), and the verdict on the last attempt |
 | Manifest row | `input_id`, `iteration`, `category`, `entry_type`, `mode`, `spec` (the dealt value of each axis; none without axes), `status` (`planned`), one per unit |
 
 ## Files
@@ -211,7 +215,9 @@ file's, whose keys an old folder lacks. A resume then compares the run's
 `seed`, `outputs_per_input`, `modes` and axes' weights with
 `output_responses.plan.json`, and raises `Outputs: this run's [...] differ
 from those the responses in ... were dealt with`, naming the keys and
-`resume=False`.
+`resume=False`. A plan file that holds no record (one an earlier version
+cut off as it wrote it) stops the resume before anything is cut, naming the
+file: delete it to resume unchecked, or start over.
 
 ## Rejected and failed units
 

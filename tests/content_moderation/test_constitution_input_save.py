@@ -21,7 +21,7 @@ from redact.content_moderation.inputs import (
     _constitution_inputs_ledger,
     _constitution_inputs_manifest,
 )
-from redact.dataset import Ledger, content_id
+from redact.dataset import content_id
 from tests.conftest import (
     Killed,
     MockBackend,
@@ -53,7 +53,7 @@ _NO_SAMPLES = 30    # every reply of this entry is rejected whole
 _TWICE = 50         # this entry's reply holds one text twice
 _FRAUD_FROM = 66    # the entries from here on are of a third category
 
-_DESCRIPTION, _STYLE = 9, 12    # columns of a category file
+_DESCRIPTION, _RETIRED_COLUMN = 9, 12   # columns of a fixture's category file
 
 
 def _category(i: int) -> str:
@@ -72,13 +72,13 @@ def _entries(*numbers: int) -> pd.DataFrame:
     ])
 
 
-def _key(i: int, style: str = "", iteration: int = 0) -> tuple[str, str, str, int]:
-    return f"desc zq{i}", "benign" if i % 3 == 0 else "harmful", style, iteration
+def _key(i: int, iteration: int = 0) -> tuple[str, str, int]:
+    return f"desc zq{i}", "benign" if i % 3 == 0 else "harmful", iteration
 
 
-def _keys(*numbers: int, style: str = "") -> set[tuple[str, str, str, int]]:
+def _keys(*numbers: int) -> set[tuple[str, str, int]]:
     """The keys of both units of each entry."""
-    return {_key(i, style, iteration) for i in numbers for iteration in (0, 1)}
+    return {_key(i, iteration) for i in numbers for iteration in (0, 1)}
 
 
 def _write(token: str, attempt: int) -> str:
@@ -145,7 +145,7 @@ def _no_read(*args, **kwargs):
 def _five_saves(folder: Path) -> dict:
     """The files and the counts of one run of 70 entries, 140 units saved 32
     at a time."""
-    result, _gen = _run(folder, _entries(), style="long")
+    result, _gen = _run(folder, _entries())
     return {
         "files": _tree(folder),
         "counts": {
@@ -161,7 +161,8 @@ def _five_saves(folder: Path) -> dict:
 class TestTheFilesOfARun:
     def test_five_saves_write_the_rows_of_the_fixture_with_their_iteration(
             self, tmp_path):
-        """Same rows, columns and column order, and last an ``iteration``
+        """Same rows, columns and column order, but for the fixture's last
+        column, which the stage no longer writes, and last an ``iteration``
         column: 1 for an entry's second sample, else 0. The one row that is
         gone: zq20 and zq21 were live together and gave one text, and each
         wrote it to its own category. Now the first to finish writes it. The
@@ -181,9 +182,10 @@ class TestTheFilesOfARun:
                        if r[_DESCRIPTION] == f"desc zq{after}")
             rows.insert(last + 1, row)
         for rows in expected.values():
-            rows[0].append("iteration")
+            rows[0][_RETIRED_COLUMN:] = ["iteration"]
             for row in rows[1:]:
-                row.append("1" if row[1].startswith('second "quoted"') else "0")
+                row[_RETIRED_COLUMN:] = [
+                    "1" if row[1].startswith('second "quoted"') else "0"]
 
         run = _five_saves(tmp_path)
         assert run["files"] == expected
@@ -240,7 +242,7 @@ class TestRepeatedTexts:
         shared, of_20, of_21 = (content_id(text) for text in (
             _REPEATS[20], 'second "quoted" sample, café zq20',
             'second "quoted" sample, café zq21'))
-        fields = ("sample_description", "entry_type", "style", "iteration")
+        fields = ("sample_description", "entry_type", "iteration")
         assert _acks(tmp_path)[1:] == [
             dict(zip(fields, _key(20)), ids=[shared], accepted=True),
             dict(zip(fields, _key(20, iteration=1)), ids=[of_20], accepted=True),
@@ -272,11 +274,6 @@ class TestRepeatedTexts:
             "Violence": ["first sample zq4", 'second "quoted" sample, café zq4'],
             "Privacy": ['second "quoted" sample, café zq41'],
         }
-
-    def test_a_text_another_style_wrote_is_dropped(self, tmp_path):
-        _run(tmp_path, _entries(4), style="long")
-        _run(tmp_path, _entries(41), style="short")
-        assert _texts(tmp_path)["Privacy"] == ['second "quoted" sample, café zq41']
 
     def test_the_ids_of_a_save_that_did_not_finish_are_not_known(
             self, tmp_path, monkeypatch):
@@ -357,14 +354,14 @@ class TestAResume:
             self, tmp_path, resume):
         from filelock import FileLock
 
-        _run(tmp_path, _entries(0, 1), style="long")
+        _run(tmp_path, _entries(0, 1))
         before = _files(tmp_path)
         ledger = _constitution_inputs_ledger(tmp_path)
         another = FileLock(str(ledger.path) + ".lock", timeout=0)
         another.acquire()
         try:
             with pytest.raises(RuntimeError, match="is locked"):
-                _run(tmp_path, _entries(0, 1, 2), style="long", resume=resume)
+                _run(tmp_path, _entries(0, 1, 2), resume=resume)
         finally:
             another.release()
         assert _files(tmp_path) == before       # the manifest too
@@ -378,155 +375,7 @@ def _again(token: str, attempt: int) -> str:
 
 
 class TestAFreshRun:
-    def _two_styles(self, folder):
-        """Long in Violence and Privacy; short there and alone in Fraud, with
-        an entry that has no row."""
-        _run(folder, _entries(0, 1, 2), style="long")
-        _run(folder, _entries(4, 5, 66, _NO_SAMPLES), style="short")
-
-    def test_of_one_style_keeps_the_rows_and_acks_of_the_others(self, tmp_path):
-        _run(tmp_path, _entries(0, 1, 2), style="long")
-        long_only = _files(tmp_path)
-        _run(tmp_path, _entries(4, 5, 66, _NO_SAMPLES), style="short")
-        short_ids = {row[0] for rows in _tree(tmp_path).values()
-                     for row in rows[1:] if row[_STYLE] == "short"}
-
-        _result, gen = _run(tmp_path, _entries(4, 5, 66, _NO_SAMPLES), write=_again,
-                            style="short", resume=False)
-        # Both units of every entry of the style were generated again, three
-        # times each for none.
-        assert sorted(token for batch in gen.batches for token in batch) == sorted(
-            ["zq4", "zq4*", "zq5", "zq5*", "zq66", "zq66*", "zq30", *["zq30*"] * 5])
-        after = _files(tmp_path)
-        for name in ("Violence/samples.csv", "Privacy/samples.csv"):
-            assert after[name].startswith(long_only[name])      # byte for byte
-        assert _texts(tmp_path) == {
-            "Violence": ["first sample zq0", 'second "quoted" sample, café zq0',
-                         "first sample zq2", 'second "quoted" sample, café zq2',
-                         "first sample again zq4", "second sample again zq4"],
-            "Privacy": ["first sample zq1", 'second "quoted" sample, café zq1',
-                        "first sample again zq5", "second sample again zq5"],
-            "Fraud": ["first sample again zq66", "second sample again zq66"],
-        }
-        ledger = _constitution_inputs_ledger(tmp_path)
-        assert ledger.completed() == (
-            _keys(0, 1, 2, style="long") | _keys(4, 5, 66, _NO_SAMPLES, style="short"))
-        # No id of a removed row is known, and the sizes are those of the files.
-        assert ledger.ids == set(_ids_on_disk(tmp_path))
-        assert not ledger.ids & short_ids
-        assert {name: size for name, (size, _crc) in ledger.saved.items()} == {
-            name: len(data) for name, data in after.items() if name.endswith(".csv")}
-
-    def test_of_one_style_that_dies_at_its_first_call_is_resumed(self, tmp_path):
-        self._two_styles(tmp_path)
-
-        def dies(token, attempt):
-            raise RuntimeError("engine died")
-
-        with pytest.raises(RuntimeError, match="engine died"):
-            _run(tmp_path, _entries(4, 5, 66, _NO_SAMPLES), write=dies,
-                 style="short", resume=False)
-        assert all(row[_STYLE] == "long"
-                   for rows in _tree(tmp_path).values() for row in rows[1:])
-        assert "Fraud/samples.csv" not in _tree(tmp_path)   # no row left: no file
-        ledger = _constitution_inputs_ledger(tmp_path)
-        assert ledger.completed() == _keys(0, 1, 2, style="long")
-        assert lock_is_free(ledger.path)
-
-        result, _gen = _run(tmp_path, _entries(4, 5, 66, _NO_SAMPLES), style="short")
-        assert (result.total_entries_processed, result.skipped_entries) == (6, 2)
-        assert _texts(tmp_path)["Fraud"] == [
-            "first sample zq66", 'second "quoted" sample, café zq66']
-        assert _constitution_inputs_ledger(tmp_path).ids == set(_ids_on_disk(tmp_path))
-
-    def _dies_before_the_ledger(self, folder, monkeypatch, style):
-        """A fresh run of ``style`` that wrote the files again and not the
-        ledger; the folder as it leaves it."""
-        with monkeypatch.context() as patch:
-            patch.setattr(Ledger, "rewrite", lambda self, drop, saved: 1 / 0)
-            with pytest.raises(ZeroDivisionError):
-                _run(folder, _entries(4), style=style, resume=False)
-        return _files(folder)
-
-    def test_of_one_style_that_stopped_before_the_ledger_is_finished_by_another(
-            self, tmp_path, monkeypatch):
-        """In between, a resume stops: rows are gone whose acks are not."""
-        self._two_styles(tmp_path)
-        stopped = self._dies_before_the_ledger(tmp_path, monkeypatch, "short")
-
-        with pytest.raises(RuntimeError, match="'short' did not finish"):
-            _run(tmp_path, _entries(4), style="short")
-        assert _files(tmp_path) == stopped
-
-        _run(tmp_path, _entries(4), write=_again, style="short", resume=False)
-        assert _texts(tmp_path)["Violence"][-2:] == [
-            "first sample again zq4", "second sample again zq4"]
-        ledger = _constitution_inputs_ledger(tmp_path)
-        assert ledger.completed() == (
-            _keys(0, 1, 2, style="long") | _keys(4, style="short"))
-        assert ledger.ids == set(_ids_on_disk(tmp_path))
-
-    def test_of_another_style_stops_on_one_that_did_not_finish(
-            self, tmp_path, monkeypatch):
-        """It would leave a ledger that matches the files, with the acks of
-        the first style in it and its rows gone: a resume of that style
-        would then generate nothing."""
-        self._two_styles(tmp_path)
-        stopped = self._dies_before_the_ledger(tmp_path, monkeypatch, "short")
-
-        with pytest.raises(RuntimeError, match="'short' did not finish"):
-            _run(tmp_path, _entries(0, 1, 2), write=_again, style="long", resume=False)
-        assert _files(tmp_path) == stopped
-        assert lock_is_free(_constitution_inputs_ledger(tmp_path).path)
-
-        # The first is made again and finishes; then the second runs.
-        short = _entries(4, 5, 66, _NO_SAMPLES)
-        _result, gen = _run(tmp_path, short, style="short", resume=False)
-        again = {token.rstrip("*") for batch in gen.batches for token in batch}
-        assert again == {"zq4", "zq5", "zq66", "zq30"}
-        _run(tmp_path, _entries(0, 1, 2), write=_again, style="long", resume=False)
-        assert _texts(tmp_path) == {
-            "Violence": ["first sample zq4", 'second "quoted" sample, café zq4',
-                         "first sample again zq0", "second sample again zq0",
-                         "first sample again zq2", "second sample again zq2"],
-            "Privacy": ["first sample zq5", 'second "quoted" sample, café zq5',
-                        "first sample again zq1", "second sample again zq1"],
-            "Fraud": ["first sample zq66", 'second "quoted" sample, café zq66'],
-        }
-        ledger = _constitution_inputs_ledger(tmp_path)
-        assert ledger.completed() == (
-            _keys(0, 1, 2, style="long") | _keys(4, 5, 66, _NO_SAMPLES, style="short"))
-        assert ledger.ids == set(_ids_on_disk(tmp_path))
-
-    def test_of_one_style_stops_on_a_file_that_lost_its_last_rows(self, tmp_path):
-        """Cut short at the end of a row, the file is whole to look at. The
-        ledger recorded more of it, and no fresh run is unfinished."""
-        self._two_styles(tmp_path)
-        violence = tmp_path / "Violence" / "samples.csv"
-        data = violence.read_bytes()
-        # Its last two rows are zq4's, and a row starts with its id.
-        first_of_zq4 = content_id("first sample zq4").encode()
-        violence.write_bytes(data[:data.index(first_of_zq4)])
-        assert violence.read_bytes().endswith(b"\n")
-        before = _files(tmp_path)
-
-        with pytest.raises(RuntimeError, match="copied incompletely") as stopped:
-            _run(tmp_path, _entries(4), style="short", resume=False)
-        assert str(violence) in str(stopped.value)
-        assert "start the whole stage over" in str(stopped.value)
-        assert _files(tmp_path) == before
-
-    def test_of_one_style_leaves_a_file_without_a_style_column_alone(self, tmp_path):
-        """Its rows are of no style, as a resume reads them; written without
-        an iteration, it then stops the stage."""
-        write_inputs(tmp_path, ["an old sample"], "Violence", source="constitution")
-        old = (tmp_path / "Violence" / "samples.csv").read_bytes()
-        with pytest.raises(ValueError, match="'iteration'"):
-            _run(tmp_path, _entries(_NO_SAMPLES), style="long", resume=False)
-        assert (tmp_path / "Violence" / "samples.csv").read_bytes() == old
-
-    def test_without_a_style_removes_the_tree_its_cut_files_and_the_ledger(
-            self, tmp_path):
+    def test_it_removes_the_tree_its_cut_files_and_the_ledger(self, tmp_path):
         _run(tmp_path, _entries(0, 1))
         with (tmp_path / "Violence" / "samples.csv").open("ab") as fh:
             fh.write(b"a tail\r\n")
@@ -539,7 +388,7 @@ class TestAFreshRun:
             "constitution_inputs.manifest.jsonl", "constitution_inputs.plan.json"}
         assert _acks(tmp_path)[0] == {}         # a new ledger: its opening line
         assert _constitution_inputs_manifest(tmp_path).load() == [
-            {"sample_description": "desc zq1", "entry_type": "harmful", "style": "",
+            {"sample_description": "desc zq1", "entry_type": "harmful",
              "iteration": iteration, "category": "Privacy", "status": "planned"}
             for iteration in (0, 1)]
 
@@ -549,16 +398,15 @@ def _old_folder(folder: Path, with_rows, acked) -> None:
     and before an entry was a unit per sample: rows without an iteration, and
     one plain ledger line per entry."""
     for i in with_rows:
-        description, entry_type, style, _iteration = _key(i, "long")
+        description, entry_type, _iteration = _key(i)
         write_inputs(
             folder, [f"first sample zq{i}", f"second sample zq{i}"], _category(i),
             source="constitution", extra={
                 "entry_type": entry_type, "subcategory": "Sub",
                 "source_sample_description": description,
                 "constitution_category": "Top", "source_group_tag": "",
-                "template_style": style, "rejection_reason": ""})
-    lines = [dict(zip(("sample_description", "entry_type", "style"), _key(i, "long")))
-             for i in acked]
+                "rejection_reason": ""})
+    lines = [dict(zip(("sample_description", "entry_type"), _key(i))) for i in acked]
     _constitution_inputs_ledger(folder).path.write_text(
         "".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
 
@@ -568,7 +416,7 @@ class TestAFolderWrittenBeforeUnitsHadAnIteration:
         _old_folder(tmp_path, with_rows=(0, 1), acked=(0, 1))
         old = _files(tmp_path)
         with pytest.raises(ValueError, match="without an iteration") as stopped:
-            result, gen = _run(tmp_path, _entries(0, 1, 2), style="long")
+            result, gen = _run(tmp_path, _entries(0, 1, 2))
         assert "resume=False" in str(stopped.value)
         assert "new data_dir" in str(stopped.value)
         assert _files(tmp_path) == old
@@ -583,15 +431,15 @@ class TestAFolderWrittenBeforeUnitsHadAnIteration:
             _run(tmp_path, _entries(0))
         assert not _constitution_inputs_ledger(tmp_path).exists()
 
-    def test_a_fresh_run_of_its_style_starts_every_entry_over(self, tmp_path):
+    def test_a_fresh_run_starts_every_entry_over(self, tmp_path):
         """The acks of a ledger of that time are removed with the rows."""
         _old_folder(tmp_path, with_rows=(0, 1), acked=(0, 1, _NO_SAMPLES))
         result, gen = _run(tmp_path, _entries(0, 1, _NO_SAMPLES), write=_again,
-                           style="long", resume=False)
+                           resume=False)
         assert (result.total_entries_processed, result.skipped_entries) == (4, 2)
         assert _texts(tmp_path) == {
             "Violence": ["first sample again zq0", "second sample again zq0"],
             "Privacy": ["first sample again zq1", "second sample again zq1"],
         }
         assert _constitution_inputs_ledger(tmp_path).completed() == _keys(
-            0, 1, _NO_SAMPLES, style="long")
+            0, 1, _NO_SAMPLES)

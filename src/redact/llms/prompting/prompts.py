@@ -146,7 +146,7 @@ def load_prompt(
         pipeline: Pipeline name (e.g. "input", "output", "jailbreak",
             "constitution").
         category: Category within it (e.g. "quality_check",
-            "generation/from_constitution/long").
+            "generation/harmful").
         prompt_dir: Optional directory searched first. ``None`` uses the
             packaged prompts only.
 
@@ -539,12 +539,6 @@ class PromptTemplate:
         return messages
 
 
-#TODO(driver script): move one-shot message building into the driver.
-#   - Builds and discards a PromptTemplate on every call.
-#   - Passes no name/source, so a render error cannot name the prompt file.
-#   - Passes no prompt_dir, so a format-instruction override is ignored.
-#     PromptTemplate.load fixes both.
-#   - Passes every kwarg to both stages, hence the reserved placeholder names.
 def build_messages(
     prompt_config: dict,
     few_shot: bool = True,
@@ -555,7 +549,9 @@ def build_messages(
 
     Constructs a :class:`PromptTemplate` and calls it with the same kwargs,
     so they apply to both ``system_prompt`` and ``template``. Prefer
-    :meth:`PromptTemplate.load` in new code.
+    :meth:`PromptTemplate.load` in new code: this builds a template on every
+    call, a render error cannot name the prompt file, and a format
+    instruction is read from the packaged tree only, not a ``prompt_dir``.
 
     Args:
         prompt_config: Parsed prompt JSON.

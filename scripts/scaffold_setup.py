@@ -3,11 +3,14 @@
     python scripts/scaffold_setup.py ./my_setup              # refuses to overwrite
     python scripts/scaffold_setup.py ./my_setup --overwrite
 
-Then run a recipe from it (``python scripts/run.py ./my_setup/eval_recipe.json``).
-Each recipe's ``"config_dir": "."`` makes the folder an **overlay**: its
-``dataset_types/``, ``taxonomy/`` and ``jailbreak/augmentations.json`` files
-are read in place of the library's, so delete every file you don't change and
-the rest stay current when the library's improve. Prompts are a separate tier
+Then run a recipe from it (``python scripts/run.py ./my_setup/eval_recipe.json``;
+the folder's README gives the command to type from inside it). Each recipe's
+``"config_dir": "."`` makes the folder an **overlay**: its ``dataset_types/``,
+``taxonomy/``, ``jailbreak/augmentations.json``, ``generation_axes.json`` and
+``dimensions.json`` files are read in place of the library's, so delete every
+file you don't change and the rest stay current when the library's improve.
+Each recipe's ``data_dir`` is ``runs/eval`` or ``runs/training`` in the
+folder, as an absolute path. Prompts are a separate tier
 (``scripts/scaffold_prompts.py`` and a recipe's ``prompt_dir``).
 """
 

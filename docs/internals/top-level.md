@@ -16,8 +16,8 @@ Under `src/redact/`:
 | `constitution/` | The constitution stage: `generation.py` (`ConstitutionPipeline`, `read_constitution`), `units.py` (one call per taxonomy category and entry type, and one per benign-taxonomy category for the general-benign part), `parse.py` (the `[END]` marker and the three-level markdown parser) |
 | `content_moderation/` | The inputs, outputs and paraphrase stages: `inputs.py` (`InputPipeline`), `outputs.py`, `axes.py` (the generation axes: resolve, deal, render, coverage), `modes.py` (the outputs' answer modes: the mapping, the label, the deal), `paraphrase.py`, `checker.py` (the checkers), `feedback.py` (rejection feedback, the length floor's reason), `results.py` (the inputs stage's totals) |
 | `jailbreak/` | The technique library, one subpackage per layer, and the augmentation engine ([jailbreak.md](jailbreak.md)) |
-| `multi_turn/` | Conversation datasets: settings, actors, `generate_conversations`, `evaluate_conversations` |
-| `multiturn_attacks/`, `optimization/` | Crescendo and PAIR attacks against a safety-trained target; a beam search over conversation moves ([conversations](../stages/conversations.md#attacks-and-search)) |
+| `multi_turn/` | Conversation datasets: settings, actors, `generate_conversations`, `evaluate_conversations`; a planned extension, not finished |
+| `multiturn_attacks/`, `optimization/` | Crescendo and PAIR attacks against a safety-trained target; a beam search over conversation moves ([conversations](../stages/conversations.md#attacks-and-search)); planned extensions, not finished |
 | `dataset/` | Rows on disk: identity, the ledger and manifest, resume, the per-category tree, what an eval build leaves out ([dataset.md](dataset.md)) |
 | `configs/` | Package data: `llm/` (registry, roles, GPU prices, `hf_configs/`), `jailbreak/` (the spec, the augmentation defaults, technique templates), `dataset_types/` (what `training` and `eval` mean), `taxonomy/`, `datasets/`, `runs/` (example recipes and their params files), `generation_axes.json` (the axes of the inputs and outputs), `dimensions.json` (what each family and axis varies) |
 | `prompts/` | One prompt JSON per pipeline and step |
@@ -52,7 +52,7 @@ and calls one core, then returns what the core returns.
 | Front | Core | Returns |
 |---|---|---|
 | `generate_constitution` | `ConstitutionPipeline.run` | the saved constitution |
-| `generate_inputs` | `InputPipeline.run_from_constitution` | the accepted inputs of the current style |
+| `generate_inputs` | `InputPipeline.run_from_constitution` | the accepted inputs |
 | `generate_outputs` | `content_moderation.run_output_generation` | the rows of `output_responses.csv` |
 | `generate_paraphrases` | `content_moderation.paraphrase.run_paraphrase_target`, per target | a frame per target that ran: `{"inputs": ...}` by default, `{"inputs": ..., "outputs": ...}` for `target="both"` |
 | `generate_jailbreaks` | `jailbreak.pipeline.run_augmentation`, per kind | the rows of `jailbreaks.csv` |
@@ -92,16 +92,17 @@ pipeline = InputPipeline(gen=client, check=client,
                          dataset_dir="./runs/eval/Datasets/constitution_inputs")
 result = pipeline.run_from_constitution(
     constitution_df=constitution,                     # from generate_constitution()
-    prompt_config=load_prompt("input", "generation/from_constitution/long"),
-    samples_per_entry=3, style="long",
+    prompt_config=load_prompt("input", "generation"),
+    samples_per_entry=3,
 )
 print(f"{result.total_prompts_accepted} accepted samples")
 ```
 
 ## The stage table
 
-`stages.STAGES` maps each recipe stage name to a `Stage`, in the order a run
-takes them.
+`stages.STAGES` maps each recipe stage name to a `Stage`, in the order of a
+full run. A run takes the stages in its recipe's order, which nothing checks
+against this one: a recipe that lists `build` before `inputs` builds first.
 
 | Field | Meaning |
 |---|---|
@@ -123,7 +124,7 @@ the params.
 | Stage | Roles | Files counted | Sources |
 |---|---|---|---|
 | `constitution` | `constitution` -> `constitution_gen` | `Data_cache/constitution/merged.csv` | the taxonomy file, and the benign taxonomy's with `include_general_benign` |
-| `inputs` | `gen`, `check` -> `uncensored_gen` | the category files of `constitution_inputs/`; accepted rows of the current style | the saved constitution, `merged.csv` |
+| `inputs` | `gen`, `check` -> `uncensored_gen` | the category files of `constitution_inputs/`; accepted rows | the saved constitution, `merged.csv` |
 | `outputs` | `gen`, `check` -> `uncensored_gen` | `output_responses.csv`, or its `output_path` | the input category files (`dataset.input_files`) |
 | `paraphrase` | `paraphraser` -> `paraphraser`, `paraphrase_check` -> `uncensored_gen` | the files of the target(s) (`inputs` by default), plus `skipped` from their ledgers | the input category files and `output_responses.csv`, per target |
 | `jailbreaks` | `gen`, `check` -> `uncensored_gen`, `translation` -> `translation` | `jailbreaks.csv` and `variations.csv`, each when its kind is on | the input category files |
@@ -139,11 +140,12 @@ the params.
 
 | Function | Does |
 |---|---|
-| `load_recipe(path or dict, params=None)` | Reads and checks a recipe ([running.md](../running.md#write-a-recipe)), with `params` (a path or dict) standing in for its `params_file`, as `run_pipeline`'s does; refuses a recipe without a `dataset_type` or with one other than `eval` and `training`, a `resume` that is not a bool and a top-level `copies` other than null; takes `stages` from the dataset type when left out; resolves `augmentations`; reads the former taxonomy name `content_moderation_categories` as `harmful`, with a `DeprecationWarning` |
+| `load_recipe(path or dict, params=None)` | Reads and checks a recipe ([running.md](../running.md#write-a-recipe)), with `params` (a path or dict) standing in for its `params_file`, as `run_pipeline`'s does (a relative `params` path read from the current directory, else the recipe's folder; `params_file_of`, which also gives the recipe's own `params_file` from its folder; the file read is the recipe's `_params_file`); refuses a recipe without a `dataset_type` or with one other than `eval` and `training`, a `resume` that is not a bool and a top-level `copies` other than null; takes `stages` from the dataset type when left out; resolves `augmentations`; reads the former taxonomy name `content_moderation_categories` as `harmful`, with a `DeprecationWarning` |
 | `load_dataset_type(name, config_dir=None)`, `dataset_type_hash(name, config_dir=None)` | The file `dataset_types/<name>.json` (`stages`, `params`, `augmentations`), the `config_dir`'s when it has one, else the packaged one, as a copy; read again when it changes. A `name` other than `eval` and `training` (`config_overlay.DATASET_TYPES`) raises. The content id of the file as parsed, which each run record holds ([configuration.md](../configuration.md#dataset-types)) |
 | `stage_params(stage, dataset_type, params=None, config_dir=None)` | A stage's params: the dataset type file's, with the params file's entry over them key by key; what `Stage.params` and `benign_taxonomy_of` read |
 | `benign_taxonomy_of(recipe, stages, params=None)` | The recipe's `benign_taxonomy` (`"benign"` by default); read, and checked to have a category, when the constitution stage runs with `include_general_benign` (or its former name `include_standalone_benign`) on in `stage_params` over `params`, or the jailbreak stage runs a kind that draws a technique needing benign data |
-| `load_params(path or dict, base_dir, config_dir=None)` | Reads the params file; refuses a key that is not a stage name (a `_` key is a comment), a `jailbreaks` key that belongs in the augmentation section, an `axes` or `axes_weighting` entry or `seed` of `inputs` or `outputs` that `axes.resolve` (with `config_dir`'s table) or a whole number would not be, and an `outputs.modes` or `outputs.outputs_per_input` that `modes.resolve_modes` or `modes.check_outputs_per_input` refuses; warns for a flat keyword |
+| `load_params(path or dict, base_dir, config_dir=None)` | Reads the params file; refuses a key that is not a stage name (a `_` key is a comment), a `jailbreaks` key that belongs in the augmentation section, an `axes` or `axes_weighting` entry or `seed` of `inputs` or `outputs` that `axes.resolve` (with `config_dir`'s table) or a whole number would not be, an `outputs.modes` or `outputs.outputs_per_input` that `modes.resolve_modes` or `modes.check_outputs_per_input` refuses, an `inputs.samples_per_entry` that `inputs.check_samples_per_entry` refuses, and a `paraphrase` `target`, `paraphrases_per_sample` or `min_words` that `paraphrase.check_settings` refuses; warns for a flat keyword |
+| `check_build_params(dataset_type, params=None, config_dir=None)` | Refuses a `build.exclude_from`, as `stage_params` gives it, in a `training` run; `load_recipe` calls it when the recipe lists the build |
 | `check_dimensions(params, augmentations, *, dataset_type, config_dir=None)` | Raises when an axis that varies, in each stage's params as `stage_params` gives them (its `axes`, weighted by its `axes_weighting`), shares a dimension with a family a kind draws (`dimensions.check`); the axes, dimensions and type files are the `config_dir`'s when it has them |
 | `augmentations_of(recipe, jailbreak_params)` | The section, both kinds resolved over the recipe's dataset type's (`resolve(..., base=)`), itself over the packaged default or the `config_dir`'s `augmentations.json`; reads the flat form; applies the params' flat keywords over the adversarial kind |
 | `serving_of(models)` | Refuses a key that is not a recipe role, whatever its value (a `_` key is a comment); checks the role objects; returns the keys given per model name |
@@ -196,9 +198,13 @@ tied to code, so they come from the package only.
    `workers` for every client built during the run.
 5. `_plan_phases`: `residency.plan_phases` over each stage's models
    (`_stage_models` resolves them as the stages will), `residency.report` per
-   distinct plan, `residency.apply_plan`. A planning error is logged at
+   distinct plan (a plan that does not fit at ERROR and one with warnings at
+   WARNING whatever `verbose` says, so `--quiet` still shows them; one that
+   fits at INFO with `verbose`), `residency.apply_plan`. A planning error is logged at
    ERROR with its traceback, never raised; the message says that every local
-   engine then loads unplanned, at 0.9 of a card.
+   engine then loads unplanned, at 0.9 of a card, and the loader's planned
+   shares and cards are cleared, so a plan applied before the error does
+   not hold.
 6. `_check_cards`: one `nvidia-smi` read (`measure.card_use`) before any
    model loads; a `RuntimeError` naming the cards, processes and PIDs when
    another process holds memory on a card the plan uses, with the vLLM
@@ -211,11 +217,14 @@ tied to code, so they come from the package only.
    copies, the trace's `load` event says so (`fallback`, `planned_copies`).
    The engines loaded before the run that no stage calls are then set
    aside, so no unload between stages releases them.
-8. Per stage: `_enter_phase` (unload, apply the stage's plan, preload this
-   stage's models and the next stage's when they fit), then inside
+8. Per stage: `_enter_phase` (unload what the previous stage held and this
+   one does not, and an engine loaded before the run for a later stage when
+   this stage's plan leaves it out and loads a model, `_strays`; apply the
+   stage's plan; preload this stage's models and the next stage's when they
+   fit), then inside
    `telemetry.stage(name)`: the front with `read_back=False`, `file_counts`
-   and the stage's `extra_counts`, then `write_record`: `stage`, `timestamp`,
-   the merged `params`, `models`, `counts`, `sources`, `serving` (the roles
+   and the stage's `extra_counts`, then `write_record`: `stage`, `timestamp`
+   (UTC, with its offset), the merged `params`, `models` (no comment key), `counts`, `sources`, `serving` (the roles
    the stage calls), `dataset_type` and its `dataset_type_hash`, with a
    `config_dir` that folder and `config_files`, and for the jailbreak stage
    `spec_version`, `rules` (`stages.jailbreak_rules`: the `rules` id each
@@ -226,11 +235,15 @@ tied to code, so they come from the package only.
    `telemetry.stage` logs the stage's replies cut at the token limit, per
    model.
 9. `finally`: clear the run's serving. When the run has a plan: join the
-   preload threads for at most `vllm.EXIT_WAIT_S` (60 s) in all, unload the
+   preload threads for at most `vllm.EXIT_WAIT_S` (60 s) in all. Unload the
    engines the run loaded (`residency.unload_local(engines=before,
    wait=vllm._GRACE_S)`, 10 s, which ends a load still running; engines
-   loaded before the run stay), and clear the planned shares and cards.
-   Then `telemetry.summary()`.
+   loaded before the run stay), with a plan, or without one when an engine
+   is loaded that was not before (a planning error). With a plan, clear the
+   planned shares and cards.
+   Then `telemetry.summary()`, and `telemetry.uninstall()`: a front called
+   after the run, as from a notebook, records into neither its trace nor
+   its roll-up.
 
 `scripts/run.py` makes the first Ctrl-C or SIGTERM exit through that
 `finally`. A second calls `terminate_engine_processes(all=True, quiet=True)`:
@@ -244,10 +257,12 @@ still alive with a `kill -9` line, and leaves with `os._exit(128 + signum)`.
 | `file_counts(files, keep)` | Counts `rows`, and `accepted` when a file has the column, reading in chunks |
 | `write_record`, `read_record`, `record_path` | The run record `Datasets/<stage>.run.json` |
 
-`write_manifest`, `read_manifest` and `manifest_path` are aliases of the
-three record functions, kept for one release. `pipelines.py` re-exports
-`stages.py` and `runconfig.py` re-exports `recipe.py` and `driver.py`, also
-for one release.
+`write_manifest`, `read_manifest` and `manifest_path` are former names of
+the three record functions, kept for one release: read from `redact.driver`,
+or the first two from `redact` (out of its `__all__`), each warns with a
+`DeprecationWarning` through a module `__getattr__`. `pipelines.py`
+re-exports `stages.py` and `runconfig.py` re-exports `recipe.py` and
+`driver.py`, also for one release; importing either warns.
 
 ## paths.py
 
@@ -322,8 +337,8 @@ How each stage departs from this:
 
 | Stage | Difference |
 |---|---|
-| constitution | A plain ledger: `resume_state` gets no artifact, so no lock and no sizes. It clears its own CSVs on a fresh run, saves after every unit (`every=1`), runs one unit at a time (`pool_size=1`), and reads back through `read_constitution` |
-| inputs | A tree of files: `artifact=folder, pattern="*/samples.csv"`, sidecars named `constitution_inputs.*` in the folder, `drop_units` for a fresh run of one style. Returns `ConstitutionInputResult`; the front reads the tree |
+| constitution | `resume_state(artifact=<constitution folder>, pattern="*.csv", units_in=...)`: locked, every CSV's size recorded with each save, cut back on a resume; a fresh run's `resume_state` removes the CSVs. It saves after every unit (`every=1`), runs one unit at a time (`pool_size=1`), and reads back through `read_constitution` |
+| inputs | A tree of files: `artifact=folder, pattern="*/samples.csv"`, sidecars named `constitution_inputs.*` in the folder; a fresh run clears the whole tree. Returns `ConstitutionInputResult`; the front reads the tree |
 | outputs | Before step 3 it checks the inputs' entry types and renders its prompts and checkers; between steps 3 and 4 it stops on an old folder and on a changed plan file, then deals each unit an answer mode (a done unit keeping its ack's) and a spec |
 | paraphrase | Before step 3 the front checks every paraphraser's fingerprinted prompt and the core builds its checker; after step 4 the units of texts under `min_words` words are acked `skipped`, with no call; steps 5 and 6 run once per paraphraser, with the stage's own residency plan and an unload between paraphrasers that do not co-fit, in one `CommitBuffer` |
 | jailbreaks | Steps 2 to 7 run once per kind; the plan is reused on resume |

@@ -1,7 +1,9 @@
 """Multi-turn jailbreak attacks: a Setting against a safety-trained target.
 
 An attacker (crescendo or PAIR) talks to the target over several turns, and a
-separate judge pass scores whether the target complied.
+separate judge pass scores whether the target complied. A planned
+extension, not finished: not part of a recipe run, and its interfaces may
+change.
 """
 
 from .attacks import DEFAULT_CRESCENDO_FOLLOWUPS, crescendo_propose, pair_propose

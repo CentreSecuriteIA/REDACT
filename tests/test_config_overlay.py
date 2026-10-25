@@ -544,6 +544,41 @@ def test_scaffold_setup_writes_the_packaged_files_as_they_are(tmp_path):
     assert "scaffold_prompts.py" in readme and "prompt_dir" in readme
 
 
+def test_the_setup_readme_runs_a_recipe_from_the_folder(tmp_path):
+    """The folder holds no scripts/: the command names the repository's
+    run.py by its absolute path, or runs the recipe from Python."""
+    import re
+
+    from redact import scaffold_setup
+
+    def command(folder):
+        scaffold_setup(folder)
+        readme = (folder / "README.md").read_text(encoding="utf-8")
+        (line,) = [line.strip() for line in readme.splitlines()
+                   if line.startswith("    python")]
+        return line
+
+    script = paths.package_dir().parents[1] / "scripts" / "run.py"
+    if script.is_file():            # a checkout, as the suite runs from
+        found = re.match(r'python "(.+)" eval_recipe\.json$', command(tmp_path / "a"))
+        assert found is not None
+        assert Path(found.group(1)).is_absolute()
+        assert Path(found.group(1)) == script
+
+
+def test_without_a_checkout_the_setup_readme_runs_the_recipe_from_python(
+        tmp_path, monkeypatch):
+    from redact.llms.prompting import scaffold
+
+    installed = tmp_path / "site-packages" / "redact"
+    installed.mkdir(parents=True)
+    monkeypatch.setattr(scaffold.paths, "package_dir", lambda: installed)
+    command = scaffold._run_command()
+    assert command.strip().startswith("python -c")
+    assert "run_pipeline('eval_recipe.json')" in command
+    assert "scripts/run.py" not in command
+
+
 @pytest.mark.parametrize(("mine", "packaged"), [
     ("eval_recipe.json", "eval_example.json"),
     ("training_recipe.json", "training_example.json")])
@@ -556,7 +591,10 @@ def test_a_scaffolded_recipe_runs_as_the_packaged_example(tmp_path, mine, packag
     assert ours["config_dir"] == str(tmp_path / "setup")
     assert ours["stages"] == theirs["stages"]
     assert ours["augmentations"] == theirs["augmentations"]
-    assert ours["data_dir"] == theirs["data_dir"]
+    # Its own folder, absolute, not the example's run.
+    own = tmp_path / "setup" / "runs" / mine.split("_")[0]
+    assert ours["data_dir"] == own.as_posix()
+    assert ours["data_dir"] != theirs["data_dir"]
 
     def effective(recipe):
         ctx = RunContext(
@@ -597,3 +635,34 @@ def test_the_scaffold_script_writes_the_folder(tmp_path, capsys):
     assert module.main([str(tmp_path)]) == 1
     assert "overwrite" in capsys.readouterr().err
     assert module.main([str(tmp_path), "--overwrite"]) == 0
+
+
+# --- scaffold_prompt_tree --------------------------------------------------------
+
+def test_scaffolding_prompts_refuses_to_overwrite_unless_asked(tmp_path):
+    """A skeleton written over an edited prompt still renders, so the next run
+    would use it without a word: an existing file stops the call."""
+    from redact.llms.prompting import scaffold_prompt_tree
+
+    written = scaffold_prompt_tree(tmp_path)
+    edited = tmp_path / "input" / "quality_check" / "template.json"
+    edited.write_text('{"template": "mine {sample}"}', encoding="utf-8")
+    with pytest.raises(FileExistsError) as raised:
+        scaffold_prompt_tree(tmp_path, mode="empty")
+    assert "overwrite=True" in str(raised.value)
+    assert edited.read_text(encoding="utf-8") == '{"template": "mine {sample}"}'
+    assert scaffold_prompt_tree(tmp_path, mode="empty", overwrite=True) == written
+    assert json.loads(edited.read_text(encoding="utf-8"))["template"].startswith("TODO")
+
+
+def test_the_prompt_scaffold_script_refuses_to_overwrite(tmp_path, capsys):
+    import importlib.util
+
+    script = Path(__file__).parents[1] / "scripts" / "scaffold_prompts.py"
+    spec = importlib.util.spec_from_file_location("scaffold_prompts_script", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.main([str(tmp_path)]) == 0
+    assert module.main([str(tmp_path), "--empty"]) == 1
+    assert "overwrite" in capsys.readouterr().err
+    assert module.main([str(tmp_path), "--empty", "--overwrite"]) == 0

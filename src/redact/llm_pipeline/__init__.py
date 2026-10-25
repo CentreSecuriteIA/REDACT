@@ -1,7 +1,8 @@
 """Helpers between the stages and ``llms/``: drive generators that yield
 model calls, and read replies to decide the next one.
 
-The stages import this; it imports only ``redact.llms``.
+The stages import this; it imports only ``redact.llms`` and
+``redact.exceptions``.
 """
 
 from .check import (

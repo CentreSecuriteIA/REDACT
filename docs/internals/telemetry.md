@@ -25,6 +25,7 @@ describes the output from a user's side.
 | `observe.set_emitter(fn)` | Installs the emitter; `telemetry.install` calls it |
 | `observe.set_stage(label)` | The stage later events carry; a module global, since thread pools do not pass context variables to their workers |
 | `observe.current_stage()` | The stage label set now |
+| `observe.first_in_stage(key)` | Whether `key` is new since the stage label was last set; `set_stage` forgets what it saw. The cut-reply warning uses it, so it warns once per stage run (a second `run_pipeline` in a notebook warns again) |
 
 ## Events
 
@@ -49,12 +50,17 @@ takes each item as its own engine request, so both give one event per item.
 | `stage(label)` | A context manager: labels every event inside it, and records a `stage` event with its duration on exit; then logs a WARNING per model that had replies cut at the token limit in the stage, with their count |
 | `summary()` | Rolls up the run and logs it; `{}` when telemetry is off |
 | `collector()` | The installed `Collector`, or `None` |
-| `uninstall()` | Stops collecting |
+| `uninstall()` | Stops collecting; `run_pipeline` calls it when it returns, after its roll-up |
 | `set_gpu_rate(usd_per_hour)` | Prices this machine's GPUs, over the environment and the table |
 
 With `REDACT_TRACE=wandb` the same events also go to Weights & Biases (a
 missing `wandb` package logs a warning and keeps the JSONL trace). With
-`off` nothing is collected and `summary()` is empty.
+`off` nothing is collected and `summary()` is empty; a backend still warns
+for the first cut reply of each model in each stage, but the stage-end
+counts are lost.
+
+A `Collector` keeps the totals the roll-up needs, never the events: a large
+run makes millions of them, and the trace holds them.
 
 ## The roll-up
 
@@ -65,7 +71,7 @@ token limit per stage and model
 `Collector.cut_in(stage)` gives one stage's counts.
 
 A backend marks a cut reply with `cut` on its `call` event and warns for the
-first cut reply of each model in each stage; later ones are only counted.
+first cut reply of each model in each stage run; later ones are only counted.
 
 Two meters, because two things are bought:
 

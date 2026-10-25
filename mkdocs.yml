@@ -92,8 +92,9 @@ nav:
       - Paraphrase: stages/paraphrase.md
       - Jailbreaks: stages/jailbreaks.md
       - Combination search: stages/combination-search.md
-      - Conversations: stages/conversations.md
       - Build: stages/build.md
+  - Extensions (planned):
+      - Conversations: stages/conversations.md
   - Internals:
       - Top level: internals/top-level.md
       - llms: internals/llms.md

@@ -60,6 +60,28 @@ def _replace(source: Path, target: Path) -> None:
             time.sleep(_REPLACE_WAIT_SECONDS)
 
 
+def _write_atomic(path: Path, chunks: Iterable[bytes]) -> None:
+    """Replace the file at ``path`` with ``chunks``, so it holds its old bytes
+    or all the new ones.
+
+    The bytes go to ``<path>.tmp`` beside it, synced to disk, which is then
+    renamed onto ``path``.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        with temporary.open("wb") as fh:
+            for chunk in chunks:
+                fh.write(chunk)
+            fh.flush()
+            os.fsync(fh.fileno())
+        _replace(temporary, path)
+    finally:
+        # Still there only when the write or the rename failed.
+        temporary.unlink(missing_ok=True)
+
+
 def _has_bytes(path: Path) -> bool:
     """Whether ``path`` is a file with a byte in it.
 

@@ -12,9 +12,8 @@ calls, the files it writes and the kwargs a recipe gives it.
 #     it reads none of its output back.
 #   - Nothing locks the constitution's files against a second process; the
 #     stage is tens of units.
-#TODO(dataset): the paraphrase stage reads its whole output CSV on every run,
-#   for the texts already in it. This goes when the stage moves onto
-#   drive_units with its ids on the ledger.
+#   - The paraphrase stage reads its whole output CSV on every run, for the
+#     texts already in it (see the TODO in content_moderation/paraphrase.py).
 
 import filecmp
 import inspect
@@ -34,12 +33,14 @@ from redact.config_overlay import taxonomy_folder
 from redact.constitution import ConstitutionPipeline, read_constitution
 from redact.content_moderation import InputPipeline, run_output_generation
 from redact.content_moderation import axes as generation_axes
+from redact.content_moderation.inputs import check_samples_per_entry
 from redact.content_moderation.modes import check_outputs_per_input, resolve_modes
 from redact.content_moderation.paraphrase import (
     DEFAULT_TARGET as DEFAULT_PARAPHRASE_TARGET,
 )
 from redact.content_moderation.paraphrase import (
     check_paraphrase_prompt,
+    check_settings,
     paraphrase_pool,
     run_paraphrase_target,
 )
@@ -74,7 +75,7 @@ from redact.jailbreak.obfuscation import langid
 from redact.jailbreak.obfuscation import translation as jailbreak_translation
 from redact.jailbreak.pipeline import run_augmentation
 from redact.llms import ModelClient, load_prompt
-from redact.llms.model_config import default_model_for_role
+from redact.llms.model_config import default_model_for_role, get_model_config
 from redact.types import EntryType
 
 logger = logging.getLogger(__name__)
@@ -213,7 +214,6 @@ def generate_inputs(
     prompt_dir: str | Path | None = None,
     resume: bool = True,
     verbose: bool = True,
-    style: str = "long",
     samples_per_entry: int = 3,
     entry_types: list[str] | None = None,
     batch_size: int = 32,
@@ -244,15 +244,15 @@ def generate_inputs(
         prompt_dir: Root prompt directory for the generation, format and
             check prompts. ``None`` (default) falls back to the bundled
             ``prompts/``.
-        resume: When True (default), skip entries already processed. When
-            False, start this style over.
+        resume: When True (default), skip the units ``(entry, iteration)``
+            already acked in the ledger. When False, start the stage over:
+            the whole tree of category files is removed.
         verbose: Log progress.
-        style: Template style (``"long"`` / ``"short"`` / any directory under
-            ``prompts/input/generation/from_constitution/``).
         samples_per_entry: Samples per constitution entry, one call each.
         entry_types: Filter constitution entries to these types
             (e.g. ``["harmful", "benign"]``). None = all.
-        batch_size: Entries per LLM engine pass.
+        batch_size: Requests per grouped call; the unit pool keeps at least
+            twice as many units live (``llm_pipeline.pool_size``).
         max_attempts: Generations per unit before a reply without its
             ``[END]`` marker or with another number of samples is given up on.
         check_max_tokens: Reply limit for the check calls. ``None`` keeps the
@@ -261,8 +261,7 @@ def generate_inputs(
             ``inputs`` section of ``configs/generation_axes.json``: ``None``
             for those, ``False`` for none, or ``{axis: {value: weight}}``
             over them, an axis as ``None`` to leave it out. With axes the
-            length axis sets each sample's length; ``style`` picks the
-            prompt only.
+            length axis sets each sample's length.
         axes_weighting: ``"table"`` deals the axes' weights as they are,
             ``"log"`` spreads them more evenly over each axis's values
             (:func:`redact.content_moderation.axes.resolve`).
@@ -273,15 +272,17 @@ def generate_inputs(
         read_back: False returns an empty DataFrame and reads no sample back.
 
     Returns:
-        Merged DataFrame of accepted samples of ``style``.
+        Merged DataFrame of the accepted samples under ``data_dir``.
 
     Raises:
         ValueError: ``constitution_df`` is None and no constitution is saved
             under ``data_dir``, ``axes`` names an unknown axis or value or
-            ``axes_weighting`` another weighting, or the folder or its plan
+            ``axes_weighting`` another weighting, ``samples_per_entry`` is not
+            a whole number of at least 1, or the folder or its plan
             file stops the stage
             (``InputPipeline.run_from_constitution``).
     """
+    check_samples_per_entry(samples_per_entry)
     axes = generation_axes.resolve(
         "inputs", axes, weighting=axes_weighting, config_dir=config_dir)
     if constitution_df is None:
@@ -305,14 +306,12 @@ def generate_inputs(
             constitution_df["entry_type"].isin(entry_types)
         ].reset_index(drop=True)
 
-    prompt_config = load_prompt(
-        "input", f"generation/from_constitution/{style}", prompt_dir=prompt_dir
-    )
+    prompt_config = load_prompt("input", "generation", prompt_dir=prompt_dir)
 
     if verbose:
         logger.info("Generate Inputs (constitution-seeded)")
-        logger.info("Entries: %d | Style: %s | Samples/entry: %d | Batch: %d",
-                    len(constitution_df), style, samples_per_entry, batch_size)
+        logger.info("Entries: %d | Samples/entry: %d | Batch: %d",
+                    len(constitution_df), samples_per_entry, batch_size)
 
     result = pipeline.run_from_constitution(
         constitution_df=constitution_df,
@@ -322,7 +321,6 @@ def generate_inputs(
         verbose=verbose,
         batch_size=batch_size,
         resume=resume,
-        style=style,
         max_attempts=max_attempts,
         check_max_tokens=check_max_tokens,
         axes=axes,
@@ -333,7 +331,7 @@ def generate_inputs(
             result.total_prompts_accepted, result.total_prompts_generated)
 
     # The merged file build_dataset() reads: the accepted rows of every
-    # style under this data_dir, copied from the category files in chunks;
+    # category under this data_dir, copied from the category files in chunks;
     # removed when no sample is accepted, so the build takes no row the files
     # no longer hold.
     files = (paths.category_csv(c, root=ds_dir)
@@ -348,10 +346,7 @@ def generate_inputs(
         merged.unlink(missing_ok=True)
     if not read_back:
         return pd.DataFrame()
-    result = merge_all(ds_dir, accepted_only=True)
-    if style and not result.empty and "template_style" in result.columns:
-        result = result[result["template_style"] == style].reset_index(drop=True)
-    return result
+    return merge_all(ds_dir, accepted_only=True)
 
 
 def generate_outputs(
@@ -395,11 +390,12 @@ def generate_outputs(
          checker's verdict as feedback.
       3. Incremental append to the output CSV as rows finish — crash-resilient.
 
-    Resume: each input gets a stable content-hash id (its ``id`` column when
-    present, else ``content_id(prompt)``), and each unit is ``(input_id,
-    iteration)``. Completed units are recorded in a sidecar ``*.state.jsonl``
-    ledger beside the output CSV. On a re-run (``resume=True``) units already
-    in the ledger are skipped, so a crash loses only the rows still in
+    Resume: each input gets a stable id (its ``sample_id`` when present, else
+    the content id of its ``sample``, or ``prompt``), and each unit is
+    ``(input_id, iteration)``. Completed units are recorded in a sidecar
+    ``*.state.jsonl`` ledger beside the output CSV. On a re-run
+    (``resume=True``) units already in the ledger are skipped, so a crash
+    loses only the rows still in
     progress, and the modes and specs are dealt as before:
     ``output_responses.plan.json`` stops a resume with another ``seed``,
     ``outputs_per_input``, other ``modes`` or other axes' weights.
@@ -415,7 +411,8 @@ def generate_outputs(
         check_outputs: Run each row's mode's output quality checker.
             Set False to skip checking (accept everything).
         check_model: Checker model; defaults to ``model``.
-        batch_size: Units per engine pass.
+        batch_size: Requests per grouped call; the unit pool keeps at least
+            twice as many units live (``llm_pipeline.pool_size``).
         max_samples: Global cap on inputs processed (``head(N)`` over the whole
             frame); None = all. Applied *after* ``max_per_category``. Both
             caps count inputs, before each is expanded to
@@ -434,11 +431,12 @@ def generate_outputs(
             over ``data_dir``.
         prompt_dir: Root prompt directory for the generation **and** output-check
             prompts. ``None`` (default) falls back to the bundled ``prompts/``.
-        resume: When True (default), skip inputs already recorded in the sidecar
-            state ledger. When False, clear the output CSV and ledger first.
+        resume: When True (default), skip the units ``(input_id,
+            iteration)`` already recorded in the sidecar state ledger. When
+            False, clear the output CSV and ledger first.
         verbose: Print per-batch progress.
-        max_attempts: Generations per input; more than 1 retries a rejected
-            response with the checker's verdict as feedback.
+        max_attempts: Generations per response (unit); more than 1 retries a
+            rejected response with the checker's verdict as feedback.
         check_max_tokens: Reply limit for the check calls; a verdict needs
             few tokens. ``None`` keeps the checker model's default.
         axes: The response axes each row is dealt a value of, the
@@ -641,7 +639,7 @@ def generate_jailbreaks(
 
     Returns:
         The rows of the jailbreaks CSV (input columns plus ``sample_id``,
-        ``jailbreak``, ``technique``, ``technique_info``, ``complexity``,
+        ``input_id``, ``jailbreak``, ``technique``, ``technique_info``, ``complexity``,
         ``num_techniques``, ``is_noop``, ``accepted``, ``reasoning``,
         ``iteration``, ``combination_spec_version``), or an empty frame when
         the adversarial kind is off. ``sample_id`` is this row's own
@@ -904,9 +902,10 @@ def generate_paraphrases(
 
     Each base sample is paraphrased ``paraphrases_per_sample`` times (K units,
     driven as a pool of units, one paraphraser at a time, each with its own
-    reply cap), with paraphraser models assigned round-robin from the
-    ``paraphraser`` pool. Each paraphrase passes five gates (length, split
-    lines, script, language, artifacts) and is then validated by a
+    reply cap), each unit's paraphraser picked from the ``paraphraser`` pool
+    by a seeded hash of its id and iteration. Each paraphrase passes five
+    gates (length, split lines, script, language, artifacts) and is then
+    validated by a
     **separate** checker at ``CHECK_TEMPERATURE`` (no retry), and is deduped
     so no two stored samples are identical. Rows land in ``paraphrases_inputs.csv`` /
     ``paraphrases_outputs.csv`` under ``data_dir``, carrying
@@ -932,7 +931,9 @@ def generate_paraphrases(
             with a warning; one with no rows at all is skipped silently.
         data_dir: Working root.
         paraphraser: ``None`` → ``paraphraser`` role default; a model name; or
-            ``"distribution"`` → round-robin over all ``paraphraser``-role models.
+            ``"distribution"`` → every ``paraphraser``-role model, each unit
+            to one of them by a seeded hash. Each must be registered: an
+            unregistered one stops the front before anything is cleared.
         check_model: Validator model. ``None`` → ``uncensored_gen`` role (kept
             separate from the paraphraser; warns if they coincide).
         paraphrases_per_sample: K units per base sample (warns if K>1 with 1 model).
@@ -947,7 +948,7 @@ def generate_paraphrases(
             the inputs, ``(response_id, iteration)`` of the outputs.
         batch_size: Requests per grouped call; with ``pool_size``, how many
             units the pool keeps live.
-        seed: Round-robin assignment seed.
+        seed: The seed of the hash that assigns units to paraphrasers.
         prompt_dir: Root prompt directory for the paraphrase **and** paraphrase-check
             prompts. ``None`` (default) falls back to the bundled ``prompts/``.
         inputs_path: Path override for the ``inputs`` target's artifact.
@@ -962,10 +963,22 @@ def generate_paraphrases(
     Returns:
         A key per target that ran: ``{"inputs": df}`` by default,
         ``{"inputs": df, "outputs": df}`` for ``"both"``.
+
+    Raises:
+        ValueError: ``target``, ``paraphrases_per_sample`` or ``min_words``
+            breaks its rule
+            (:func:`redact.content_moderation.paraphrase.check_settings`),
+            before anything runs.
     """
+    targets = check_settings(
+        target=target, paraphrases_per_sample=paraphrases_per_sample,
+        min_words=min_words)
     pool = paraphrase_pool(paraphraser)
-    # Before any client: a paraphraser whose prompt breaks its format stops here.
+    # Before any client, and before a fresh run clears the target: an
+    # unregistered paraphraser (KeyError), or one whose prompt breaks its
+    # format, stops here. The clients are built one paraphraser at a time.
     for model in pool:
+        get_model_config(model)
         check_paraphrase_prompt(model, prompt_dir)
     if paraphrases_per_sample > 1 and len(pool) == 1:
         warnings.warn(
@@ -988,9 +1001,6 @@ def generate_paraphrases(
         logger.info("Paraphraser(s): %s | K: %d | Checker: %s",
                     pool, paraphrases_per_sample, check_model if check else "disabled")
 
-    targets = ["inputs", "outputs"] if target == "both" else [target]
-    if not set(targets) <= {"inputs", "outputs"}:
-        raise ValueError("target must be 'inputs', 'outputs', or 'both'.")
     if "outputs" not in targets:
         _warn_stale_outputs(Path(outputs_path) if outputs_path
                             else paths.paraphrases_outputs_csv(data_dir), targets)
@@ -1395,9 +1405,15 @@ class _TechniqueTags:
 _EVAL_FILES = {"inputs": paths.eval_inputs_csv, "outputs": paths.eval_outputs_csv,
                "jailbreaks": paths.eval_jailbreaks_csv}
 
+#: The generation axis columns the eval files carry: an input's spec, and a
+#: response's (``content_moderation.axes.spec_columns`` of the packaged
+#: table's ``inputs`` and ``outputs`` sections).
+_INPUT_AXES = ("length", "register", "writer", "framing", "directness", "focus")
+_RESPONSE_AXES = ("response_length", "response_format", "response_register")
+
 #: The columns a derived eval row takes from its input when its own stage
 #: file lacks them.
-_FROM_INPUT = ("subcategory", "source_taxonomy")
+_FROM_INPUT = ("subcategory", "source_taxonomy", *_INPUT_AXES)
 
 
 def _build_eval(
@@ -1434,7 +1450,10 @@ def _eval_parts(parts: dict[str, Part], tags: _TechniqueTags) -> dict[str, list[
     are read from its ``technique`` by ``tags``.
 
     A stage part the build did not find is one without rows, so each file
-    has its columns whatever the run made.
+    has its columns whatever the run made. The generation axis columns are
+    an input's own on an input and a bare benign input, the input's on a
+    response and an attack, and a response's own on a response; a
+    paraphrase has none (the paraphraser rewrote what the spec asked for).
     """
     by_input = _by_input(parts.get("inputs"), _FROM_INPUT)
 
@@ -1446,19 +1465,25 @@ def _eval_parts(parts: dict[str, Part], tags: _TechniqueTags) -> dict[str, list[
               "subcategory": "subcategory", "source_taxonomy": "source_taxonomy"}
     derived = {**origin, **{column: _of_input(column, by_input[column])
                             for column in _FROM_INPUT}}
+    own_axes = {column: column for column in _INPUT_AXES}
     inputs = {"sample_id": "sample_id", "text": "sample", "label": "entry_type",
               "paraphrased": False, "input_id": None, "paraphrase_model": None,
-              **origin}
+              **origin, **own_axes}
+    # A paraphrase's own file has no axis column: without these Nones,
+    # _of_input would give it its input's spec.
     input_paraphrases = {**inputs, "paraphrased": True, "input_id": "input_id",
-                         "paraphrase_model": "paraphrase_model", **derived}
+                         "paraphrase_model": "paraphrase_model", **derived,
+                         **dict.fromkeys(_INPUT_AXES)}
     outputs = {"sample_id": "sample_id", "text": "output_response",
                "label": _response_label("Outputs"), "output_label": "output_label",
                "paraphrased": False, "input_id": "input_id", "model": "model",
-               "paraphrase_model": None, **derived}
+               "paraphrase_model": None, **derived,
+               **{column: column for column in _RESPONSE_AXES}}
     output_paraphrases = {**outputs, "text": "sample",
                           "label": _response_label("Output paraphrases"),
                           "paraphrased": True, "model": None,
-                          "paraphrase_model": "paraphrase_model"}
+                          "paraphrase_model": "paraphrase_model",
+                          **dict.fromkeys((*_INPUT_AXES, *_RESPONSE_AXES))}
     attacks = {"sample_id": "sample_id", "text": "jailbreak", "label": "entry_type",
                "is_jailbreak": True, "technique": "technique",
                "families": tags.families, "layers": tags.layers,
@@ -1467,7 +1492,7 @@ def _eval_parts(parts: dict[str, Part], tags: _TechniqueTags) -> dict[str, list[
     negatives = {**attacks, "text": "sample", "is_jailbreak": False,
                  "technique": None, "families": None, "layers": None,
                  "complexity": None, "num_techniques": None,
-                 "iteration": None, "input_id": None, **origin}
+                 "iteration": None, "input_id": None, **origin, **own_axes}
     return {
         "inputs": [part("inputs", columns=inputs),
                    part("paraphrases_inputs", columns=input_paraphrases)],
@@ -1833,12 +1858,7 @@ def _run_inputs(ctx: RunContext) -> list[Path]:
 def _inputs_files(ctx: RunContext) -> tuple[list[Path], dict]:
     tree = paths.constitution_inputs_dir(ctx.data_dir)
     files = [paths.category_csv(c, root=tree) for c in discover_categories(tree)]
-    keep = {"accepted": True}
-    # Inputs of another style may share the tree.
-    style = _params(ctx, "inputs").get("style", "long")
-    if style:
-        keep["template_style"] = style
-    return files, keep
+    return files, {"accepted": True}
 
 
 def _outputs_kwargs(ctx: RunContext) -> dict:
@@ -1979,7 +1999,8 @@ def _build_sources(ctx: RunContext) -> list[Path]:
 _GEN = ("gen", "uncensored_gen")
 _CHECK = ("check", "uncensored_gen")
 
-#: The stages a recipe can name, in the order a run takes them.
+#: The stages a recipe can name, in the order of a full run. A run takes the
+#: stages in its recipe's order, which nothing checks against this one.
 STAGES: dict[str, Stage] = {stage.name: stage for stage in (
     Stage("constitution", "generate_constitution",
           roles=(("constitution", "constitution_gen"),),

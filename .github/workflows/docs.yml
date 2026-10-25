@@ -30,11 +30,14 @@ jobs:
         # --no-project avoids installing the heavy runtime deps (vllm, torch);
         # mkdocstrings reads the source statically via griffe, so they aren't
         # needed. ruff formats the long signatures over several lines.
-        # --strict fails the build on a broken link or anchor.
+        # --strict fails the build on a broken link or anchor. The bounds are
+        # the docs extra's (pyproject.toml): MkDocs 2.0 breaks every plugin.
         run: >
           uv run --no-project
-          --with mkdocs-material
+          --with "mkdocs<2"
+          --with "mkdocs-material<10"
           --with "mkdocstrings[python]"
+          --with "mkdocstrings-python<3"
           --with ruff
           mkdocs build --strict
 

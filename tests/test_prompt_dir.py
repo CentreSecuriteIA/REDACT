@@ -70,8 +70,7 @@ def test_the_seeded_inputs_read_their_format_and_check_through_the_overlay(
     from redact import generate_inputs
 
     overlay = tmp_path / "prompts"
-    _overlay(overlay, "input/generation/from_constitution/long", "MINE-GEN",
-             "about {sample_description}")
+    _overlay(overlay, "input/generation", "MINE-GEN", "about {sample_description}")
     _overlay(overlay, "input/quality_check", "MINE-CHECK")
     numbered = overlay / "format_instructions" / "numbered"
     numbered.mkdir(parents=True)

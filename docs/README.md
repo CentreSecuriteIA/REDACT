@@ -60,7 +60,7 @@ ledger key, and what happens to a rejected or failed unit.
 - [stages/jailbreaks.md](stages/jailbreaks.md): the adversarial and natural
   kinds, `jailbreaks.csv` and `variations.csv`
 - [stages/conversations.md](stages/conversations.md): conversations and
-  scoring, outside the recipe
+  scoring, outside the recipe; a planned extension, not finished
 - [stages/build.md](stages/build.md)
 
 ### Internals

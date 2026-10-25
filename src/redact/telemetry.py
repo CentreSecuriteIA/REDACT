@@ -135,16 +135,17 @@ _LOCAL_BACKENDS = frozenset({"vllm", "introspect"})
 
 
 class Collector:
-    """Accumulates events, writes them to the sinks, and rolls up cost.
+    """Rolls events up into totals and cost, and writes each to the sinks.
 
-    Thread-safe: events arrive from worker threads.
+    It keeps the totals only, never the events: a large run makes millions,
+    and the JSONL trace holds them. Thread-safe: events arrive from worker
+    threads.
     """
 
     def __init__(self, trace_path: Path | None, sinks: list):
         self.trace_path = trace_path
         self._sinks = sinks
         self._lock = threading.Lock()
-        self.events: list[dict] = []
         # Per-model usage, local backends included.
         self.tokens: dict[str, dict[str, int]] = defaultdict(
             lambda: {"in": 0, "out": 0, "calls": 0, "items": 0, "ms": 0.0}
@@ -157,7 +158,8 @@ class Collector:
         self.local_s: dict[str, float] = defaultdict(float)
         # When each released engine was held, on time.perf_counter().
         self.local_spans: list[tuple[float, float]] = []
-        self.errors: list[dict] = []
+        # Calls that failed.
+        self.errors = 0
         # Replies cut at the token limit, per stage and model.
         self.cut: dict[str | None, dict[str, int]] = defaultdict(
             lambda: defaultdict(int))
@@ -166,7 +168,6 @@ class Collector:
         """Receive one event from ``observe.record``."""
         event.setdefault("ts", datetime.now(timezone.utc).isoformat(timespec="seconds"))
         with self._lock:
-            self.events.append(event)
             if event.get("ev") == "call":
                 acc = self.tokens[event.get("model", "?")]
                 acc["in"] += event.get("in_tok") or 0
@@ -179,7 +180,7 @@ class Collector:
                     priced["in"] += event.get("in_tok") or 0
                     priced["out"] += event.get("out_tok") or 0
                 if event.get("error"):
-                    self.errors.append(event)
+                    self.errors += 1
                 if event.get("cut"):
                     self.cut[event.get("stage")][event.get("model", "?")] += 1
             elif event.get("ev") == "local" and event.get("phase") == "release":
@@ -219,7 +220,7 @@ class Collector:
             all_local = bool(self.tokens) and not self.priced
             local_s = dict(self.local_s)
             spans = list(self.local_spans)
-            n_errors = len(self.errors)
+            n_errors = self.errors
             cut = {stage: dict(models) for stage, models in self.cut.items()}
         # Engines still loaded have sent no release event yet.
         from .llms.backends import introspection, vllm

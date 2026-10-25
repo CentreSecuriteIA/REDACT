@@ -2,8 +2,8 @@
 ``Datasets/constitution_inputs/{category}/samples.csv``: its rows, read back,
 merged, capped per group.
 
-A category CSV may hold columns beyond ``SAMPLE_COLUMNS`` (template_style,
-rejection_reason, ...); they are kept on read.
+A category CSV may hold columns beyond ``SAMPLE_COLUMNS`` (rejection_reason,
+iteration, ...); they are kept on read.
 """
 
 from collections.abc import Mapping
@@ -19,16 +19,61 @@ from .rows import _ID_COLUMNS, _blank_missing_text, _has_bytes, accepted_mask
 
 # The columns of an input sample row.
 SAMPLE_COLUMNS: list[str] = [
-    "sample_id",         # MD5 hash of sample text — this row's own identity
-    "sample",            # The generated text content
-    "category",          # Harm or benign category name
-    "subcategory",       # Constitution subcategory, or ""
+    "sample_id",         # Content id of the text: this row's own identity
+    "sample",            # The generated text
+    "category",          # The entry's source_category, harmful or benign taxonomy
+    "subcategory",       # The entry's constitution subcategory, or ""
     "entry_type",        # harmful / dual_use_harmful / dual_use_benign / benign
-    "turn",              # Generation turn index
+    "turn",              # 0: every sample is written in one turn
     "accepted",          # Whether the sample passed the checker
-    "rejection_reason",  # Checker reasoning on reject; "" on accept
-    "source",            # constitution / handcrafted / generated
+    "rejection_reason",  # The checker's reply on a reject; "" on accept
+    "source",            # "constitution": every input is seeded from it
 ]
+
+
+# What a folder name may not hold on Windows, besides the path separators
+# and the control characters, those below the space.
+_NOT_IN_A_FOLDER_NAME = '<>:"|?*'
+_SPACE = " "
+# The device names Windows reserves, with or without an extension.
+_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL",
+                   *(f"COM{n}" for n in range(1, 10)),
+                   *(f"LPT{n}" for n in range(1, 10))}
+
+
+def check_category_name(name: Any) -> str:
+    """``name`` when it can name a category's folder, on every platform.
+
+    A category's input samples are stored under a folder of its name
+    (``{category}/samples.csv``), and a run folder may be copied to another
+    machine, so a name Windows cannot use as a folder is refused on every
+    platform: a path separator, one of ``<>:"|?*`` or a control character, a
+    trailing dot or space, an empty name, or a reserved device name such as
+    ``CON``.
+
+    Raises:
+        ValueError: The name, why, and what to do.
+    """
+    text = name if isinstance(name, str) else ""
+    stem = text.split(".")[0].strip().upper()
+    if not text.strip():
+        why = "it is empty"
+    elif "/" in text or "\\" in text:
+        why = "it holds a path separator ('/' or '\\')"
+    elif any(c in _NOT_IN_A_FOLDER_NAME or c < _SPACE for c in text):
+        why = (f"it holds a character a folder name may not hold "
+               f"({_NOT_IN_A_FOLDER_NAME} or a control character)")
+    elif text.endswith((".", " ")):
+        why = "it ends with a dot or a space"
+    elif stem in _RESERVED_NAMES:
+        why = f"{stem} is a device name Windows reserves"
+    else:
+        return text
+    raise ValueError(
+        f"Category name {name!r} cannot name a folder: {why}. A category's "
+        "inputs are stored under a folder of its name, on every platform the "
+        "run may be copied to; rename the category in the taxonomy (or the "
+        "constitution's source_category).")
 
 
 def read_category_csv(

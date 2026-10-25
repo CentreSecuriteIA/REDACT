@@ -174,7 +174,8 @@ class BatchCaller:
         request is rejected here. ``ModelClient.generate()`` makes the same
         check.
         """
-        if internals_ids is not None and not self._backend.compute_config.supports_internals:
+        capture = self._backend.compute_config.supports_internals
+        if internals_ids is not None and not capture:
             raise ValueError(
                 f"{type(self._backend).__name__} does not support internals "
                 f"capture (supports_internals=False); remove internals_ids/"
@@ -187,7 +188,8 @@ class BatchCaller:
         The backend clamps its own value at construction, so in normal use
         this fires only for an explicit ``max_workers`` override.
         """
-        if not self._backend.compute_config.supports_parallel_calls and self._max_workers > 1:
+        parallel = self._backend.compute_config.supports_parallel_calls
+        if not parallel and self._max_workers > 1:
             raise ValueError(
                 f"{type(self._backend).__name__} requires series calls; "
                 f"max_workers must be 1 (got {self._max_workers}). "

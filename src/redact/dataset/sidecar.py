@@ -29,7 +29,7 @@ from itertools import chain, islice
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from .rows import _replace, _retry_held
+from .rows import _retry_held, _write_atomic
 
 # Stands for what a ledger's file records until the file is read.
 _UNREAD: Any = object()
@@ -89,20 +89,13 @@ class JsonlSidecar:
         first = list(islice(rows, 1))
         if not first:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         # ensure_ascii=False keeps unicode readable in the sidecar file;
-        # the file is always opened as utf-8 and read back via json.loads.
-        lines = (json.dumps(r, ensure_ascii=False) + "\n" for r in chain(first, rows))
-        temporary = self.path.with_name(self.path.name + ".tmp")
-        try:
-            with temporary.open("w", encoding="utf-8") as fh:
-                fh.writelines(lines)
-                fh.flush()
-                os.fsync(fh.fileno())
-            _replace(temporary, self.path)
-        finally:
-            # Still there only when the write or the rename failed.
-            temporary.unlink(missing_ok=True)
+        # the file is always read as utf-8 and each line via json.loads. The
+        # lines end as a text write ends them: json.dumps writes no raw line
+        # break of its own.
+        _write_atomic(self.path, (
+            (json.dumps(r, ensure_ascii=False) + os.linesep).encode("utf-8")
+            for r in chain(first, rows)))
 
 
 class LedgerState(NamedTuple):
@@ -288,44 +281,6 @@ class Ledger(JsonlSidecar):
         if self._ids is not _UNREAD:
             for record in records:
                 self._ids.update(record.get("ids") or ())
-
-    def rewrite(
-        self,
-        drop: Callable[[Mapping[str, Any]], bool],
-        saved: Mapping[str, Any],
-    ) -> None:
-        """Replace the file with its finished records, less those ``drop`` picks.
-
-        The lines that stay are the bytes they were, and one last line
-        records ``saved``. A line that only recorded sizes is left out, so
-        doing it again leaves the same file. The new file is written beside
-        the old one, synced, and renamed onto it, so the ledger is the old
-        one or the new one.
-        """
-        end = self.read().end
-        ids: set = set()
-        last = json.dumps({"_saved": dict(saved)}, ensure_ascii=False)
-        temporary = self.path.with_name(self.path.name + ".tmp")
-        try:
-            with self.path.open("rb") as old, temporary.open("wb") as new:
-                for line in old:
-                    end -= len(line)
-                    if end < 0:     # what follows belongs to no finished save
-                        break
-                    record = _parse(line) or {}
-                    if drop(record) or set(record) == {"_saved"}:
-                        continue
-                    new.write(line)
-                    with suppress(TypeError):
-                        ids.update(record.get("ids") or ())
-                new.write(last.encode("utf-8") + b"\n")
-                new.flush()
-                os.fsync(new.fileno())
-            _replace(temporary, self.path)
-        finally:
-            # Still there only when the write or the rename failed.
-            temporary.unlink(missing_ok=True)
-        self._saved, self._ids = dict(saved), ids
 
     def _append(self, data: bytes) -> None:
         """Add ``data`` to the end of the file in one write, synced to disk.

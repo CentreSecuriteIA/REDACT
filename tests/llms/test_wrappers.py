@@ -141,6 +141,18 @@ class TestExtractSystemPrompt:
         assert system_prompt == "Rule 1.\n\nRule 2."
         assert rest == [{"role": "user", "content": "Hi"}]
 
+    def test_empty_system_messages_add_no_blank_lines(self):
+        """As the fold drops them."""
+        messages = [
+            {"role": "system", "content": ""},
+            {"role": "system", "content": "Rule."},
+            {"role": "system", "content": ""},
+            {"role": "user", "content": "Hi"},
+        ]
+        assert extract_system_prompt(messages)[0] == "Rule."
+        assert extract_system_prompt(messages[:1] + messages[3:]) == (
+            None, [{"role": "user", "content": "Hi"}])
+
     def test_only_system_messages_leaves_empty_rest(self):
         messages = [{"role": "system", "content": "Just a system prompt."}]
         system_prompt, rest = extract_system_prompt(messages)

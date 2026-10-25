@@ -20,7 +20,9 @@ import logging
 import os
 import threading
 import time
+import warnings
 from collections.abc import Iterable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,7 @@ from redact.recipe import (
     load_recipe,
     resolve_role,
     serving_of,
+    stage_params,
 )
 from redact.stages import STAGES, RunContext, jailbreak_rules
 
@@ -68,7 +71,8 @@ def write_record(
     jailbreak stage's: the ``rules`` id of each kind's plan, by kind."""
     record = {
         "stage": stage,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        # UTC, with its offset, as the trace's timestamps are.
+        "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
         "params": params or {},
         "models": models or {},
         "counts": counts or {},
@@ -97,10 +101,27 @@ def read_record(stage: str, data_dir: str | Path | None = None) -> dict | None:
         return json.load(fh)
 
 
-# Former names of the three record functions, kept for one release.
-manifest_path = record_path
-write_manifest = write_record
-read_manifest = read_record
+#: Former names of the three record functions, read for one release with a
+#: DeprecationWarning (a run record is not a ``*.manifest.jsonl``).
+FORMER_RECORD_NAMES = {"manifest_path": "record_path",
+                       "write_manifest": "write_record",
+                       "read_manifest": "read_record"}
+
+
+def former_record_name(module: str, name: str, stacklevel: int = 3):
+    """The record function ``name``, a former name, stands for, with a
+    ``DeprecationWarning`` naming ``module`` and the new name."""
+    new = FORMER_RECORD_NAMES[name]
+    warnings.warn(
+        f"{module}.{name} is now {new}; the former name is read for this release.",
+        DeprecationWarning, stacklevel=stacklevel)
+    return globals()[new]
+
+
+def __getattr__(name: str):
+    if name in FORMER_RECORD_NAMES:
+        return former_record_name(__name__, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def file_counts(
@@ -147,7 +168,9 @@ def _plan_phases(
 
     Runs before the stage loop, so a stage that does not fit says so before
     any stage spends its budget. Nothing here aborts the run: a plan that
-    does not fit and a planning error are only logged. ``copies`` is the
+    does not fit and a planning error are only logged, at ERROR, and so is a
+    plan with warnings, at WARNING, with ``verbose`` off too; a plan that
+    fits is logged at INFO with ``verbose`` only. ``copies`` is the
     recipe's: a number of copies per model name.
 
     Returns:
@@ -172,6 +195,8 @@ def _plan_phases(
         for i, phase in enumerate(phases):
             if phase.resident and id(phase.plan) not in reported:
                 reported.add(id(phase.plan))
+                # report() logs a plan that does not fit, or warns, whatever
+                # verbose says: --quiet runs at WARNING and still shows it.
                 residency.report(
                     phase.plan, verbose=verbose, stages=stages_of[id(phase.plan)])
             # The first replaces what an earlier run left. An engine loaded
@@ -184,6 +209,13 @@ def _plan_phases(
             "plan, so every local engine loads unplanned, at 0.9 of a whole "
             "card: a second engine on the same card will not start.",
             type(exc).__name__, exc, exc_info=exc)
+        # A plan applied before the error would still hold: drop it, so that
+        # every engine does load unplanned, as the message says.
+        with contextlib.suppress(Exception):
+            from .llms.backends import vllm
+
+            vllm.set_planned_utilization({})
+            vllm.set_planned_devices({})
         return []
     return phases
 
@@ -302,6 +334,34 @@ def _check_cards(phases: list) -> None:
             f"(CUDA_VISIBLE_DEVICES). Nothing has run yet.")
 
 
+def _engine_ids(engines: dict | None) -> set[tuple]:
+    """``(setup, *key)`` per engine of ``engines``, as
+    :func:`~redact.residency.loaded_engines` returns them: the engine ids a
+    plan's footprints carry (:attr:`~redact.residency.ModelFootprint.engine`)."""
+    return {(setup, *key) for setup, keys in (engines or {}).items() for key in keys}
+
+
+def _strays(plans: list, kept: dict | None, previous: list = ()) -> set[tuple]:
+    """The loaded engines that ``plans`` leave out, when an engine they hold
+    is still to load.
+
+    Such an engine was loaded before the run, for a later stage: these
+    plans hand its memory out again, so what they load beside it may not
+    fit. Empty when every engine the plans hold is loaded already, since
+    then nothing loads beside it. ``kept`` are engines no unload releases,
+    and the engines of the ``previous`` stage's plans are left out: the
+    models that stage drops are unloaded as such.
+    """
+    from . import residency
+
+    loaded = _engine_ids(residency.loaded_engines())
+    held = {fp.engine for plan in plans for fp in plan.footprints}
+    if held <= loaded:
+        return set()
+    earlier = {fp.engine for plan in previous for fp in plan.footprints}
+    return loaded - held - earlier - _engine_ids(kept)
+
+
 def _enter_phase(
     phases: list, i: int, warm: set[str], verbose: bool = True,
     kept: dict | None = None,
@@ -311,7 +371,11 @@ def _enter_phase(
     Unloads the engines the stage's plan leaves out, hands the loader the
     plan's shares and cards, then starts loading this stage's models in the
     background, and the next stage's too when they fit beside them without
-    an unload. Nothing here aborts the run.
+    an unload. An engine loaded before the run that a later stage calls is
+    unloaded too when this stage's plan (with the next one's, when its
+    models load during this stage) leaves it out and loads anything
+    (:func:`_strays`): it is loaded again for its stage. Nothing here aborts
+    the run.
 
     Args:
         phases: The run's phases, as :func:`_plan_phases` returns them.
@@ -331,23 +395,32 @@ def _enter_phase(
     try:
         phase = phases[i]
         warm &= set(phase.resident)
-        dropped = set(phases[i - 1].resident) - set(phase.resident) if i else ()
-        if dropped:
+        following = phases[i + 1] if i + 1 < len(phases) else None
+        # The next stage's models load during this one when every model of
+        # this one stays for it and they fit together.
+        next_ahead = (following is not None and following.plan.co_resident
+                      and set(phase.resident) <= set(following.resident))
+        holding = list(dict.fromkeys(
+            phase.resident + (following.resident if next_ahead else [])))
+        previous = phases[i - 1] if i else None
+        dropped = set(previous.resident) - set(phase.resident) if previous else set()
+        strays = _strays([phase.plan] + ([following.plan] if next_ahead else []),
+                         kept, [previous.plan] if previous else [])
+        if dropped or strays:
             if verbose:
+                gone = sorted(dropped) + [f"{engine[1]} (not in this stage's plan)"
+                                          for engine in sorted(strays)]
                 logger.info("[residency] stage %s: unloading %s",
-                            phase.stage, ", ".join(sorted(dropped)))
-            residency.unload_local(keep=phase.resident, engines=kept)
+                            phase.stage, ", ".join(gone))
+            residency.unload_local(keep=holding, engines=kept)
         # What loads from here on loads under this stage's plan.
         residency.apply_plan(phase.plan)
         ahead = list(phase.loadable)
-        if i + 1 < len(phases):
-            following = phases[i + 1]
-            if (following.plan.co_resident
-                    and set(phase.resident) <= set(following.resident)):
-                ahead += following.loadable
-                # An engine both stages hold has the same share and cards
-                # in both plans.
-                residency.apply_plan(following.plan, replace=False)
+        if next_ahead:
+            ahead += following.loadable
+            # An engine both stages hold has the same share and cards in
+            # both plans.
+            residency.apply_plan(following.plan, replace=False)
         todo = [m for m in dict.fromkeys(ahead) if m not in warm]
         if todo:
             warm |= set(todo)
@@ -442,7 +515,10 @@ def run_pipeline(
 ) -> dict:
     """Run the stages a recipe names, in order, writing a run record per stage.
 
-    ``params`` replaces the recipe's ``params_file``, and ``data_dir`` its
+    ``params`` replaces the recipe's ``params_file``: a dict, or a file's
+    path, which when relative is read from the current directory, else from
+    the recipe's folder (:func:`redact.recipe.params_file_of`); with
+    ``verbose`` the file read is logged. ``data_dir`` replaces the recipe's
     ``data_dir``. A params key that is not a parameter of its stage's front,
     or that the run passes the front itself, fails before any stage runs, as
     do an augmentation section the params contradict and a generation axis
@@ -452,17 +528,23 @@ def run_pipeline(
     over its adversarial kind. No stage reads its rows back: the counts
     are taken from each stage's files, and the inputs are seeded from the
     constitution saved under ``data_dir``. The local engines the run loaded
-    are released when it returns or raises; those loaded before it, such as
-    a notebook's, stay loaded unless the run calls one and unloads it
-    between stages. The way the recipe serves its models holds only until then.
+    are released when it returns or raises, after a planning error too. One
+    loaded before it, such as a notebook's, is not released at its end,
+    though a stage may unload it: one a later stage calls is unloaded on
+    entering a stage whose plan leaves it out and loads a model
+    (:func:`_enter_phase`), and loaded again for its stage. The way the
+    recipe serves its models holds only until then.
     Before any of them loads, the run stops if another process holds memory
     on a card the plan puts one on (:func:`_check_cards`). At the end a
     preload still loading is waited for at most ``EXIT_WAIT_S`` (60 s), then
-    its load is ended.
+    its load is ended, and the run's telemetry is rolled up and uninstalled:
+    a front called after the run records into neither its trace nor its
+    roll-up.
 
     Returns:
-        ``dataset_type``, ``data_dir``, ``stages`` (per stage, its
-        ``counts`` and the path of its record under ``manifest``),
+        ``dataset_type``, ``data_dir`` (the root the run wrote under),
+        ``stages`` (per stage, its ``counts`` and the path of its run record
+        under ``manifest``, a key kept by that name),
         ``serving`` (:func:`_served`) and ``telemetry``; ``residency`` when
         a stage calls a local model, and ``trace`` when one is written.
     """
@@ -472,8 +554,8 @@ def run_pipeline(
     from . import residency
 
     recipe = load_recipe(recipe, params=params)
-    params = load_params(recipe.get("params_file") if params is None else params,
-                         base_dir=recipe.get("_base_dir"),
+    params_file = recipe["_params_file"]
+    params = load_params(params if isinstance(params, dict) else params_file,
                          config_dir=recipe.get("config_dir"))
     serving = serving_of(recipe.get("models") or {})
     stages = recipe["stages"]
@@ -482,12 +564,16 @@ def run_pipeline(
         dataset_type=recipe["dataset_type"],
         models={**_DEFAULT_MODELS, **_role_names(recipe.get("models") or {})},
         prompt_dir=recipe.get("prompt_dir"),
-        taxonomy=recipe.get("taxonomy", "harmful"),
+        # null, as the examples write taxonomy_dir and prompt_dir, is the default.
+        taxonomy=("harmful" if recipe.get("taxonomy") is None
+                  else recipe["taxonomy"]),
         taxonomy_dir=recipe.get("taxonomy_dir"),
         benign_taxonomy=recipe["benign_taxonomy"],
         params=params,
-        augmentations=augmentations_of(
-            recipe, params.get("jailbreaks") if "jailbreaks" in stages else None),
+        # The type file's flat keywords too, which load_params warns are read.
+        augmentations=augmentations_of(recipe, stage_params(
+            "jailbreaks", recipe["dataset_type"], params, recipe.get("config_dir"))
+            if "jailbreaks" in stages else None),
         resume=recipe.get("resume", True),
         verbose=verbose,
         config_dir=recipe.get("config_dir"),
@@ -501,6 +587,8 @@ def run_pipeline(
 
     if verbose:
         logger.info("Run pipeline (%s) — stages: %s", ctx.dataset_type, stages)
+        if params_file is not None:
+            logger.info("Params file: %s", params_file)
 
     # Telemetry first, so the plan and preload below are themselves recorded.
     telemetry.install(data_dir=ctx.data_dir)
@@ -517,7 +605,9 @@ def run_pipeline(
                      config_files=sorted(configs["overridden"] + configs["added"]))
 
     summary: dict = {
-        "dataset_type": ctx.dataset_type, "data_dir": str(ctx.data_dir), "stages": {}}
+        "dataset_type": ctx.dataset_type,
+        # The root the run wrote under, get_output_dir() when it names none.
+        "data_dir": str(paths.datasets(ctx.data_dir).parent), "stages": {}}
     phases: list = []
     warm: set[str] = set()
     preloads: list[tuple[threading.Thread, list[str]]] = []
@@ -572,7 +662,7 @@ def run_pipeline(
                 )
                 summary["stages"][name] = {"counts": counts, "manifest": str(path)}
                 if verbose:
-                    logger.info("[%s] %s -> manifest %s", name, counts, path.name)
+                    logger.info("[%s] %s -> record %s", name, counts, path.name)
     finally:
         # The serving was this run's: a call made after it must not get it.
         capabilities.set_run_serving({})
@@ -580,9 +670,9 @@ def run_pipeline(
         # and roll up, also after a failed stage. Nothing here may mask the
         # stage's own error.
         try:
-            if phases:
-                from .llms.backends import vllm
+            from .llms.backends import vllm
 
+            if phases:
                 warm.clear()        # emptied first: the preloader skips the rest
                 # A model still loading is released below, once it is loaded.
                 # Not waited for longer than an exit waits: a load that does
@@ -598,7 +688,11 @@ def run_pipeline(
                             "[residency] the preload of %s has not finished "
                             "%g s after the run's end; ending its load to "
                             "release the cards.", ", ".join(names), vllm.EXIT_WAIT_S)
+            # Without a plan too: after a planning error the stages load
+            # their engines unplanned, and those are the run's as well.
+            if phases or _engine_ids(residency.loaded_engines()) - _engine_ids(before):
                 residency.unload_local(engines=before, wait=vllm._GRACE_S)
+            if phases:
                 vllm.set_planned_utilization({})      # the shares were this run's
                 vllm.set_planned_devices({})          # and so were the cards
             # Roll up tokens, engine time and cost. Also logged at INFO, so
@@ -607,7 +701,10 @@ def run_pipeline(
         except Exception as exc:  # noqa: BLE001 — must not mask the stage's error
             logger.error("[residency] end of run failed (%s: %s)",
                          type(exc).__name__, exc)
-    trace = telemetry.collector()
-    if trace is not None and trace.trace_path is not None:
-        summary["trace"] = str(trace.trace_path)
+        trace = telemetry.collector()
+        if trace is not None and trace.trace_path is not None:
+            summary["trace"] = str(trace.trace_path)
+        # The trace and the roll-up were this run's: a front called after it,
+        # as from a notebook, records into neither.
+        telemetry.uninstall()
     return summary

@@ -29,6 +29,7 @@ A stage that resumes and finds nothing to save opens no buffer and calls
 
 # The per-category tree of input samples
 from .categories import (
+    check_category_name,
     discover_categories,
     input_files,
     merge_all,
@@ -39,9 +40,6 @@ from .categories import (
 
 # Rows before acks
 from .save import CommitBuffer, commit
-
-# Starting part of a stage over
-from .drop import drop_units
 
 # What an eval build leaves out
 from .exclusion import Exclusion, exclusion_files
@@ -84,6 +82,7 @@ __all__ = [
     "Part",
     "accepted_mask",
     "append_rows",
+    "check_category_name",
     "check_columns",
     "clear_stage",
     "commit",
@@ -91,7 +90,6 @@ __all__ = [
     "count_rows",
     "create_taxonomy",
     "discover_categories",
-    "drop_units",
     "exclusion_files",
     "has_rows",
     "input_files",

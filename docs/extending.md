@@ -155,13 +155,15 @@ prompt. A placeholder may not share a name with a parameter of
 `source`, `is_override`, `prompt_dir`), nor, through `PromptTemplate.load`,
 with `pipeline` or `category`.
 
-**A new input style** needs only a file:
-`prompts/input/generation/from_constitution/<style>/template.json`, then
-`"style": "<style>"` under `inputs` in the params file. The seeded inputs
-stage renders it with `Category`, `sample_description`,
-`constitution_subcategory`, `entry_type`, `sample_spec` (the unit's dealt
-generation axes; empty without axes) and `num_samples`, and appends the
-`numbered` format instruction.
+**A different input template** needs only a file in the overlay:
+`<prompt_dir>/input/generation/template.json`, read in place of the
+packaged one. The seeded inputs stage renders it with `Category`,
+`sample_description`, `constitution_subcategory`, `entry_type`,
+`sample_spec` (the unit's dealt generation axes; empty without axes) and
+`num_samples`, and appends the `numbered` format instruction. To vary the
+samples' length, register and the rest, change the
+[generation axes](configuration.md#the-generation-axes) rather than the
+template.
 
 **To change a prompt for your runs** without editing the library, use the
 overlay: `scripts/scaffold_prompts.py ./my_prompts`, keep the files you
@@ -676,14 +678,23 @@ folder of a recipe's `config_dir`, or under the folder a recipe names as
 ```
 
 - **A new category** is one more entry under `categories`. Its name is a
-  folder name on disk, so it may not hold `/` or `\`.
+  folder name on disk, so `dataset.check_category_name` refuses, on every
+  platform, a name no folder can have on Windows: a path separator, any of
+  `<>:"|?*`, a control character, a trailing dot or space, an empty name,
+  or a device name (`CON`, `NUL`, `COM1`, ...). The constitution checks the
+  categories it plans and the inputs stage every `source_category`, before
+  any call; `create_taxonomy` checks every category it writes.
 - The constitution stage fills its prompts with the category's name,
   `description`, `subcategories` (a list, or a dict whose keys are used) and
   `group_tag` (default `general`, recorded as `source_group_tag`).
 - **A new taxonomy**: write the file, or call
   `redact.create_taxonomy(name, categories, taxonomy_dir=...)`, then set
   `"taxonomy": "<name>"` (and `taxonomy_dir`) in the recipe. A dict passed to
-  a front as `taxonomy=` works too.
+  a front as `taxonomy=` works too. `create_taxonomy` writes to the packaged
+  `configs/taxonomy/` by default, and refuses (`FileExistsError`) to write
+  over a taxonomy packaged there (`harmful`, `benign`) unless
+  `overwrite=True`, since every run reads it; give a `taxonomy_dir` of your
+  own. A file in another folder is written over.
 
 The category reaches every later stage through its rows' `category` column.
 The benign categories are a taxonomy of their own,

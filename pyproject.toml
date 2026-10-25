@@ -4,7 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "redact"
-version = "0.1.0"
+# One source: __version__ in src/redact/__init__.py ([tool.hatch.version]).
+dynamic = ["version"]
 authors = [
     { name = "Leonhard Waibl", email = "leonhardwaibl@gmail.com" },
 ]
@@ -18,14 +19,18 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
+# openai 1.55.3 and anthropic 0.40 are the oldest that build a client beside
+# httpx 0.28, which dropped the proxies argument older SDKs pass (checked in a
+# fresh venv, with tests/llms passing at both). anthropic is held below 2:
+# 2.x sends API version 2026-10-21, on which the backend can send no
+# temperature, so the checks would lose their 0.15.
 dependencies = [
     "pandas>=2.0",
     "python-dotenv>=1.0",
-    "openai>=1.0",
-    "anthropic>=0.30",
+    "openai>=1.55.3",
+    "anthropic>=0.40,<2",
     "pyfiglet>=0.8",
     "filelock>=3.11",
 ]
@@ -36,7 +41,9 @@ dependencies = [
 # engine processes from others on a card (driver.py, only with local models).
 # A machine-translation model runs only on vLLM, and the paraphrase check's
 # language gate runs beside a local paraphraser, so the extra brings langid.
-vllm = ["vllm>=0.4", "hf_transfer>=0.1", "psutil>=5.9", "redact[langid]"]
+# vLLM 0.31 is the oldest tested (requirements.lock): the backend runs its V1
+# engine, AsyncLLM, and APIs older releases lack (backends/vllm.py, MIN_VLLM).
+vllm = ["vllm>=0.31", "hf_transfer>=0.1", "psutil>=5.9", "redact[langid]"]
 # GlotLID, which checks the language of a machine translation and of a
 # paraphrase (jailbreak/obfuscation/langid.py): fastText inference only, no numpy.
 langid = ["fasttext-predict>=0.9.2.4", "huggingface_hub>=0.20"]
@@ -48,13 +55,24 @@ hf = ["datasets>=2.0"]
 # pyyaml: the neutral containers' test parses the YAML they write.
 dev = ["pytest>=7.0", "ruff>=0.4", "mypy>=1.0", "ipykernel>=7.0", "pyyaml>=6.0"]
 # The documentation site (mkdocs.yml): `mkdocs build --strict`. ruff formats
-# the API reference's signatures.
-docs = ["mkdocs-material", "mkdocstrings[python]", "ruff"]
+# the API reference's signatures. Bounded below the next majors: MkDocs 2.0
+# breaks every plugin, and the site builds with mkdocs 1.6, Material 9.7 and
+# mkdocstrings-python 2.0.
+docs = [
+    "mkdocs<2",
+    "mkdocs-material<10",
+    "mkdocstrings[python]",
+    "mkdocstrings-python<3",
+    "ruff",
+]
 
 [project.urls]
 Homepage = "https://github.com/CentreSecuriteIA/REDACT"
 Documentation = "https://centresecuriteia.github.io/REDACT/"
 Issues = "https://github.com/CentreSecuriteIA/REDACT/issues"
+
+[tool.hatch.version]
+path = "src/redact/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/redact"]
@@ -76,17 +94,15 @@ target-version = "py311"
 #     (run_from_constitution, generate_jailbreaks, build_dataset, etc.).
 #     Real complexity worth reducing over time via targeted extraction, but
 #     fixing all of them is a much larger, higher-risk initiative than a
-#     lint-rule toggle — tracked separately (see cleanup.md), not enforced
-#     as a blanket rule yet.
+#     lint-rule toggle, so not enforced as a blanket rule yet.
 select = ["E", "F", "I", "UP", "SIM", "PLR2004"]
 
 [tool.ruff.lint.per-file-ignores]
 # __init__.py files re-export names for the public API (e.g. `from redact
 # import generate_jailbreaks`); ruff can't distinguish that from a genuinely
 # unused import without an `__all__` list everywhere, which this project
-# doesn't use. Not dead code — verified case by case for every other file
-# (see cleanup.md) before deciding this pattern was safe to blanket-ignore
-# only here.
+# doesn't use. Not dead code: every other file was checked case by case
+# before this pattern was ignored here only.
 "__init__.py" = ["F401"]
 
 [tool.mypy]

@@ -10,7 +10,8 @@ events there as well.
 """
 
 import logging
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Hashable
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,10 @@ _emitter: Callable[[dict], None] | None = None
 # not propagate context variables to their workers, so a ContextVar would read
 # empty in every call BatchCaller fans out.
 _stage: str | None = None
+
+# What first_in_stage() has seen since the stage label was last set.
+_seen: set[Hashable] = set()
+_seen_lock = threading.Lock()
 
 
 def set_emitter(fn: Callable[[dict], None] | None) -> None:
@@ -35,11 +40,25 @@ def set_emitter(fn: Callable[[dict], None] | None) -> None:
 def set_stage(stage: str | None) -> None:
     """Set the pipeline stage label attached to later events.
 
-    Called by ``redact.telemetry.stage()``. Events carry ``stage: None`` when
-    no stage is set.
+    Called by ``redact.telemetry.stage()``, on entering a stage and on
+    leaving it. Events carry ``stage: None`` when no stage is set. What
+    :func:`first_in_stage` has seen is forgotten, so a stage run again (a
+    second run in a notebook) warns again.
     """
     global _stage
-    _stage = stage
+    with _seen_lock:
+        _stage = stage
+        _seen.clear()
+
+
+def first_in_stage(key: Hashable) -> bool:
+    """Whether ``key`` is new since the stage label was last set: for a
+    warning given once per stage run, such as a model's first cut reply."""
+    with _seen_lock:
+        if key in _seen:
+            return False
+        _seen.add(key)
+        return True
 
 
 def current_stage() -> str | None:

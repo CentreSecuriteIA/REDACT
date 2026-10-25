@@ -225,8 +225,8 @@ def drive_units(
     group when none does, and
     hands the replies back. A unit that finishes is reported at once, so the
     caller can save it without waiting for the others. Each distinct limit on
-    one model is another group: at ``pool_size = 2 * cap`` up to three keep
-    the calls full, more leave them part-full.
+    one model is another group: at ``pool_size = 2 * cap`` two keep the
+    calls full, more leave them part-full.
 
     A request whose client has async calls (``supports_async_calls``) is not
     grouped. It is sent on the shared event loop the moment its unit yields
@@ -355,7 +355,8 @@ def drive_units(
             return
         del live[key]
         finished += 1
-        on_done(key, value)          # outside the try: its exception propagates unchained
+        # Outside the try: its exception propagates unchained.
+        on_done(key, value)
 
     def land(wait: bool) -> bool:
         """Hand back the async reply that arrived first, if one has.
@@ -404,7 +405,8 @@ def drive_units(
             if key in live:
                 raise ValueError(f"Unit {key!r} is already live.")
             live[key] = gen
-            advance(key, None)       # sending None starts it; finishing here frees the slot at once
+            # Sending None starts it; finishing here frees the slot at once.
+            advance(key, None)
 
     round_idx = 0
     try:
@@ -425,17 +427,21 @@ def drive_units(
                 continue
             round_idx += 1
             for keys in full or [max(groups.values(), key=len)]:
-                keys = keys[:cap]                      # the rest stay pending, ahead of later yields
+                # The rest stay pending, ahead of later yields.
+                keys = keys[:cap]
                 requests = [pending.pop(k) for k in keys]
                 first = requests[0]
-                client = first.client if first.client is not None else resolve(first.model)
-                kw = {"progress": _label(progress, round_idx, first)} if progress else {}
+                client = (first.client if first.client is not None
+                          else resolve(first.model))
+                kw = ({"progress": _label(progress, round_idx, first)}
+                      if progress else {})
                 if first.max_tokens is not None:
                     kw["max_tokens"] = first.max_tokens
                 if first.temperature is not None:
                     kw["temperature"] = first.temperature
                 ids = [r.internals_id for r in requests]
-                if any(i is not None for i in ids):    # a non-capturing client rejects any list
+                # A non-capturing client rejects any list.
+                if any(i is not None for i in ids):
                     kw["internals_ids"] = ids
                 responses = client.generate([r.messages for r in requests], **kw)
                 if len(responses) != len(keys):

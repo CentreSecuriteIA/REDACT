@@ -6,11 +6,17 @@ shared between the backends that use it.
 
 Calls are made in series: this backend declares
 ``supports_parallel_calls=False``, so ``max_workers`` is always 1.
+
+A temperature goes in ``extra_body``: the SDK's ``messages.create()`` has no
+``temperature`` keyword from version 1.0, and API version 2023-06-01 still
+takes it, on the models that accept one. API version 2026-10-21, which the
+SDK sends from 2.0, refuses it on every model, so there none is sent.
 """
 
 import logging
 import threading
 import time
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, ClassVar
 
 from ...exceptions import PromptTooLongError
@@ -49,7 +55,8 @@ def _sdk_client(api_key: str, *, max_retries: int, timeout_s: float | None):
                     "The 'anthropic' package could not be imported. It is a "
                     "required dependency: reinstall redact (pip install -e .)."
                 )
-            # The SDK retries a failed call itself, unseen by the rate limiter and the trace.
+            # The SDK retries a failed call itself, unseen by the rate limiter
+            # and the trace.
             client = anthropic.Anthropic(
                 api_key=api_key, **sdk_client_kwargs(max_retries, timeout_s))
             _sdk_clients[key] = client
@@ -58,6 +65,30 @@ def _sdk_client(api_key: str, *, max_retries: int, timeout_s: float | None):
 
 # The status of the SDK's BadRequestError.
 _BAD_REQUEST = 400
+
+# The first API version that refuses temperature, top_p and top_k on every
+# model. ISO dates compare as strings.
+_NO_SAMPLING_VERSION = "2026-10-21"
+# Set once the dropped temperature was warned about.
+_sampling_warned = False
+
+
+def _takes_temperature(client) -> bool:
+    """Whether the API version the SDK client sends takes a temperature.
+
+    Read from the client's ``anthropic-version`` header; a client that
+    names none is taken to send 2023-06-01, which does.
+    """
+    headers = getattr(client, "default_headers", None)
+    version = headers.get("anthropic-version") if isinstance(headers, Mapping) else None
+    return not (isinstance(version, str) and version >= _NO_SAMPLING_VERSION)
+
+
+def _text_of(response) -> str:
+    """The text blocks of a reply, joined. A thinking block, which a model
+    that thinks by default puts first, has no text."""
+    return "".join(text for block in (response.content or ())
+                   if isinstance(text := getattr(block, "text", None), str))
 
 
 def _is_prompt_too_long(exc: BaseException) -> bool:
@@ -166,7 +197,8 @@ class AnthropicBackend(LLMBackend):
             messages_list: One chat message list per item. Only ``role`` and
                 ``content`` of each message are sent.
             max_tokens: Overrides the model's default.
-            temperature: Overrides the model's default.
+            temperature: Overrides the model's default. Sent in
+                ``extra_body``, and not at all on API version 2026-10-21.
             internals_ids: Ignored. This backend does not capture internals.
             **kwargs: Passed to ``messages.create()``.
 
@@ -177,13 +209,24 @@ class AnthropicBackend(LLMBackend):
             PromptTooLongError: The API rejected an item's prompt as over
                 the model's context.
         """
+        global _sampling_warned
         prompts, resolved = self._prepare(messages_list)
         max_tok, temp = self._resolve(max_tokens, temperature)
+        if temp is not None and not _takes_temperature(self._client):
+            if not _sampling_warned:
+                _sampling_warned = True
+                logger.warning(
+                    "%s: the anthropic SDK sends API version %s or later, which "
+                    "refuses a temperature on every model, so none is sent and "
+                    "the model's default sampling applies.",
+                    self.model, _NO_SAMPLING_VERSION)
+            temp = None
 
         results = []
         # Runs once via ModelClient (one item per call); loops only for direct callers.
         for messages, system_prompt in zip(resolved, prompts):
-            conv_messages = [{"role": m["role"], "content": m["content"]} for m in messages]
+            conv_messages = [{"role": m["role"], "content": m["content"]}
+                             for m in messages]
             # kwargs first: a model= or messages= in them must not re-target the call.
             call_kwargs: dict = {
                 **kwargs,
@@ -194,7 +237,8 @@ class AnthropicBackend(LLMBackend):
             if system_prompt:
                 call_kwargs["system"] = system_prompt
             if temp is not None:
-                call_kwargs["temperature"] = temp
+                call_kwargs["extra_body"] = {
+                    **(kwargs.get("extra_body") or {}), "temperature": temp}
 
             started = time.perf_counter()
             try:
@@ -219,8 +263,8 @@ class AnthropicBackend(LLMBackend):
                 # context window.
                 cut=stop_reason in ("max_tokens", "model_context_window_exceeded"),
             )
-            # A response with no content blocks counts as an empty reply.
-            text = (response.content[0].text or "") if response.content else ""
+            # A response with no text block counts as an empty reply.
+            text = _text_of(response)
             if not text:
                 logger.warning("%s returned an empty reply (stop_reason=%s).",
                                self.model, stop_reason)

@@ -89,13 +89,22 @@ def test_a_notebook_builds_in_the_mode_its_folder_names(path):
         assert [_mode(call) for call in builds] == [Path(folder).name] * len(builds)
 
 
-def test_the_eval_notebooks_cells_make_the_run_its_last_cell_makes(tmp_path):
-    path = _FOLDER / "eval_pipeline.ipynb"
+@pytest.mark.parametrize("mode", ["eval", "training"])
+def test_a_pipeline_notebooks_cells_make_the_run_its_last_cell_makes(tmp_path, mode):
+    """Each step takes the type's params with the notebook's PARAMS over them
+    and the run's augmentation section, so the last cell resumes what the
+    cells wrote (a resume with other plan settings would raise)."""
+    path = _FOLDER / f"{mode}_pipeline.ipynb"
     setup: dict = {}
     exec(_cells(path, "code")[0], setup)    # noqa: S102 - imports and names only
-    run_section = augmentations_of(load_recipe({"dataset_type": "eval"}))
+    (run,) = _calls(path, "run_pipeline")
+    recipe = {ast.literal_eval(key): value
+              for key, value in zip(run.args[0].keys, run.args[0].values, strict=True)}
+    given = ({"augmentations": eval(ast.unparse(recipe["augmentations"]), setup)}  # noqa: S307
+             if "augmentations" in recipe else {})
+    run_section = augmentations_of(load_recipe({"dataset_type": mode, **given}))
     ctx = RunContext(
-        data_dir=tmp_path, dataset_type="eval", models={}, prompt_dir=None,
+        data_dir=tmp_path, dataset_type=mode, models={}, prompt_dir=None,
         taxonomy="harmful", taxonomy_dir=None, params=setup["PARAMS"],
         augmentations=run_section, resume=True, verbose=False)
     fronts = {stage.front: stage for stage in STAGES.values() if stage.name != "build"}
@@ -110,12 +119,12 @@ def test_the_eval_notebooks_cells_make_the_run_its_last_cell_makes(tmp_path):
             f"params({stage.name!r})"]
         assert setup["params"](stage.name) == stage.params(ctx)
     assert called == ["constitution", "inputs", "outputs", "jailbreaks"]
+    assert ast.literal_eval(recipe["stages"]) == [*called, "build"]
     (jailbreaks,) = _calls(path, "generate_jailbreaks")
-    assert [ast.unparse(kw.value) for kw in jailbreaks.keywords
-            if kw.arg == "augmentation"] == ["EVAL_AUGMENTATIONS"]
-    assert {kind: resolve(setup["EVAL_AUGMENTATIONS"], kind)
-            for kind in run_section} == run_section
-    (run,) = _calls(path, "run_pipeline")
+    (section,) = [kw.value for kw in jailbreaks.keywords if kw.arg == "augmentation"]
+    # The front resolves its section over the packaged default alone, the run
+    # over the type's: they must come to the same kinds.
+    section = eval(ast.unparse(section), setup)     # noqa: S307
+    assert {kind: resolve(section, kind) for kind in run_section} == run_section
     assert [ast.unparse(kw.value) for kw in run.keywords if kw.arg == "params"] == [
         "PARAMS"]
-    assert "augmentations" not in [key.value for key in run.args[0].keys]
