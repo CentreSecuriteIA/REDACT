@@ -534,7 +534,6 @@ Other files you may see:
 |---|---|
 | `<ledger>.lock` | The stage's lock. The operating system holds it, so a run that died holds nothing; the file itself may stay |
 | `<output>.cut` | Bytes a resume cut off an output: the tail of a save that did not finish |
-| `<ledger>.dropping` | A fresh run of one seeded-inputs style that did not finish. Run it again |
 | `<kind>.plan.json` | What a jailbreak kind's plan was made with: `seed`, `rounds`, `pool`, `family_weights`, `layer_rates`, `spec_version`, `rules`. A resume compares them with the run's, the pool against what the library added or retired after `spec_version`, and warns when `spec_version` or `rules` is not today's |
 | `constitution_inputs.plan.json`, `output_responses.plan.json` | What the deal of the generation axes was made with, one record: `seed`, the axes' weights, for the inputs `samples_per_entry`, and for the outputs `outputs_per_input` and `modes` (the answer modes of every entry type). A resume compares them with the run's (the inputs' once the folder has a done unit) |
 | `constitution_inputs.coverage.csv`, `output_responses.coverage.csv` | Per axis value, the specs planned and accepted per category and entry type; the outputs' also per answer mode (`axis` `mode`) |
@@ -629,7 +628,6 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `RuntimeError: ... is locked: another run, or this same process, is writing this stage's output` | Two runs on one output | Stop the other run, or use another `data_dir` |
 | `RuntimeError: Cannot resume <file>: <ledger> recorded N bytes of it and the file is missing / is M bytes / holds other bytes there` | The output has been replaced, edited or copied incompletely since its last save | Restore the file; or delete the ledger, and the next resume takes over the rows in the file; or start the stage over |
 | `RuntimeError: <file> is N bytes and <ledger> recorded M bytes after the last save: something else changed the file` | Another writer touched the output during the run | Stop the other writer, then resume |
-| `RuntimeError: A fresh run of 'long' did not finish in ...` | A fresh run of one seeded-inputs style stopped half way | Run that style again with `resume: false` |
 | ERROR `[residency] ...` with `PROBLEM:` lines | The local models of a stage do not fit the cards | Follow the plan's advice; the run continues and may run out of memory at load |
 | ERROR `[preload] <model> failed to load` | A background load failed | The stage that needs the model fails when it calls it, with the cause in the log |
 | WARNING `[vllm] The engine of ... failed to build with N copies ...; loading one copy on ... instead` | The engine failed to build with copies | The run goes on with one copy; set `"copies": 1` for that role to skip the attempt |

@@ -2,8 +2,7 @@
 
 `dataset/` is everything a stage does with files: the identity of a row,
 appending and reading CSV rows, the two sidecar files, saving finished units,
-resuming, a fresh run of part of a stage, and the per-category tree of input
-samples.
+resuming, and the per-category tree of input samples.
 
 ## Responsibilities and boundaries
 
@@ -14,7 +13,6 @@ It is responsible for:
 - the ledger and the manifest (`sidecar.py`);
 - a save: rows first, acks after (`save.py`);
 - what a run skips, and what a resume puts back (`resume.py`);
-- a fresh run of part of a stage (`drop.py`);
 - the per-category tree of inputs (`categories.py`);
 - what an eval build leaves out because another run holds it
   (`exclusion.py`: `exclusion_files`, `Exclusion`);
@@ -159,21 +157,20 @@ not retried forever. Leaving the block also releases the stage's lock.
 `resume_state(ledger, resume=True, artifact=out)`:
 
 1. takes the stage's lock (below);
-2. stops if a `drop_units` did not finish;
-3. reads the plan file beside the manifest, when one is given and the file
+2. reads the plan file beside the manifest, when one is given and the file
    exists: one that holds no record (not JSON, or not an object) stops the
    resume with a `ValueError` naming the file and the remedies (delete it,
    and the stage resumes without comparing its settings, with a WARNING; or
    start over with `resume=False`), and the lock is given back;
-4. reads the ledger;
-5. checks every file the last `_saved` names: a file that is missing,
+3. reads the ledger;
+4. checks every file the last `_saved` names: a file that is missing,
    shorter than recorded, or different in the last 4 kB before the recorded
    size stops the resume with a `RuntimeError` naming the remedies. Every
    file is checked before any is changed;
-6. cuts each file back to its recorded size. The bytes cut off, the tail of a
+5. cuts each file back to its recorded size. The bytes cut off, the tail of a
    save that did not finish, are appended to `<file>.cut`;
-7. cuts the ledger back to the end of its last `_saved` line;
-8. returns the finished keys. It reads no row of the output.
+6. cuts the ledger back to the end of its last `_saved` line;
+7. returns the finished keys. It reads no row of the output.
 
 The units of the unfinished save run again, so no unit ends with two sets of
 rows. `tests/dataset/test_crash_matrix.py` crashes a save at every write and
@@ -188,7 +185,7 @@ of its rows, and one ledger write acks them and records the sizes.
 
 `resume_state(ledger, resume=False, artifact=out, manifest=manifest)` takes
 the stage's lock and removes the output, its `.cut` and `.tmp` files, the
-`.dropping` marker, the ledger and the manifest, and returns no key. The
+ledger and the manifest, and returns no key. The
 lock stays held until the `CommitBuffer` exits or `release_lock` is called.
 Called with no `artifact`, which no stage does, the ledger is plain: read as
 it is, with no lock, no sizes, nothing cut, and `resume=False` removes only
@@ -197,7 +194,7 @@ the ledger and the manifest.
 `clear_stage(artifact, *, manifest_path=None, also=())` does what a fresh
 run's `resume_state` does, for a stage that starts over with nothing to run:
 it takes the stage's lock, removes the output, its `.cut` and `.tmp` files,
-the `.dropping` marker, the ledger beside it and the manifest (beside it
+the ledger beside it and the manifest (beside it
 unless `manifest_path` names it), gives the lock back, then removes the
 files in `also`. The fronts call it with `resume=False` for a stage skipped
 for want of accepted rows: outputs, each paraphrase target, and each
@@ -230,20 +227,6 @@ no finished save recorded is cut whole: a save that did not finish created
 it. The seeded inputs stage checks the columns of every file of a save
 (`check_columns`) before it writes the first, so a save never stops half way
 over a bad column.
-
-### A fresh run of part of a stage
-
-`drop_units(ledger, *, artifact, name, rows, acks, pattern=None,
-units_in=None)` removes some units' rows and acks and leaves the rest. A
-folder whose ledger records no sizes is taken over first. It puts the files
-back at the last save, writes each output again without the picked rows,
-then the ledger without the picked acks, each through `<file>.tmp`, synced,
-and a rename. A file left with no row is removed, so the next save writes
-its header. The CSV reader's field limit is raised to 2^31 - 1, so a cell as
-long as pandas writes it is read; a file that does not parse as CSV stops it
-with a `RuntimeError`. Until it is done, `<ledger name>.dropping` holds
-`name`: a resume stops, and only the same call, made again, finishes the
-job.
 
 ## The per-category tree
 
