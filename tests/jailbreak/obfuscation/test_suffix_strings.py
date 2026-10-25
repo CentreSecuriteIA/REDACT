@@ -174,8 +174,10 @@ def test_a_row_s_info_is_its_slug_alone_whatever_its_source_says():
 
 
 def test_the_published_suffixes_refuse_ascii_art_both_ways():
-    """As the unicode and emoji noise suffixes do: a published suffix holds
-    characters the fonts lack. 24 published x to_ascii_art pairs are refused
+    """A published suffix works only as the literal token string at the end
+    of the prompt, and drawing the prompt as art removes it (its characters
+    are plain ASCII, which the fonts draw: not the unicode and emoji noise
+    suffixes' reason). 24 published x to_ascii_art pairs are refused
     whichever is picked first, and the punctuation and fragment suffixes
     still pair with it (26 of the family's 28 refuse it)."""
     from redact.jailbreak.rules import compatible

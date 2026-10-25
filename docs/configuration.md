@@ -924,7 +924,8 @@ copy the packaged adversarial lists into it
   from public GCG artifacts, each with its source and the model it was
   optimized against, a technique per row (`to_adversarial_suffix_<slug>`,
   the suffix appended after a space, the info `slug=<slug>`), attack only,
-  each refusing `ascii_art` as the unicode and emoji ones do; the four noise
+  each refusing `ascii_art` (drawn as art, a suffix is no longer the token
+  string it was published as); the four noise
   suffixes stay.
 - **Two techniques from the BELLS guardrail attacks.** `to_letter_spacing`
   (the `encode` family, light, with four decode hints) puts a space between

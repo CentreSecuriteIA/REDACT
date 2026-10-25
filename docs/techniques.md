@@ -344,12 +344,15 @@ technique is picked first. A technique may not join a combination when:
   layer cap);
 - one of its families is in the `cross_incompatible_with` of a taken
   technique's own spec entry, or a taken family is in its own. The spec keeps
-  `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode`, the 24
-  published suffixes (the `suffixes` generator gives each the key),
+  `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode`,
   `to_braille`, `to_tokenbreak_split`, `to_lookalike_letters`,
   `to_zero_width_noise`, `to_fullwidth`, `to_math_styled` and the three
   `to_emoji_sprinkle_*` from `ascii_art`, since no font draws the characters
-  they may leave. It keeps the ten `heavy` full-text encodings from it too,
+  they may leave. It keeps the 24 published suffixes (the `suffixes`
+  generator gives each the key) from `ascii_art` for another reason: they
+  are plain ASCII, which the fonts draw, but a published suffix works only
+  as the literal token string at the end of the prompt, and drawing the
+  prompt as art, the suffix with it, removes that string. It keeps the ten `heavy` full-text encodings from it too,
   `to_braille` and the nine others (`to_base64`, `to_unicode_escape`,
   `to_ascii_ordinal`, `to_morse`, `to_hex`, `to_binary`, `to_html_entities`,
   `to_base32`, `to_base85`): a code for every character lengthens the text,
@@ -967,8 +970,10 @@ eval pool v2.
   appended after a space as published, with the info `slug=<slug>` (the
   source and the model stay in the data file). Each row says where the
   string was published (`source`) and which model it was optimized against
-  (`optimized_against`). A published suffix refuses `ascii_art`, as the
-  unicode and emoji ones do: its characters are ones the fonts lack. A
+  (`optimized_against`). A published suffix refuses `ascii_art`: it works
+  only as the literal token string at the end of the prompt, and drawing
+  the prompt as art, the suffix with it, removes that string (its
+  characters are plain ASCII, which the fonts draw). A
   published suffix is used as it was written, never
   optimized here (that needs a gradient search against a white-box model for
   each target). The published ones are attack only, as the generator's
