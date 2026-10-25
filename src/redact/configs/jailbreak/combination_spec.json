@@ -331,7 +331,9 @@
   "generators": {
     "_comment": "Families whose techniques come one per row of a data file beside this spec. jailbreak/technique.py (read_spec) expands each into technique entries, so every reader sees them under techniques: a row (of file, and with where only one whose column of that name is true) makes the technique name, {slug} its slug, with families [the key], this entry's other keys, and the row's complexity, since and deprecated over them. The family's module builds the functions from the same file, so adding a row adds the technique; import fails while the two disagree.",
     "translation":     { "file": "languages.json", "where": "translation", "name": "to_{slug}", "requires_llm": true },
-    "answer_language": { "file": "languages.json", "where": "answer_language", "name": "to_ask_answer_in_{slug}", "requires_llm": false }
+    "answer_language": { "file": "languages.json", "where": "answer_language", "name": "to_ask_answer_in_{slug}", "requires_llm": false },
+    "_suffixes": "The adversarial suffixes published in the literature (obfuscation/suffix_strings.json; jailbreak/obfuscation/suffixes.py builds the functions and refuses a row without its suffix, source, optimized_against or since), after the family's four noise suffixes; attack only.",
+    "suffixes":        { "file": "obfuscation/suffix_strings.json", "name": "to_adversarial_suffix_{slug}", "complexity": 1, "requires_llm": false, "kinds": ["adversarial"] }
   },
 
   "techniques": {

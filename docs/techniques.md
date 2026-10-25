@@ -800,7 +800,18 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   `variant=<name>;font=<font>;detected_words=<word>`. It is attack only and
   outside the eval type's pool.
 - `suffixes` appends an adversarial suffix: punctuation, fragments, unicode
-  or emoji. Its info is `suffix=<suffix>`.
+  or emoji, drawn at random, with the info `suffix=<suffix>`; or a suffix
+  published in the literature, one technique per row of
+  `configs/jailbreak/obfuscation/suffix_strings.json` (the spec's `suffixes`
+  generator: `to_adversarial_suffix_<slug>`, after the four noise ones),
+  appended after a space as published, with the info
+  `slug=<slug>;source=<source>`. Each row says where the string was
+  published (`source`) and which model it was optimized against
+  (`optimized_against`); a published suffix is used as it was written, never
+  optimized here (that needs a gradient search against a white-box model for
+  each target). The published ones are attack only, as the generator's
+  `kinds` say whatever a row gives, so the natural kind draws only the
+  punctuation and emoji suffixes.
 - `payload_split` (spec version 1.3) cuts the text into two to four parts,
   names them A, B, C ..., and writes them, one per line as `A: "..."` (a
   quote or a backslash in a part is escaped as a JSON string does, so the

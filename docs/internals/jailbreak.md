@@ -14,7 +14,9 @@ the technique names are in [techniques.md](../techniques.md).
   layers, complexities and compatibility rules. Importing `redact.jailbreak`
   fails when the spec and the registered functions name different
   techniques. A family whose techniques come one per row of a data file
-  (the two language families, from `languages.json`) is a `generators`
+  (the two language families, from `languages.json`, and the published
+  adversarial suffixes of `suffixes`, from `obfuscation/suffix_strings.json`)
+  is a `generators`
   entry, which `load_spec` expands into technique entries, so every reader
   sees one `techniques` dict; the family's module builds its functions from
   the same rows ([extending.md](../extending.md#add-a-jailbreak-technique)).

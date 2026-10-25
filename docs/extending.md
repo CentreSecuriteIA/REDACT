@@ -427,6 +427,29 @@ The `translation` and `answer_language` techniques are generated from
    The eval type's translation allow list names its languages, so a new
    translation is not drawn there.
 
+### Add a published adversarial suffix
+
+The `suffixes` family's published suffixes are generated from
+`configs/jailbreak/obfuscation/suffix_strings.json` (the spec's `suffixes`
+generator), one row per string, after the family's four noise suffixes,
+which stay in code:
+
+1. **Add a row**: `slug` (lower-case letters, digits and underscores, the end
+   of its technique's name `to_adversarial_suffix_<slug>`, none of the noise
+   suffixes' `punctuation`, `fragments`, `unicode`, `emoji`), `suffix` (the
+   string as published), `source` (the paper, its arXiv id or the repository
+   it is from, without a `;`), `optimized_against` (the model or models), and
+   `since`, the spec version that adds it; `notes`, `complexity` (default 1)
+   and `deprecated` are optional. `obfuscation/suffixes.py` refuses a row
+   without one of the five at import, naming it. Append the row: its place is
+   its technique's place in the family.
+2. **Date it** as a language: move the spec's `version` up and give the row
+   that `since`.
+3. **Then as for any technique**: regenerate the registry fixture and update
+   the counts in the docs. The technique is attack only (the generator's
+   `kinds`; a row's own `kinds` are not read), so the natural pool does not
+   move, and the eval type's allow list names no suffix.
+
 ### Add a rewrite technique
 
 The `rewrite` layer comes first: its technique rewrites the whole prompt

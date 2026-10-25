@@ -25,11 +25,20 @@ def test_the_language_generators_make_the_entries_the_spec_wrote_out():
     assert "to_ask_answer_in_maori" in techniques and "to_maori" not in techniques
 
 
+def _copy_data_files(folder) -> None:
+    """Copy the data files the packaged spec's generators read into ``folder``,
+    at their places beside the spec."""
+    for generator in T.load_spec()["generators"].values():
+        if isinstance(generator, dict):
+            (folder / generator["file"]).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(_PACKAGED / generator["file"], folder / generator["file"])
+
+
 def _spec(tmp_path, rows: list[dict], **generator) -> dict:
     """The packaged spec, copied into ``tmp_path`` with a stand-in family,
     ``stand_in``, whose techniques come from ``hacking/stand_ins.json``
     holding ``rows``, and read back."""
-    shutil.copy(_PACKAGED / "languages.json", tmp_path / "languages.json")
+    _copy_data_files(tmp_path)
     spec = json.loads((_PACKAGED / "combination_spec.json").read_text(encoding="utf-8"))
     spec["families"]["stand_in"] = {
         "layer": "hacking", "dimension": "role_framing", "within_layer_order": 0,
@@ -155,7 +164,7 @@ def test_a_row_that_breaks_a_rule_raises_naming_its_file(tmp_path, rows, generat
 
 def _read_changed(tmp_path, change) -> dict:
     """The packaged spec with ``change`` applied, read from ``tmp_path``."""
-    shutil.copy(_PACKAGED / "languages.json", tmp_path / "languages.json")
+    _copy_data_files(tmp_path)
     spec = json.loads((_PACKAGED / "combination_spec.json").read_text(encoding="utf-8"))
     change(spec)
     path = tmp_path / "combination_spec.json"
