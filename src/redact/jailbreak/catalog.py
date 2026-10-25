@@ -27,14 +27,14 @@ pools, the augmentation kinds and the prompt tree:
   kind's entry types), the units counted by their number of techniques and
   of layers, and the family pairs drawn most often.
 
-:func:`dumps` writes it as JSON (``docs/catalog.json``); every number in
-it comes from the code. The pools
+:func:`dumps` writes it as JSON (``docs/catalog.json``) and :func:`markdown`
+as ``docs/catalog.md``; every number in both comes from the code. The pools
 are those of the packaged files: a ``config_dir`` is not read. A variant
 pool's floor is the variant-floor fixture's
 (``tests/fixtures/variant_floor.json``), read when the repository's tests are
-there, else ``None``. ``tests/jailbreak/test_catalog.py`` fails until the
-file is made again, from the repository root, with
-``PYTHONPATH=src py -m redact.jailbreak.catalog``.
+there, else ``None``. ``tests/jailbreak/test_catalog.py`` fails until both
+files are made again, from the repository root, with
+``PYTHONPATH=src py -m redact.jailbreak.catalog`` (or ``scripts/catalog.py``).
 
 The rules of a pair, by code (:data:`RULES`): ``S`` one technique per
 family, ``L`` the layer cap (``layer_max_picks``), ``F`` a family's
@@ -63,6 +63,7 @@ import argparse
 import functools
 import inspect
 import json
+import re
 import sys
 import tempfile
 import types
@@ -992,6 +993,677 @@ def _dump(value, depth: int) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(", ", ": "))
 
 
+# --- Markdown -------------------------------------------------------------------
+
+#: The letter of a pool in the technique tables.
+_POOL_LETTERS = {
+    "adversarial": "A",
+    "adversarial_rewrite": "R",
+    "natural": "N",
+    "natural_translation": "T",
+    "eval.adversarial": "E",
+}
+
+
+def _row(*cells) -> str:
+    return "| " + " | ".join(str(cell).replace("|", "\\|") for cell in cells) + " |"
+
+
+def _rule_line(columns: int) -> str:
+    return "|" + "---|" * columns
+
+
+def _code(name) -> str:
+    return f"`{name}`"
+
+
+def _names(names) -> str:
+    return ", ".join(_code(name) for name in names)
+
+
+def _anchor(heading: str) -> str:
+    """The id Python-Markdown's ``toc`` gives ``heading``."""
+    text = re.sub(r"[^\w\s-]", "", heading.replace("`", "")).strip().lower()
+    return re.sub(r"[-\s]+", "-", text)
+
+
+def _calls(entry: dict) -> str:
+    calls = entry["calls"]
+    if not calls:
+        return ""
+    low, high = calls
+    text = str(low) if low == high else f"{low}-{high}"
+    return f"{text} ({entry['check']})" if entry["check"] else text
+
+
+def _tags(entry: dict) -> str:
+    tags = []
+    if entry["requires_benign"]:
+        tags.append("benign")
+    if entry["encode_weight"]:
+        tags.append(entry["encode_weight"])
+    if entry["needs_latin"]:
+        tags.append("latin")
+    if entry["applicability"]:
+        tags.append("applies")
+    if entry["max_tokens"]:
+        tags.append(f"max {entry['max_tokens']}")
+    return " ".join(tags)
+
+
+def _pool_letters(entry: dict) -> str:
+    held = set(entry["pools"])
+    letters = []
+    for pool, letter in _POOL_LETTERS.items():
+        if pool not in held:
+            continue
+        if pool == "adversarial_rewrite" and "adversarial" in held:
+            continue
+        if pool == "natural_translation" and "natural" in held:
+            continue
+        letters.append(letter)
+    return " ".join(letters)
+
+
+def _never(entry: dict, catalog: dict) -> str:
+    """The families ``entry`` never combines with, the rest of its layer
+    (refused by the cap alone) in one item; those it combines with only in
+    part, as ``some``; and what it keeps out as the request obfuscation."""
+    families = catalog["families"]
+    layer = entry["layer"]
+    parts = []
+    same_layer = [
+        f
+        for f in entry["never_with"]
+        if families[f]["layer"] == layer and entry["never_with"][f] == "L"
+    ]
+    if same_layer:
+        parts.append(f"rest of {_code(layer)} (L)")
+    parts += [
+        f"{_code(f)} ({codes})"
+        for f, codes in entry["never_with"].items()
+        if f not in same_layer
+    ]
+    parts += [
+        f"some {_code(f)} ({part['refused']} of {part['members']}, {part['rules']})"
+        for f, part in entry["partly_with"].items()
+    ]
+    if entry["as_request_obfuscation_keeps_out"]:
+        parts.append(
+            f"as request obfuscation: "
+            f"{_names(entry['as_request_obfuscation_keeps_out'])} (R)"
+        )
+    return ", ".join(parts)
+
+
+def _technique_name(name: str, entry: dict) -> str:
+    if entry["retired"]:
+        return f"{_code(name)} (retired {entry['deprecated']})"
+    return _code(name)
+
+
+def _section_headline(catalog: dict) -> list[str]:
+    head = catalog["headline"]
+    pools = catalog["pools"]
+    lines = ["## Headline", "", _row("What", "Count"), _rule_line(2)]
+    lines += [
+        _row("Spec version", catalog["spec_version"]),
+        _row("Techniques registered", head["registered"]),
+        _row("Active techniques", head["active"]),
+        _row("Retired techniques", head["retired"]),
+        _row("Layers", head["layers"]),
+        _row("Families with an active technique", head["families"]),
+        _row("Families in the spec", head["spec_families"]),
+        _row("Compatible pairs of active techniques", head["compatible_pairs"]),
+        _row("Variant pools", head["variant_pools"]),
+        _row("Template variants", head["template_variants"]),
+        _row("Model prompt files", head["prompt_files"]),
+        _row("Jailbreak prompt steps", head["jailbreak_prompt_steps"]),
+    ]
+    lines += [
+        _row(f"Pool {_code(name)}", size)
+        for name, size in head["pools"].items()
+        if pools[name]["on"]
+    ]
+    return lines
+
+
+def _section_layers(catalog: dict) -> list[str]:
+    sampling = catalog["sampling"]
+    lines = [
+        "## Layers",
+        "",
+        "Applied in this order:",
+        "",
+        _row(
+            "#",
+            "Layer",
+            "Cap",
+            "Rate",
+            "Off by default",
+            "Families",
+            "Active",
+            "Retired",
+            "Variants",
+        ),
+        _rule_line(9),
+    ]
+    for layer in catalog["layers"]:
+        lines.append(
+            _row(
+                layer["position"],
+                _code(layer["name"]),
+                layer["cap"] if layer["cap"] is not None else "none",
+                layer["rate"] if layer["rate"] is not None else "",
+                "yes" if layer["off_by_default"] else "no",
+                len(layer["families"]),
+                layer["techniques"],
+                layer["retired"],
+                layer["variants"],
+            )
+        )
+    lines += ["", "Order within a layer (`within_layer_order`):", ""]
+    for layer in catalog["layers"]:
+        order = sorted(
+            layer["within_layer_order"].items(), key=lambda kv: (kv[1], kv[0])
+        )
+        lines.append(
+            f"- {_code(layer['name'])}: "
+            + ", ".join(f"{_code(f)} {n}" for f, n in order)
+        )
+    request = sampling["request_obfuscation"]
+    blocked = sampling["manipulation_blocked_obfuscation"]
+    lines += [
+        "",
+        "### Budget and sampling",
+        "",
+        _row("Setting", "Value"),
+        _rule_line(2),
+        _row(
+            "Complexity of a technique", f"0 to {sampling['max_technique_complexity']}"
+        ),
+        _row("Default `max_complexity`", sampling["default_max_complexity"]),
+        _row("Default `max_obfuscations`", sampling["default_max_obfuscations"]),
+        _row("Group budget headroom", sampling["group_budget_headroom"]),
+        _row("`heavy_encoding_weight`", sampling["heavy_encoding_weight"]),
+        _row("`decode_hint_rate`", sampling["decode_hint_rate"]),
+        _row("Layers off by default", _names(sampling["layers_off_by_default"])),
+        _row("Natural-only for the attacks", _names(sampling["natural_only_families"])),
+        _row(
+            "Request obfuscation (phase 5)",
+            "on" if sampling["allow_request_obfuscation"] else "off",
+        ),
+        _row("Request obfuscation rate", request["rate"]),
+        _row("Request obfuscation families", _names(request["allowed_families"])),
+        _row("Request obfuscation candidates", len(request["candidates"])),
+    ]
+    lines += [
+        _row(f"A {_code(family)} request obfuscation keeps out", _names(kept))
+        for family, kept in request["refuses"].items()
+    ]
+    lines += [
+        _row("Manipulation block: families", _names(blocked.get("families", []))),
+        _row("Manipulation block: `encode_weight`", blocked.get("encode_weight", "")),
+        "",
+        "### Escalation rounds",
+        "",
+        _row("Round", "Settings"),
+        _rule_line(2),
+    ]
+    lines += [
+        _row(i, _code(json.dumps(r, sort_keys=True)))
+        for i, r in enumerate(sampling["escalation"], start=1)
+    ]
+    return lines
+
+
+def _section_families(catalog: dict) -> list[str]:
+    lines = [
+        "## Families",
+        "",
+        "Active and retired count by first family.",
+        "",
+        _row(
+            "Family",
+            "Layer",
+            "Order",
+            "Dimension",
+            "Kinds",
+            "Active",
+            "Retired",
+            "Also in",
+            "Variants",
+            "Floor",
+            "Models",
+            "Calls",
+            "Refuses",
+            "Refused by",
+            "Blocked by manipulation",
+        ),
+        _rule_line(15),
+    ]
+    for family, entry in catalog["families"].items():
+        lines.append(
+            _row(
+                _code(family),
+                entry["layer"],
+                entry["within_layer_order"],
+                entry["dimension"] or "",
+                " ".join(k[:3] for k in entry["kinds"]),
+                len(entry["techniques"]),
+                len(entry["retired"]),
+                len(entry["also_in"]),
+                entry["variants"],
+                entry["floor"] if entry["floor"] is not None else "",
+                ", ".join(entry["models"]),
+                _calls(entry) or (entry["check"] or ""),
+                _names(entry["refuses"]),
+                _names(entry["refused_by"]),
+                "yes" if entry["manipulation_blocked"] else "",
+            )
+        )
+    return lines
+
+
+_SYMBOLS = {"always": "✓", "sometimes": "◐", "never": "✗", "same": "=", "n/a": "·"}
+
+
+def _section_matrix(catalog: dict) -> list[str]:
+    matrix = catalog["family_matrix"]
+    order = matrix["families"]
+    legend = ", ".join(f"{symbol} {status}" for status, symbol in _SYMBOLS.items())
+    lines = [
+        "## Family matrix",
+        "",
+        f"Every pair of active members: {legend}.",
+        "",
+        _row("#", "Family", *range(1, len(order) + 1)),
+        _rule_line(len(order) + 2),
+    ]
+    for i, a in enumerate(order, start=1):
+        lines.append(
+            _row(i, _code(a), *(_SYMBOLS[matrix["cells"][a][b][0]] for b in order))
+        )
+    return lines
+
+
+def _section_techniques(catalog: dict) -> list[str]:
+    legend = ", ".join(
+        f"{letter} {_code(pool)}" for pool, letter in _POOL_LETTERS.items()
+    )
+    rules_legend = ", ".join(f"{code} {title}" for code, title in RULES.items())
+    lines = [
+        "## Techniques",
+        "",
+        f"Pools: {legend}.",
+        "",
+        f"Rules: {rules_legend}, {REQUEST_RULE} request obfuscation.",
+        "",
+        "Combines with: active partners `rules.compatible` admits.",
+        "Never with: whole families; `some`: in part.",
+        "",
+    ]
+    by_layer: dict[str, list[str]] = defaultdict(list)
+    for name, entry in catalog["techniques"].items():
+        by_layer[entry["layer"]].append(name)
+    family_rank = {f: i for i, f in enumerate(catalog["families"])}
+    for layer in catalog["layers"]:
+        names = sorted(
+            by_layer.get(layer["name"], ()),
+            key=lambda n: (family_rank[catalog["techniques"][n]["first_family"]], n),
+        )
+        lines += [
+            f"### Layer {_code(layer['name'])}",
+            "",
+            _row(
+                "Technique",
+                "Families",
+                "Kinds",
+                "Cx",
+                "Calls",
+                "Tags",
+                "Variants",
+                "Prompts",
+                "Pools",
+                "Since",
+                "Combines with",
+                "Never with",
+            ),
+            _rule_line(12),
+        ]
+        short = []
+        for name in names:
+            entry = catalog["techniques"][name]
+            variants = entry["variants"]
+            lines.append(
+                _row(
+                    _technique_name(name, entry),
+                    _names(entry["families"]),
+                    " ".join(k[:3] for k in entry["kinds"]),
+                    entry["complexity"],
+                    _calls(entry),
+                    _tags(entry),
+                    f"{variants} opt"
+                    if entry["variant_pool_optional"]
+                    else variants or "",
+                    len(entry["prompts"]) or "",
+                    _pool_letters(entry),
+                    entry["since"],
+                    entry["allowed_count"],
+                    _never(entry, catalog),
+                )
+            )
+            if entry["refused_count"] <= SHORT_LIST:
+                short.append(
+                    f"- {_code(name)} ({entry['refused_count']}): "
+                    + _names(entry["refused_with"])
+                )
+        if short:
+            lines += ["", "Refused partners, where few:", "", *short]
+        lines.append("")
+    return lines[:-1]
+
+
+def _section_pools(catalog: dict) -> list[str]:
+    pools = catalog["pools"]
+    lines = [
+        "## Pools",
+        "",
+        _row("Pool", "Kind", "Dataset type", "Section", "On", "Size", "Families"),
+        _rule_line(7),
+    ]
+    for name, entry in pools.items():
+        lines.append(
+            _row(
+                _code(name),
+                entry["kind"],
+                entry["dataset_type"] or "",
+                _code(f"{entry['dataset_type']}.json")
+                if entry["dataset_type"]
+                else _code(json.dumps(entry["section"], sort_keys=True))
+                if entry["section"] is not None
+                else "",
+                "yes" if entry["on"] else "no",
+                entry["size"],
+                len(
+                    {
+                        catalog["techniques"][n]["first_family"]
+                        for n in entry["techniques"]
+                    }
+                ),
+            )
+        )
+    listed: dict[tuple, str] = {}
+    for name, entry in pools.items():
+        if not entry["on"]:
+            continue
+        lines += ["", f"### Pool {_code(name)}", ""]
+        key = tuple(entry["techniques"])
+        if key in listed:
+            lines.append(f"Same techniques as {_code(listed[key])}.")
+            continue
+        listed[key] = name
+        grouped: dict[str, list[str]] = defaultdict(list)
+        for technique in entry["techniques"]:
+            grouped[catalog["techniques"][technique]["first_family"]].append(technique)
+        for family in catalog["families"]:
+            if family in grouped:
+                lines.append(
+                    f"- {_code(family)} ({len(grouped[family])}): "
+                    + _names(grouped[family])
+                )
+        lines += ["", "Rounds:", ""]
+        lines += [f"- {_code(json.dumps(r, sort_keys=True))}" for r in entry["rounds"]]
+    return lines
+
+
+def _section_prompts(catalog: dict) -> list[str]:
+    prompts = catalog["prompts"]
+    lines = [
+        "## Prompts",
+        "",
+        "### Template variants by layer",
+        "",
+        _row("Layer", "Variant pools", "Variants"),
+        _rule_line(3),
+    ]
+    for layer in catalog["layers"]:
+        count = sum(
+            1 for p in prompts["variant_pools"].values() if p["layer"] == layer["name"]
+        )
+        lines.append(_row(_code(layer["name"]), count, layer["variants"]))
+    lines.append(_row("all", len(prompts["variant_pools"]), prompts["variants_total"]))
+    lines += [
+        "",
+        "### Variant pools",
+        "",
+        _row("Pool", "Family", "Techniques", "Variants", "Floor"),
+        _rule_line(5),
+    ]
+    for name, pool in prompts["variant_pools"].items():
+        drawn = pool["techniques"]
+        lines.append(
+            _row(
+                _code(name),
+                _code(pool["family"]),
+                _names(drawn) if len(drawn) <= 3 else f"{len(drawn)} techniques",  # noqa: PLR2004
+                pool["variants"],
+                pool["floor"] if pool["floor"] is not None else "",
+            )
+        )
+    lines += [
+        "",
+        "### Model prompt files",
+        "",
+        _row("Pipeline", "Steps", "Files", "Few-shot examples"),
+        _rule_line(4),
+    ]
+    for pipeline, entry in prompts["pipelines"].items():
+        lines.append(
+            _row(
+                _code(pipeline),
+                len(entry["steps"]),
+                entry["files"],
+                entry["few_shot_examples"],
+            )
+        )
+    lines.append(
+        _row(
+            "all",
+            sum(len(e["steps"]) for e in prompts["pipelines"].values()),
+            sum(e["files"] for e in prompts["pipelines"].values()),
+            sum(e["few_shot_examples"] for e in prompts["pipelines"].values()),
+        )
+    )
+    lines += [
+        "",
+        "### Jailbreak prompt steps",
+        "",
+        _row("Step", "Files", "Techniques", "Families", "Stage"),
+        _rule_line(5),
+    ]
+    steps = prompts["pipelines"].get("jailbreak", {}).get("steps", {})
+    for step, users in prompts["jailbreak_steps"].items():
+        families = sorted(
+            {catalog["techniques"][n]["first_family"] for n in users["techniques"]},
+            key=list(catalog["families"]).index,
+        )
+        lines.append(
+            _row(
+                _code(step),
+                steps.get(step, {}).get("files", ""),
+                len(users["techniques"]),
+                _names(families),
+                "benign pairs" if users["stage"] else "",
+            )
+        )
+    lines += [
+        "",
+        "### Prompt steps by technique",
+        "",
+        _row("Steps", "Techniques"),
+        _rule_line(2),
+    ]
+    grouped: dict[tuple, list[str]] = defaultdict(list)
+    for name, entry in catalog["techniques"].items():
+        if entry["prompts"]:
+            grouped[tuple(entry["prompts"])].append(name)
+    for steps_used, names in sorted(grouped.items()):
+        lines.append(_row(_names(steps_used), f"{len(names)}: {_names(names)}"))
+    lines += _section_inputs(catalog["inputs"])
+    return lines
+
+
+def _section_inputs(inputs: dict) -> list[str]:
+    lines = [
+        "",
+        "### Input side",
+        "",
+        f"Entry types ({len(inputs['entry_types'])}): "
+        + _names(inputs["entry_types"])
+        + ".",
+        "",
+    ]
+    for name, taxonomy in inputs["taxonomies"].items():
+        lines += [
+            f"Taxonomy {_code(name)}: {taxonomy['categories']} categories, "
+            f"{taxonomy['subcategories']} subcategories.",
+            "",
+            _row("Category", "Subcategories"),
+            _rule_line(2),
+        ]
+        lines += [
+            _row(category, count)
+            for category, count in taxonomy["per_category"].items()
+        ]
+        lines.append("")
+    benign = inputs["benign_pairs"]
+    lines += [
+        "Benign pairs:",
+        "",
+        _row("What", "Count"),
+        _rule_line(2),
+        _row("Subcategories", benign["subcategories"]),
+        _row("Answer types", _names(benign["answer_types"])),
+        _row("Units", benign["units"]),
+        _row("Pairs per unit", benign["pairs_per_unit"]),
+        _row("Pairs in all", benign["pairs"]),
+        _row("Many-shot pairs", benign["many_shot_pairs"]),
+        "",
+        "Generation axes:",
+        "",
+        _row("Stage", "Axis", "Dimension", "Values (weight)"),
+        _rule_line(4),
+    ]
+    for stage, stage_axes in inputs["axes"].items():
+        for axis, entry in stage_axes.items():
+            values = (
+                ", ".join(f"{_code(v)} ({w})" for v, w in entry["values"].items())
+                if entry["values"]
+                else f"from {entry['from']}"
+            )
+            lines.append(_row(stage, _code(axis), entry["dimension"] or "", values))
+    modes = inputs["answer_modes"]
+    lines += [
+        "",
+        f"Answer modes: {_names(modes['modes'])}.",
+        "",
+        _row("Entry type", "Modes"),
+        _rule_line(2),
+    ]
+    lines += [_row(_code(t), _names(m)) for t, m in modes["by_entry_type"].items()]
+    return lines
+
+
+def _section_combinations(catalog: dict) -> list[str]:
+    lines = ["## Combination examples", ""]
+    for kind, sim in catalog["combinations"].items():
+        lines += [
+            f"### Kind {_code(kind)}",
+            "",
+            _row("Plan", "Value"),
+            _rule_line(2),
+            _row("Units", sim["units"]),
+            _row("Synthetic inputs", sim["inputs"]),
+            _row("Rounds", sim["rounds"]),
+            _row("Groups", sim["groups"]),
+            _row("Entry types", _names(sim["entry_types"])),
+            _row("Seed", sim["seed"]),
+            _row("Pool size", sim["pool_size"]),
+            _row("Techniques drawn", sim["techniques_drawn"]),
+            _row("Never drawn", _names(sim["never_drawn"])),
+            _row("Mean techniques per unit", sim["mean_techniques"]),
+            "",
+            _row("Techniques", "Units"),
+            _rule_line(2),
+        ]
+        lines += [_row(k, n) for k, n in sim["by_size"].items()]
+        lines += ["", _row("Layers touched", "Units"), _rule_line(2)]
+        lines += [_row(k, n) for k, n in sim["by_layers_touched"].items()]
+        lines += ["", _row("Layer", "Units"), _rule_line(2)]
+        lines += [_row(_code(layer), n) for layer, n in sim["units_per_layer"].items()]
+        if sim["top_family_pairs"]:
+            lines += ["", _row("Family pair", "Units"), _rule_line(2)]
+            lines += [
+                _row(f"{_code(a)} + {_code(b)}", n)
+                for a, b, n in sim["top_family_pairs"]
+            ]
+        else:
+            lines += ["", "No unit draws two families."]
+        lines.append("")
+    return lines[:-1]
+
+
+def _section_rules(catalog: dict) -> list[str]:
+    lines = ["## Rules", "", _row("Code", "Rule", "Source"), _rule_line(3)]
+    lines += [
+        _row(code, entry["rule"], _code(entry["source"]))
+        for code, entry in catalog["rules"].items()
+    ]
+    for key, text in catalog["spec_notes"].items():
+        lines += ["", f"### Spec notes: {_code(key)}", "", "> " + text]
+    lines += ["", "### Family descriptions", ""]
+    lines += [
+        f"- {_code(family)}: {entry['description']}"
+        for family, entry in catalog["families"].items()
+        if entry["description"]
+    ]
+    return lines
+
+
+_SECTIONS = (
+    ("Headline", _section_headline),
+    ("Layers", _section_layers),
+    ("Families", _section_families),
+    ("Family matrix", _section_matrix),
+    ("Techniques", _section_techniques),
+    ("Pools", _section_pools),
+    ("Prompts", _section_prompts),
+    ("Combination examples", _section_combinations),
+    ("Rules", _section_rules),
+)
+
+
+def markdown(catalog: dict) -> str:
+    """``catalog`` as the Markdown page ``docs/catalog.md``."""
+    lines = [
+        "# Technique catalog",
+        "",
+        "<!-- Generated: redact.jailbreak.catalog -->",
+        "",
+        "Generated from the code; do not edit.",
+        f"Regenerate: `{REGENERATE}`.",
+        "Data: [catalog.json](catalog.json).",
+        "",
+        "Contents:",
+        "",
+    ]
+    lines += [f"- [{title}](#{_anchor(title)})" for title, _ in _SECTIONS]
+    for _, section in _SECTIONS:
+        lines += ["", *section(catalog)]
+    return "\n".join(lines) + "\n"
+
+
 # --- the command line -----------------------------------------------------------
 
 
@@ -1001,21 +1673,24 @@ def default_dir() -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Write ``catalog.json`` (``--check``: only say whether it is
-    current); returns the exit status."""
+    """Write ``catalog.json`` and ``catalog.md`` (``--check``: only say
+    whether they are current); returns the exit status."""
     parser = argparse.ArgumentParser(description="Write the technique catalog.")
     parser.add_argument(
         "--out-dir",
         type=Path,
         default=default_dir(),
-        help="the folder of catalog.json",
+        help="the folder of catalog.json and catalog.md",
     )
     parser.add_argument(
         "--check", action="store_true", help="exit 1 if a file is stale"
     )
     args = parser.parse_args(argv)
     catalog = build()
-    files = {args.out_dir / "catalog.json": dumps(catalog)}
+    files = {
+        args.out_dir / "catalog.json": dumps(catalog),
+        args.out_dir / "catalog.md": markdown(catalog),
+    }
     stale = [
         path
         for path, text in files.items()

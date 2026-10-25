@@ -83,6 +83,7 @@ nav:
   - Running a pipeline: running.md
   - Configuration: configuration.md
   - Jailbreak techniques: techniques.md
+  - Technique catalog: catalog.md
   - Extending: extending.md
   - Stages:
       - Constitution: stages/constitution.md

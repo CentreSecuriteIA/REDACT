@@ -1,14 +1,16 @@
 """The technique catalog (:mod:`redact.jailbreak.catalog`) against the code.
 
-``docs/catalog.json`` is made from the code; it fails here until it is made
-again, from the repository root, with
+``docs/catalog.json`` and ``docs/catalog.md`` are made from the code; they
+fail here until they are made again, from the repository root, with
 ``PYTHONPATH=src py -m redact.jailbreak.catalog``. The other tests check
 what the catalog says against the registry, the rules, the pools and the
-variant pools, each read another way than the catalog reads it.
+variant pools, each read another way than the catalog reads it, and that
+the page lists every technique once and renders its tables whole.
 """
 
 import json
 import os
+import re
 import subprocess
 import sys
 from collections import Counter
@@ -85,12 +87,16 @@ def test_the_catalog_is_the_same_under_another_hash_seed(tmp_path, built):
     assert (tmp_path / "catalog.json").read_text(encoding="utf-8") == catalog.dumps(
         built
     )
+    assert (tmp_path / "catalog.md").read_text(encoding="utf-8") == catalog.markdown(
+        built
+    )
 
 
 def test_check_says_whether_the_files_are_current(tmp_path, built, monkeypatch):
     monkeypatch.setattr(catalog, "build", lambda: built)
     assert catalog.main(["--out-dir", str(tmp_path), "--check"]) == 1
     assert not (tmp_path / "catalog.json").exists()
+    assert not (tmp_path / "catalog.md").exists()
     assert catalog.main(["--out-dir", str(tmp_path)]) == 0
     assert catalog.main(["--out-dir", str(tmp_path), "--check"]) == 0
 
@@ -420,6 +426,14 @@ def test_the_models_a_technique_uses_follow_its_spec(built):
             assert models & {"generation", "translation"}, name
 
 
+def test_a_technique_a_model_checks_loads_a_check_prompt_too(built):
+    """A model check is a prompt of its own beside the generation's, loaded
+    through a template (``PromptTemplate.load``) as often as directly."""
+    for name, entry in built["techniques"].items():
+        if entry["check"] in MODEL_CHECKS:
+            assert len(entry["prompts"]) >= 2, (name, entry["prompts"])  # noqa: PLR2004
+
+
 def test_the_prompt_files_are_the_prompt_tree_s(built):
     files = sorted(paths.prompts_dir().rglob("*.json"))
     pipelines = built["prompts"]["pipelines"]
@@ -443,3 +457,96 @@ def test_the_combination_examples_count_every_unit(built):
         counts = [n for _, _, n in sim["top_family_pairs"]]
         assert counts == sorted(counts, reverse=True)
         assert len(counts) <= catalog.TOP_FAMILY_PAIRS
+
+
+# --- the page -------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def page(built) -> str:
+    return catalog.markdown(built)
+
+
+def test_the_catalog_page_is_the_code_s(page):
+    written = (_DOCS / "catalog.md").read_text(encoding="utf-8")
+    assert written == page, (
+        f"docs/catalog.md is stale: regenerate it with {catalog.REGENERATE}"
+    )
+
+
+def _technique_rows(page: str, name: str) -> list[str]:
+    row = re.compile(rf"^\| `{re.escape(name)}`( \(retired [^)]*\))? \|")
+    return [line for line in page.splitlines() if row.match(line)]
+
+
+def test_the_page_lists_every_technique_in_one_row(built, page):
+    for fn in all_techniques():
+        rows = _technique_rows(page, fn.__name__)
+        assert len(rows) == 1, (fn.__name__, len(rows))
+        entry = built["techniques"][fn.__name__]
+        assert f" | {entry['allowed_count']} | " in rows[0], fn.__name__
+
+
+def test_the_page_marks_the_retired_techniques(built, page):
+    for name, entry in built["techniques"].items():
+        marked = f"| `{name}` (retired {entry['deprecated']}) |" in page
+        assert marked == entry["retired"], name
+
+
+def test_the_page_quotes_the_catalog_s_totals(built, page):
+    head = built["headline"]
+    for label, value in (
+        ("Techniques registered", head["registered"]),
+        ("Active techniques", head["active"]),
+        ("Retired techniques", head["retired"]),
+        ("Variant pools", head["variant_pools"]),
+        ("Template variants", head["template_variants"]),
+    ):
+        assert f"| {label} | {value} |" in page, label
+
+
+def _cells(row: str) -> int:
+    return len(re.findall(r"(?<!\\)\|", row)) - 1
+
+
+def test_every_table_row_has_its_header_s_cells(page):
+    """A row with a cell more or less than its header does not render; the
+    family matrix is one such table."""
+    lines = page.splitlines()
+    tables = 0
+    for i, line in enumerate(lines):
+        if not line.startswith("|---"):
+            continue
+        tables += 1
+        width = line.count("---")
+        assert _cells(lines[i - 1]) == width, lines[i - 1][:80]
+        for row in lines[i + 1 :]:
+            if not row.startswith("|"):
+                break
+            assert _cells(row) == width, row[:80]
+    assert tables
+
+
+def test_the_family_matrix_has_a_row_and_a_column_per_family(built, page):
+    order = built["family_matrix"]["families"]
+    section = page.split("\n## Family matrix\n")[1].split("\n## ")[0]
+    rows = [line for line in section.splitlines() if re.match(r"^\| \d+ \| `", line)]
+    assert [_cells(row) for row in rows] == [len(order) + 2] * len(order)
+
+
+def test_the_page_s_links_point_at_its_headings(page):
+    anchors = {
+        catalog._anchor(line.lstrip("#").strip())
+        for line in page.splitlines()
+        if line.startswith("#")
+    }
+    targets = re.findall(r"\]\(#([^)]+)\)", page)
+    assert targets and set(targets) <= anchors
+
+
+#: The longest the page may grow, in lines.
+_MOST_LINES = 4000
+
+
+def test_the_page_stays_readable_in_length(page):
+    assert len(page.splitlines()) < _MOST_LINES
