@@ -22,12 +22,13 @@
   "natural": {
     "entry_types": null,
     "translation": false,
+    "_comment_dialect": "dialect runs on the translation model and is gated by the translation switch like the translation family: with translation true it is auto-added to this pool, so it is not named below; with translation false it is out.",
     "layers": {"deny": []},
     "families": {
       "allow": ["typos", "casual_writing", "noise", "neutral_container",
                 "answer_language", "answer_format", "asking", "indirect",
                 "smalltalk_prefix", "smalltalk_suffix", "benign_role",
-                "transliteration", "code_switching", "romanization", "dialect"],
+                "transliteration", "code_switching", "romanization"],
       "deny": []
     },
     "techniques": {

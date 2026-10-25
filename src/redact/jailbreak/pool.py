@@ -109,10 +109,11 @@ def technique_pool(resolved: dict) -> list[Callable]:
     ``families.allow`` or named in ``techniques.allow``; less those of a
     family in ``families.deny`` and those named in ``techniques.deny``; with
     ``pure_only``, less every technique that calls a model or needs benign
-    data. The translation family is out when ``translation`` is false,
-    whatever the lists say. When it is true, the family is in, though
-    denied as a family, and with an allow list it is in whole unless
-    ``techniques.allow`` names some of its techniques: then those only.
+    data. The translation and dialect families are out when ``translation``
+    is false, whatever the lists say (both run on the translation model).
+    When it is true, each is in, though denied as a family, and with an allow
+    list it is in whole unless ``techniques.allow`` names some of its own
+    techniques: then those only.
     Then only the techniques whose spec ``kinds`` hold the kind
     (:func:`kind_of`) stay: the natural kind draws only what the spec marks
     natural, and the attacks every technique but those of the families the
@@ -128,8 +129,16 @@ def technique_pool(resolved: dict) -> list[Callable]:
             if getattr(fn, "layer", None) not in denied_layers]
     if families["allow"] is not None or techniques["allow"] is not None:
         allowed = set(families["allow"] or ())
+        # Translation and dialect run on the translation model and are gated by
+        # the switch, not the lists. With the switch on and no specific
+        # translation language named, the whole translation family joins the
+        # allow list, and the dialect family with it unless specific dialects
+        # are named; a kind that names its own languages (the eval type) gets
+        # only those and no dialect.
         if resolved["translation"] and not named & languages():
             allowed.add(TRANSLATION)
+            if not named & dialects():
+                allowed.add(DIALECT)
         pool = [fn for fn in pool if fn.__name__ in named
                 or allowed.intersection(getattr(fn, "families", ()))]
     # The switch, not the lists, decides the translation family; it also gates
@@ -180,6 +189,15 @@ def languages() -> set[str]:
     """The names of the translation family's techniques."""
     return {fn.__name__ for fn in all_techniques()
             if TRANSLATION in getattr(fn, "families", ())}
+
+
+def dialects() -> set[str]:
+    """The names of the dialect family's techniques. Like the translation
+    family, the dialect family runs on the translation model, so a kind's
+    ``translation`` switch gates it too (:func:`uses_translation`,
+    ``_switch_off_translation``)."""
+    return {fn.__name__ for fn in all_techniques()
+            if DIALECT in getattr(fn, "families", ())}
 
 
 def registry(techniques: list[Callable]) -> dict[str, Callable]:

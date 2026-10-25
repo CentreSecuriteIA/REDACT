@@ -541,6 +541,14 @@ _DROPPED = "redact.jailbreak.augmentation"
      "['to_thai', 'family_weights.translation']"),
     ({"adversarial": {"translation": False, "family_weights": {"translation": 2}}},
      "['family_weights.translation']"),
+    # The dialect family is gated by the same switch (K3).
+    ({"adversarial": {"translation": False, "families": {"allow": ["encode"]},
+                      "techniques": {"allow": ["to_dialect_mexican_spanish",
+                                               "to_base64"]}}},
+     "['to_dialect_mexican_spanish']"),
+    ({"adversarial": {"translation": False,
+                      "family_weights": {"dialect": 3}}},
+     "['family_weights.dialect']"),
 ])
 def test_translation_an_allow_list_names_with_the_switch_off_is_dropped_with_a_warning(
         given, named, caplog):
@@ -548,10 +556,11 @@ def test_translation_an_allow_list_names_with_the_switch_off_is_dropped_with_a_w
     with caplog.at_level("WARNING", logger=_DROPPED):
         resolved = resolve(given, kind)
     assert [r.getMessage() for r in caplog.records] == [
-        f"augmentations.{kind}.translation is false, so the translation it names "
-        f"is left out: {named}."]
+        f"augmentations.{kind}.translation is false, so the translation or "
+        f"dialect it names is left out: {named}."]
     assert not _translates({kind: resolved}, kind)
     assert "translation" not in resolved["family_weights"]
+    assert "dialect" not in resolved["family_weights"]
     assert "translation" not in (resolved["families"]["allow"] or ())
     # Resolved again, it names none, and says nothing.
     caplog.clear()
@@ -573,9 +582,22 @@ def test_allowing_only_translation_with_the_switch_off_raises():
                                  "families": {"allow": ["translation"]}}},
                 "adversarial")
     assert str(raised.value) == (
-        "augmentations.adversarial allows only translation (['translation']) and "
-        "augmentations.adversarial.translation is false; set \"translation\": "
-        "true, or allow something else.")
+        "augmentations.adversarial allows only translation or dialect "
+        "(['translation']) and augmentations.adversarial.translation is false; "
+        "set \"translation\": true, or allow something else.")
+
+
+def test_allowing_only_dialect_with_the_switch_off_raises():
+    # K3: the dialect family is gated like translation, so an allow list of
+    # only dialect with the switch off raises, not an empty pool.
+    with pytest.raises(ValueError) as raised:
+        resolve({"adversarial": {"translation": False,
+                                 "families": {"allow": ["dialect"]}}},
+                "adversarial")
+    assert str(raised.value) == (
+        "augmentations.adversarial allows only translation or dialect "
+        "(['dialect']) and augmentations.adversarial.translation is false; "
+        "set \"translation\": true, or allow something else.")
 
 
 def test_a_layer_the_kind_denies_drops_what_its_allow_lists_name_of_it(caplog):

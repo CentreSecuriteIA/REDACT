@@ -416,7 +416,9 @@ Natural only:
 The packaged natural kind allows the families `typos`, `casual_writing`,
 `noise`, `neutral_container`, `answer_language`, `answer_format`, `asking`,
 `indirect`, `smalltalk_prefix`, `smalltalk_suffix`, `benign_role` and, since
-spec 1.4, `transliteration`, `code_switching`, `romanization` and `dialect`;
+spec 1.4, `transliteration`, `code_switching` and `romanization` (the
+`dialect` family is not named: like the translation family it runs on the
+translation model and the translation switch auto-adds it when on);
 allows the techniques `to_leetspeak_basic`, `to_adversarial_suffix_punctuation`,
 `to_adversarial_suffix_emoji`; and denies `to_refusal_then_comply`,
 `to_apology_prevention`, `to_prefix_injection`. The spec's `kinds` narrow
@@ -501,18 +503,25 @@ list changes this; a
 `techniques.allow` that names some languages narrows the family to those
 (the eval type's eight low-resource languages).
 
-With the switch `false`, the translation an allow list names (the family or
-its techniques) and a `family_weights` entry for it are left out of the
-resolved kind, with a WARNING naming them:
-`augmentations.<kind>.translation is false, so the translation it names is
-left out: [...]`. So `"adversarial": {"translation": false}` over the eval
-type is a one-key override: its pool keeps the other 28 techniques. An allow
-list left empty by this is dropped when the other list still names
-something; when nothing but translation was allowed, the kind raises.
+With the switch `false`, the translation *and the dialect* an allow list names
+(the family or its techniques) and a `family_weights` entry for either are
+left out of the resolved kind, with a WARNING naming them:
+`augmentations.<kind>.translation is false, so the translation or dialect it
+names is left out: [...]`. So `"adversarial": {"translation": false}` over the
+eval type is a one-key override: its pool keeps the other 28 techniques. An
+allow list left empty by this is dropped when the other list still names
+something; when nothing but translation or dialect was allowed, the kind
+raises (`families.allow: ["dialect"]` with the switch off raises, it does not
+resolve to an empty pool).
 
 The switch also gates the `dialect` family (spec 1.4), which runs on the
-same model: `false` removes it, but `true` does not put it in an allow list,
-so a kind with one names `dialect` itself (the packaged natural kind does).
+same model and is handled exactly like the translation family: with the
+switch on, an allow-list kind that names no specific translation language
+gets the whole translation family and the dialect family with it (so the
+packaged natural kind draws the six dialects when the switch is on without
+naming `dialect`); `false` removes it, and a `dialect` an allow list or
+`family_weights` names with the switch off is left out with the same WARNING,
+raising only if nothing else was allowed.
 The packaged attacks have it `true`, drawing all 24 languages and the six
 dialects, and the natural kind `false`; the eval type narrows its attacks to the eight
 low-resource languages. They run on the `translation` role's default,

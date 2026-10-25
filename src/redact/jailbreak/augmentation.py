@@ -28,7 +28,14 @@ from redact.config_overlay import config_file
 from redact.types import ALL_ENTRY_TYPES
 
 from .plan import UNIT_HEADROOM, default_escalation_schedule
-from .pool import TRANSLATION, all_techniques, languages, technique_pool
+from .pool import (
+    DIALECT,
+    TRANSLATION,
+    all_techniques,
+    dialects,
+    languages,
+    technique_pool,
+)
 from .technique import DEFAULT_KINDS, KINDS, family_kinds, load_spec
 
 logger = logging.getLogger(__name__)
@@ -682,15 +689,16 @@ def _check_denied_layers(where: str, resolved: dict) -> None:
 
 def _switch_off_translation(where: str, resolved: dict) -> None:
     """With ``translation`` false, leave out of ``resolved`` the translation
-    family and techniques its allow lists name and its ``family_weights``
-    entry, and log a WARNING naming them.
+    and dialect families (both run on the translation model) and the
+    techniques its allow lists name and their ``family_weights`` entries, and
+    log a WARNING naming them.
 
     An allow list left empty becomes ``None`` beside the other, which still
     names something, so the pool draws what that one names.
 
     Raises:
         ValueError: ``translation`` is not a bool, or the allow lists name
-            nothing but translation.
+            nothing but translation and dialect.
     """
     if type(resolved["translation"]) is not bool:
         raise ValueError(
@@ -698,27 +706,30 @@ def _switch_off_translation(where: str, resolved: dict) -> None:
             f"{resolved['translation']!r}.")
     if resolved["translation"]:
         return
-    translation = {TRANSLATION, *languages()}
+    gated_families = (TRANSLATION, DIALECT)
+    gated = {TRANSLATION, DIALECT, *languages(), *dialects()}
     lists = [resolved["families"], resolved["techniques"]]
     named = [name for given in lists for name in given["allow"] or ()
-             if name in translation]
-    weighted = TRANSLATION in resolved["family_weights"]
+             if name in gated]
+    weighted = [f"family_weights.{family}" for family in gated_families
+                if family in resolved["family_weights"]]
     if not named and not weighted:
         return
     for given in lists:
         if given["allow"] is not None:
             given["allow"] = [name for name in given["allow"]
-                              if name not in translation] or None
+                              if name not in gated] or None
     if named and all(given["allow"] is None for given in lists):
         raise ValueError(
-            f"{where} allows only translation ({named}) and {where}.translation "
-            'is false; set "translation": true, or allow something else.')
+            f"{where} allows only translation or dialect ({named}) and "
+            f'{where}.translation is false; set "translation": true, or allow '
+            "something else.")
     resolved["family_weights"] = {
         family: weight for family, weight in resolved["family_weights"].items()
-        if family != TRANSLATION}
+        if family not in gated_families}
     logger.warning(
-        "%s.translation is false, so the translation it names is left out: %s.",
-        where, named + ["family_weights.translation"] * weighted)
+        "%s.translation is false, so the translation or dialect it names is "
+        "left out: %s.", where, named + weighted)
 
 
 def _check_count(where: str, key: str, value, *, least: int) -> None:

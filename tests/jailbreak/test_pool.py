@@ -561,8 +561,10 @@ def test_uses_translation():
         _kind(translation=True, layers={"deny": ["obfuscation"]})))
     # A dialect runs on the translation model too, and the switch gates it.
     assert uses_translation(technique_pool(_kind(families={"allow": ["dialect"]})))
+    # With the switch off, a dialect named beside something else is dropped, so
+    # the resolved pool needs no translation model.
     assert not uses_translation(technique_pool(
-        _kind(translation=False, families={"allow": ["dialect"]})))
+        _kind(translation=False, families={"allow": ["dialect", "encode"]})))
 
 
 def test_the_registered_techniques_match_the_spec():
