@@ -1,5 +1,8 @@
 """Tests for the persona techniques."""
 
+import json
+import string
+
 import pytest
 
 import redact.jailbreak.hacking.personas as P
@@ -12,6 +15,7 @@ from redact.jailbreak.hacking.personas import (
 )
 from redact.jailbreak.technique import DISCARDED
 from redact.llm_pipeline import CHECK_TEMPERATURE, drive_sync
+from redact.llms.prompting import build_messages, load_prompt
 
 _SCENE = "Notes\n---\nA quiet lab at night\n---"
 _PERSONA = (
@@ -210,3 +214,108 @@ def test_a_given_scenario_skips_the_scenario_request():
     assert result == ("jailbreak", "category=actor_persona")
     assert len(requests) == 1
     assert requests[0].model == "m"
+
+
+# --- the persona is the one who answers --------------------------------------
+#
+# The scenario and the construction prompts get the persona's name, so the
+# target is asked to play the persona (the answerer), not to be the person
+# who asks. These tests check which prompt is read and which placeholders it
+# is given, and where the name stands; they assert no prompt wording.
+
+_PERSONA_PROMPTS = {
+    "persona_invention": {"prompt"},
+    "persona_scenario_generation": {"prompt", "persona_name", "persona_description"},
+    "persona_construction": {
+        "prompt", "persona_name", "persona_description", "scenario"},
+}
+
+
+def _fields(config: dict) -> list[str]:
+    """Each placeholder in a prompt's system prompt and template, repeats kept."""
+    return [name
+            for part in (config["system_prompt"], config["template"])
+            for _, name, _, _ in string.Formatter().parse(part) if name]
+
+
+@pytest.mark.parametrize(("name", "expected"), _PERSONA_PROMPTS.items())
+def test_a_persona_prompt_holds_the_placeholders_the_code_fills_and_no_other(
+        name, expected):
+    config = load_prompt("jailbreak", name)
+    assert set(_fields(config)) == expected
+    assert set(config["seed_fields"]) == expected
+
+
+@pytest.mark.parametrize(
+    "name", ["persona_scenario_generation", "persona_construction"])
+def test_the_persona_prompts_use_the_persona_name_more_than_once(name):
+    """Once to say who the persona is and once at least for what it does: the
+    answerer's part. A prompt that names it once (or never) leaves the part
+    to the model."""
+    fields = _fields(load_prompt("jailbreak", name))
+    assert fields.count("persona_name") > 1
+
+
+def test_the_construction_holds_the_prompt_the_scene_and_the_description():
+    fields = _fields(load_prompt("jailbreak", "persona_construction"))
+    for placeholder in ("persona_description", "scenario", "prompt"):
+        assert placeholder in fields
+
+
+def test_the_rendered_construction_holds_each_value_and_the_name_more_than_once():
+    values = dict(prompt="PROBE-REQUEST", persona_name="PROBE-NAME",
+                  persona_description="PROBE-DESCRIPTION", scenario="PROBE-SCENE")
+    text = "\n".join(
+        m["content"] for m in build_messages(
+            load_prompt("jailbreak", "persona_construction"), **values))
+    for value in values.values():
+        assert value in text
+    assert text.count("PROBE-NAME") > 1
+    assert "{" not in text
+
+
+@pytest.mark.parametrize("key", P._NAMED_PERSONAS)
+def test_a_named_persona_is_built_from_the_persona_construction_prompt(key):
+    expected = build_messages(
+        load_prompt("jailbreak", "persona_construction"),
+        prompt="harmful prompt", persona_name=P._PERSONAS[key]["display_name"],
+        persona_description=P._PERSONAS[key]["description"],
+        scenario="A quiet lab at night")
+    _, requests = _drive(_named()[key], [_SCENE, "jailbreak"])
+    assert requests[1].messages == expected
+
+
+def test_an_invented_persona_gives_the_construction_its_invented_name():
+    _, requests = _drive(to_invented_persona, [_PERSONA, _SCENE, "jailbreak"])
+    assert requests[2].messages == build_messages(
+        load_prompt("jailbreak", "persona_construction"),
+        prompt="harmful prompt", persona_name="Maple the Baker",
+        persona_description="A cheerful baker who talks about bread.",
+        scenario="A quiet lab at night")
+
+
+def test_a_given_scenario_still_gives_the_construction_the_persona_name():
+    _, requests = _drive(_named()["actor"], ["jailbreak"], scenario="a stage")
+    assert P._PERSONAS["actor"]["display_name"] in str(requests[0].messages)
+
+
+def _overlay(root, name: str, template: str):
+    folder = root / "jailbreak" / name
+    folder.mkdir(parents=True)
+    (folder / "template.json").write_text(
+        json.dumps({"system_prompt": "", "template": template}), encoding="utf-8")
+
+
+def test_the_persona_construction_is_overlaid_apart_from_the_shared_one(tmp_path):
+    """A prompt_dir's ``persona_construction`` reaches the persona techniques,
+    and its ``jailbreak_construction`` (the cognitive techniques') does not."""
+    _overlay(tmp_path, "persona_construction",
+             "MARK-PERSONA {persona_name}|{persona_description}|{prompt}|{scenario}")
+    _overlay(tmp_path, "jailbreak_construction",
+             "MARK-SHARED {jailbreak_type_name}|{jailbreak_type_description}|"
+             "{prompt}|{scenario}")
+    description = P._PERSONAS["alien"]["description"]
+    _, requests = _drive(_named()["alien"], [_SCENE, "jailbreak"], prompt_dir=tmp_path)
+    assert requests[1].messages[-1]["content"] == (
+        f"MARK-PERSONA Alien|{description}|harmful prompt|A quiet lab at night")
+    assert "MARK-SHARED" not in str(requests[1].messages)

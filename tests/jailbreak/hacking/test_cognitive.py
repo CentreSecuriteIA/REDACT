@@ -1,8 +1,11 @@
 """Tests for cognitive/psychological hacking techniques."""
 
+import json
+
 import pytest
 
 from redact.jailbreak.hacking.cognitive import (
+    _TECHNIQUES,
     MALFORMED_SCENARIO,
     _extract_scenario,
     get_cognitive_functions,
@@ -88,6 +91,36 @@ class TestConstruction:
     def test_each_technique_names_its_category(self, technique):
         (_, info), _ = _drive(technique, ["output"], scenario="scenario")
         assert info == f"category={technique.__name__.removeprefix('to_')}"
+
+
+class TestConstructionPrompt:
+    """The cognitive techniques keep the shared construction prompt, with the
+    category's name and description; the persona prompts are the personas'."""
+
+    @staticmethod
+    def _overlay(root, name: str, template: str) -> None:
+        folder = root / "jailbreak" / name
+        folder.mkdir(parents=True)
+        (folder / "template.json").write_text(
+            json.dumps({"system_prompt": "", "template": template}), encoding="utf-8")
+
+    @pytest.mark.parametrize("technique", get_cognitive_functions())
+    def test_each_technique_reads_the_shared_construction_prompt(
+            self, technique, tmp_path):
+        self._overlay(
+            tmp_path, "jailbreak_construction",
+            "MARK-SHARED {jailbreak_type_name}|{jailbreak_type_description}|"
+            "{prompt}|{scenario}")
+        self._overlay(
+            tmp_path, "persona_construction",
+            "MARK-PERSONA {persona_name}|{persona_description}|{prompt}|{scenario}")
+        entry = _TECHNIQUES[technique.__name__.removeprefix("to_")]
+        _, requests = _drive(
+            technique, ["output"], scenario="the scene", prompt_dir=tmp_path)
+        assert requests[0].messages[-1]["content"] == (
+            f"MARK-SHARED {entry['display_name']}|{entry['description']}|"
+            "harmful prompt|the scene")
+        assert "MARK-PERSONA" not in str(requests[0].messages)
 
 
 def test_an_empty_construction_is_rejected_naming_the_technique():

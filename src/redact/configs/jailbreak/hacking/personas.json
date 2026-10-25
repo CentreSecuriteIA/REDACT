@@ -1,6 +1,6 @@
 {
   "name": "personas",
-  "description": "Named persona archetypes for persona-roleplay jailbreak generation. Each entry provides a display name and a description that is injected into both the persona_scenario_generation and jailbreak_construction prompt templates.",
+  "description": "Named persona archetypes for persona-roleplay jailbreak generation. Each entry provides a display name and a description that is injected into both the persona_scenario_generation and persona_construction prompt templates.",
   "categories": {
     "psychopath": {
       "display_name": "Psychopath",

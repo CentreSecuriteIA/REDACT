@@ -6,6 +6,11 @@
 its scene is asked again, then discarded, and a scenario the check rejects is
 made again once, then discarded, as for the cognitive techniques.
 
+The persona is the one who answers: a user puts the request to it
+(``persona_scenario_generation``), and the target is asked to play it
+(``persona_construction``, which gets the persona's name and description; the
+cognitive techniques keep ``jailbreak_construction``).
+
 An invented persona has a first step: the model is asked for a name and a
 description for the prompt (``persona_invention``), as ``Name: ...`` then
 ``Description: ...``, and asked again, up to 3 replies, for any other form
@@ -24,10 +29,7 @@ from redact.jailbreak.technique import DISCARDED, TechniqueGen
 from redact.llm_pipeline import LLMRequest, extracted
 from redact.llms.prompting import build_messages, load_prompt
 
-from .cognitive import (
-    _construction_messages,
-    _scenario_gen,
-)
+from .cognitive import _scenario_gen
 
 _PERSONAS: dict[str, dict] = load_templates("hacking", "personas.json")["categories"]
 
@@ -70,6 +72,20 @@ def _persona_scenario_messages(
     )
 
 
+def _persona_construction_messages(
+    prompt: str, persona_name: str, persona_description: str, scenario: str,
+    prompt_dir=None,
+) -> list[dict]:
+    config = load_prompt("jailbreak", "persona_construction", prompt_dir)
+    return build_messages(
+        config,
+        prompt=prompt,
+        persona_name=persona_name,
+        persona_description=persona_description,
+        scenario=scenario,
+    )
+
+
 def _persona_of(reply: str) -> list[str]:
     """``[name, description]`` of a reply that is a ``Name:`` line, then a
     ``Description:``, and nothing before, between or after them but blank
@@ -100,19 +116,20 @@ def _persona_gen(
     scenario and its check), then the construction request; return
     ``(jailbreak, info)``.
 
-    The scenario prompt names the persona by ``shown_as``, else by
-    :func:`display_name`, the info by its key. A scenario that no attempt
-    parses or the check rejects every time returns the prompt with the discard
-    info (:data:`~redact.jailbreak.hacking.cognitive.MALFORMED_SCENARIO`,
+    The scenario and construction prompts name the persona by ``shown_as``,
+    else by :func:`display_name`, the info by its key. A scenario that no
+    attempt parses or the check rejects every time returns the prompt with the
+    discard info
+    (:data:`~redact.jailbreak.hacking.cognitive.MALFORMED_SCENARIO`,
     ``scenario check failed``). ``record_scenario`` is called with the scene
     the construction is built on, the one given or the one the check accepted.
     """
+    shown = shown_as or display_name(persona_name)
     if scenario is None:
         scenario, discard = yield from _scenario_gen(
             gen_model,
             _persona_scenario_messages(
-                prompt, shown_as or display_name(persona_name), persona_description,
-                prompt_dir),
+                prompt, shown, persona_description, prompt_dir),
             original=prompt, check_model=check_model,
             check_attempts=check_attempts, prompt_dir=prompt_dir)
         if scenario is None:
@@ -121,8 +138,8 @@ def _persona_gen(
         record_scenario(scenario)
     jailbreak = yield LLMRequest(
         gen_model,
-        _construction_messages(
-            prompt, "Persona/Roleplay", persona_description, scenario, prompt_dir),
+        _persona_construction_messages(
+            prompt, shown, persona_description, scenario, prompt_dir),
     )
     return jailbreak, f"category={persona_name}_persona"
 
