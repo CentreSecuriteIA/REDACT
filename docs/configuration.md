@@ -682,9 +682,9 @@ the default) and in `params["jailbreaks"]`.
 
 ### Release notes
 
-**Upgrading from the previous release (spec version 1.0, now 1.3).** The
-jailbreak library grew from 151 techniques in 23 families to 244 active ones
-(251 registered, 7 retired) in 36 families and five layers. What that asks of
+**Upgrading from the previous release (spec version 1.0, now 1.4).** The
+jailbreak library grew from 151 techniques in 23 families to 256 active ones
+(263 registered, 7 retired) in 36 families and five layers. What that asks of
 a run you already have, and what you will see; each point has its note below.
 
 - **One re-plan is planned: the adversarial kind.** The packaged attacks now
@@ -733,8 +733,9 @@ a run you already have, and what you will see; each point has its note below.
   rules are new, the layers are dealt with a jitter per unit, the request
   obfuscation is decided only for a unit that drew a request, and its
   families are counted apart from the obfuscation layer's, so the attacks
-  draw every technique of their pool. The default attack pool is 214
-  techniques in 29 families (142 in 22 before; 178 in 24 at spec 1.2). The
+  draw every technique of their pool. The default attack pool is 226
+  techniques in 29 families (142 in 22 before; 178 in 24 at spec 1.2, 214
+  at spec 1.3). The
   `eval` type's pool is unchanged, at 36 techniques in 10 families, but its
   draws moved: the ASCII-art cap changes the font `to_ascii_art` draws for
   texts of about 40 characters or more, and the rules of the eval release
@@ -978,6 +979,20 @@ and dual-use benign variations such a plan made with a technique the natural
 kind no longer draws, with one WARNING that counts them. A `config_dir` copy
 of `augmentations.json` whose natural `families.allow` names one of these
 families raises ([overlay rules](#overlay-rules)).
+
+**Release note: the techniques spec 1.4 adds.** Twelve pure persona
+templates join `persona_template` (23 frames now, each drawing one of the
+same six mechanics): three each of emotional and family appeals, legitimate
+experts and authorities, and simulated systems and games, and one each built
+around a point and penalty system, a persona-tagged opening and a
+stay-in-character reset. They are attack-only, so the default attack pool
+goes from 214 to 226 techniques (29 families) and the natural pool (72) and
+the `eval` type's pool (36) do not change. An adversarial plan kept from
+spec 1.3 resumes with the growth WARNING naming the twelve; a fresh one
+draws differently, since the family is larger. The same release adds
+`obfuscation/suffix_strings.json`, 24 published adversarial suffixes with
+their source and the model each was optimized against, as data: no
+technique reads it yet.
 
 **Release note: the techniques spec 1.3 adds.** Twenty-four pure template
 techniques, attack-only but the urgent ask, whose text the maintainers wrote
@@ -1330,12 +1345,12 @@ application costs 2 to 4 calls; a distractor costs 1 to 3 (a reply with no
 text is asked for again), and no check reads it. They add no model role.
 
 The layer is off, so a run that does not allow it changes nowhere: the
-default attack pool is still 214 techniques in 29 families, the natural pool
+default attack pool is still 226 techniques in 29 families, the natural pool
 the 72 (every rewrite technique says `["adversarial"]`), and the `eval`
 type's pool and draws are unchanged (36 techniques; its allow lists name no rewrite
 family, so allowing the layer there adds nothing to its pool or its rounds
 until the families are allowed too). A kind that allows the layer draws them: the packaged
-adversarial kind's pool is then 230 techniques in 32 families, its rounds say
+adversarial kind's pool is then 242 techniques in 32 families, its rounds say
 `include_rewrite: true` (an adversarial plan kept from a section that allowed
 the layer before its pool held a technique raises on resume naming `rounds`), a
 budget round deals the layer at `layer_rates.rewrite` (the spec's 0, with a

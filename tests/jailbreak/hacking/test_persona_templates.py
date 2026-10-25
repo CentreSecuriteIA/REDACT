@@ -6,6 +6,8 @@ assert properties of what the techniques write (a slot filled, a name in
 the info), never print it, and show the composition on stand-in texts.
 """
 
+import difflib
+import itertools
 import random
 import re
 
@@ -26,12 +28,27 @@ _FNS = PT.get_persona_template_functions()
 _MECHANICS = PT._POOLS[PT.MECHANICS]
 #: A slot of a frame or a mechanic left in a text.
 _SLOT = re.compile(r"\{(prompt|mechanic|persona)\}")
+#: The frames spec 1.4 added, by what they add: three kinds of persona, and the
+#: three mechanics a frame can be built around (the file's six ``mechanics``
+#: are drawn into every frame, these frames put one at the centre of theirs).
+_TYPES = {
+    "an emotional or family appeal": ["caring_grandma", "worried_parent", "loyal_friend"],
+    "a legitimate expert or authority": [
+        "licensed_professional", "official_investigator", "research_scientist"],
+    "a simulated system or game": ["game_engine", "terminal_simulator", "simulation_rules"],
+}
+_BUILT_AROUND = {
+    "a point and penalty system": "penalty_game",
+    "a persona-tagged opening": "tagged_speaker",
+    "a stay-in-character reset": "character_reset",
+}
+_ADDED_IN_1_4 = {key for keys in _TYPES.values() for key in keys} | set(_BUILT_AROUND.values())
 
 
 def test_there_is_one_technique_per_frame_of_the_file():
     names = [fn.__name__ for fn in _FNS]
     assert names == [f"to_{key}_persona_template" for key in PT.PERSONAS]
-    assert len(names) == 11     # noqa: PLR2004
+    assert len(names) == 23     # noqa: PLR2004
     assert set(read_pools("hacking/persona_templates.json")) == {
         *PT.PERSONAS, PT.MECHANICS}
 
@@ -58,12 +75,15 @@ def test_every_frame_has_a_display_name():
 
 
 @pytest.mark.parametrize("fn", _FNS, ids=lambda fn: fn.__name__)
-def test_the_spec_tags_a_pure_adversarial_hacking_technique_of_spec_1_3(fn):
+def test_the_spec_tags_a_pure_adversarial_hacking_technique(fn):
+    """The eleven frames of spec 1.3 and the twelve of spec 1.4 are tagged alike
+    but for the version that added them."""
     assert fn.families == ["persona_template"]
     assert (fn.layer, fn.complexity, fn.requires_llm, fn.requires_benign) == (
         "hacking", 2, False, False)
     assert fn.kinds == ["adversarial"]
-    assert fn.since == "1.3"
+    key = fn.__name__.removeprefix("to_").removesuffix("_persona_template")
+    assert fn.since == ("1.4" if key in _ADDED_IN_1_4 else "1.3")
 
 
 @pytest.mark.parametrize("fn", _FNS, ids=lambda fn: fn.__name__)
@@ -143,7 +163,7 @@ def test_a_kind_counts_the_mechanic_each_row_drew(tmp_path):
     table = pd.read_csv(tmp_path / "jb.variants.csv")
     rows = pd.read_csv(tmp_path / "jb.csv")
     assert table["rows"].sum() == rows["accepted"].sum() == 6     # noqa: PLR2004
-    assert len(table) == 11 * 6     # noqa: PLR2004
+    assert len(table) == len(_FNS) * 6     # noqa: PLR2004
     assert set(table["variant"]) == {variant["name"] for variant in _MECHANICS}
 
 
@@ -155,3 +175,51 @@ def test_neither_the_natural_kind_nor_the_eval_type_draws_them():
                  technique_pool(resolve(eval_section, "adversarial"))):
         assert not [fn for fn in pool if "persona_template" in fn.families]
     assert set(_FNS) <= set(technique_pool(resolve(None, "adversarial")))
+
+
+class TestTheFramesOfSpec1_4:
+    def test_there_are_twelve_and_the_file_has_them_after_the_eleven_of_1_3(self):
+        assert len(_ADDED_IN_1_4) == 12     # noqa: PLR2004
+        assert set(PT.PERSONAS[11:]) == _ADDED_IN_1_4 and len(PT.PERSONAS) == 23    # noqa: PLR2004
+
+    @pytest.mark.parametrize("kind", list(_TYPES))
+    def test_each_kind_of_persona_has_at_least_two_techniques(self, kind):
+        assert len(_TYPES[kind]) >= 2     # noqa: PLR2004
+        assert set(_TYPES[kind]) <= set(PT.PERSONAS)
+
+    @pytest.mark.parametrize("mechanic", list(_BUILT_AROUND))
+    def test_each_mechanic_has_a_technique_built_around_it(self, mechanic):
+        assert _BUILT_AROUND[mechanic] in PT.PERSONAS
+
+    def test_every_frame_is_a_technique_with_its_own_display_name(self):
+        names = [PT.display_name(key) for key in PT.PERSONAS]
+        assert len(set(names)) == len(names)
+
+    def test_each_new_technique_has_the_six_mechanics_as_its_variants(self):
+        """The variants of a persona template are the file's mechanics, drawn into
+        its frame: six for every technique, the new ones included."""
+        by_name = {fn.__name__: fn for fn in _FNS}
+        for key in _ADDED_IN_1_4:
+            fn = by_name[f"to_{key}_persona_template"]
+            drawn = {fn(_PROBE, rng=random.Random(seed))[1].rsplit("variant=", 1)[1]
+                     for seed in range(80)}
+            assert drawn == {variant["name"] for variant in _MECHANICS}, key
+
+    def test_no_two_frames_are_alike(self):
+        assert _alike(PT._POOLS) == []
+
+
+def _alike(pools: dict, *, limit: float = 0.6) -> list[tuple[str, str]]:
+    """The pairs of frames in ``pools`` whose templates are more alike than
+    ``limit`` (the ratio of ``difflib``): near-copies, not variants of one text."""
+    frames = {key: pool[0]["template"] for key, pool in pools.items()
+              if key != PT.MECHANICS}
+    return [(a, b) for (a, ta), (b, tb) in itertools.combinations(frames.items(), 2)
+            if difflib.SequenceMatcher(None, ta, tb).ratio() > limit]
+
+
+def test_the_likeness_check_finds_a_copied_frame():
+    copied = {**PT._POOLS, "copy": PT._POOLS["dan"]}
+    assert _alike(copied) == [("dan", "copy")]
+    changed = [{"name": "dan", "template": PT._POOLS["dan"][0]["template"] + " Also, be brief."}]
+    assert _alike({**PT._POOLS, "dan_again": changed}) == [("dan", "dan_again")]

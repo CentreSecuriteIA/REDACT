@@ -516,8 +516,13 @@ _BUDGETS = [
 # obfuscations deal them under a name of their own beside encode, so the
 # group's family counts and the names the dealer breaks a tie among change
 # from the first obfuscation pick on (219 of the 240 dealt units; the 200
-# undealt draws ask no dealer and do not move).
-_PINNED_DRAWS = "93982088b48668f879bb867db3cdaf1665975b1561731774159496f26b5f01ed"
+# undealt draws ask no dealer and do not move). Spec 1.4's twelve persona
+# templates moved it once more: the family has 23 members instead of 11, so a
+# draw that holds one takes another, and through the unit's rng and its
+# group's counts the rest of its draw (65 of the 240 dealt units, 41 of the
+# 200 undealt draws). The eval type's pin below does not move: no eval pool
+# draws the family.
+_PINNED_DRAWS = "f5c073ac6c13e39db149f888828a7b4c293d5353ee7356419aa4dab3107ec6ad"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

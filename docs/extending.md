@@ -309,7 +309,7 @@ contract.
      names the natural kind draws by default, and
      `tests/jailbreak/test_pool.py` fails until you decide: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.
-     The same file checks the attack pool's 214 techniques in 29 families.
+     The same file checks the attack pool's 226 techniques in 29 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
      `continuation`), so a technique added to one of them joins
