@@ -34,21 +34,24 @@ spec marks natural (72 techniques, the low and medium noise, the neutral
 containers, six more answer languages, small talk and the benign roles
 among them since spec 1.2): one variation of the training run is a no-op the
 natural kind rejects, ``to_doubled_punctuation`` on a text with no full stop
-(31 of 32 jailbreak rows accepted). With the 66 techniques before small talk
+(21 of 22 jailbreak rows accepted). With the 66 techniques before small talk
 and the benign roles there were two, ``to_lowercase`` on a text in lower
 case already the other; the three request families dealt with the others
 gave that input ``to_code_comment``, and a dual-use benign input a benign
 role, ``to_benign_role_task_assistant``, which no harmful input of the run
-draws. Before the plan drew a technique only for the inputs it applies to,
-the two no-ops were ``to_abbreviations`` on a text with none of its words
-and ``to_stripped_accents`` on a text with no accent.
+draws. That input was one of the five an earlier call wrote in another
+style, which the run no longer holds (below), so no variation of the run is
+``to_code_comment`` now. Before the plan drew a technique only for the
+inputs it applies to, the two no-ops were ``to_abbreviations`` on a text
+with none of its words and ``to_stripped_accents`` on a text with no accent.
 The training type answers each input twice
-(``outputs.outputs_per_input`` 2): 32 responses to 16 inputs, 28 accepted
-(the answers to the second samples of ``zq0`` are rejected), and 44
-paraphrases, of 16 inputs and 28 responses, 41 accepted. The build holds 16
-inputs, 16 jailbreaks, 15 variations, 28 responses and 41 paraphrases, and
-leaves nothing out: its count is 116, where it was 86 with one response per
-input and three responses equal to variations.
+(``outputs.outputs_per_input`` 2): 22 responses to 11 inputs, 20 accepted
+(the answers to the second sample of ``zq0`` are rejected), and 31
+paraphrases, of 11 inputs and 20 responses, 28 accepted. The build holds 11
+inputs, 11 jailbreaks, 10 variations, 20 responses and 28 paraphrases, and
+leaves nothing out: its count is 80, where it was 86 with one response per
+input and three responses equal to variations, and 116 with the five inputs
+of another style.
 
 The eval run is not that commit's: its inputs are seeded from a small
 constitution of placeholder entries, as every run's are.
@@ -56,10 +59,14 @@ constitution of placeholder entries, as every run's are.
 The merged inputs file of the training run ends in an ``iteration`` column
 and one column per input generation axis (``length`` to ``focus``), since
 each entry is a unit per sample, each dealt a spec; its other cells are as
-before. The training type deals the inputs' weights log-scaled, and so does
-the earlier call that leaves the other style's inputs, since the folder's
-plan file holds one deal's weights; on these groups of three the deal is the
-one the table's weights gave.
+before. The earlier call makes the inputs of the first two entries in the
+run's own style, and the run resumes them and generates for the other two
+only: the merged file holds the run's 11 inputs, where it held 16 when the
+earlier call wrote its five in another style, which the run's record did not
+count (it said 11) and the build took. The training type deals the inputs'
+weights log-scaled, and so does the earlier call, since a resume deals as
+the folder's plan file says; on these groups of three the deal is the one
+the table's weights gave.
 
 An eval build writes three files of one flat schema, ``eval_inputs.csv``,
 ``eval_outputs.csv`` and ``eval_jailbreaks.csv``, in place of the complete
@@ -972,9 +979,10 @@ _MODELS = {"gen": "gen-model", "check": "check-model", "paraphraser": "para-mode
            "paraphrase_check": "check-model"}
 
 
-def _stub_models(monkeypatch) -> None:
+def _stub_models(monkeypatch) -> dict[tuple[str, str], int]:
     """Stub every model call of a run; a reply depends only on its request,
     and an input's on how many requests of its entry and style came before.
+    Returns those counts, by entry token and style, as the run makes them.
 
     A sample reads ``<style> <ordinal> zqN sample``, the ordinal of the
     entry's unit. A response reads ``<mode> answer to the <sample>
@@ -1024,6 +1032,7 @@ def _stub_models(monkeypatch) -> None:
     monkeypatch.setattr(ModelClient, "create", lambda m: make_client(backends[m], m))
     monkeypatch.setattr("redact.llms.resources.estimate._load_config",
                         lambda _id, **kw: None)
+    return units
 
 
 def _counts(recipe: dict, before=None, params=None) -> dict:
@@ -1075,7 +1084,8 @@ def _constitution_stage(monkeypatch, constitution: pd.DataFrame) -> None:
 
 
 def _training_run(folder: Path, monkeypatch, before=None) -> dict:
-    """A training run after an earlier call left inputs of another style."""
+    """A training run after an earlier call made the inputs of its first two
+    entries, which the run resumes."""
     from redact import generate_inputs
 
     overlay = _overlay(folder)
@@ -1086,19 +1096,23 @@ def _training_run(folder: Path, monkeypatch, before=None) -> dict:
             ("Cyber", "harmful"), ("Cyber", "benign"), ("Fraud", "harmful"),
             ("Fraud", "dual_use_benign")])
     ])
-    _stub_models(monkeypatch)
+    units = _stub_models(monkeypatch)
     _constitution_stage(monkeypatch, constitution)
 
     generate_inputs(
-        data_dir=folder, constitution_df=constitution.iloc[:2], style="short",
+        data_dir=folder, constitution_df=constitution.iloc[:2],
         model="gen-model", check_model="check-model", prompt_dir=overlay,
         axes_weighting="log", verbose=False)
+    made_before = dict(units)
     counts = _counts({
         "dataset_type": "training", "data_dir": str(folder), "prompt_dir": str(overlay),
         "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks",
                    "build"],
         "models": _MODELS, "augmentations": _PURE,
     }, before, params={"paraphrase": {"target": "both"}})   # the opt-in, too
+    # The run generated inputs only for the two entries the earlier call left.
+    assert {token for (token, style), n in units.items()
+            if n > made_before.get((token, style), 0)} == {"zq2", "zq3"}
     merged = "constitution_inputs_merged.csv"
     return {"counts": counts, merged: _files(paths.datasets(folder))[merged]}
 

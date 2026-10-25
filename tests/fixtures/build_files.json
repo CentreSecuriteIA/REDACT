@@ -80,11 +80,6 @@
   "training": {
    "constitution_inputs_merged.csv": [
     ["sample_id", "sample", "category", "subcategory", "entry_type", "turn", "accepted", "rejection_reason", "source", "source_sample_description", "constitution_category", "source_group_tag", "template_style", "iteration", "length", "register", "writer", "framing", "directness", "focus"],
-    ["138ad266812230bf", "short first zq0 sample", "Cyber", "Sub", "harmful", "0", "True", "", "constitution", "what zq0 is about", "", "", "short", "0", "long", "formal", "parent", "opinion_or_validation", "euphemistic", "single"],
-    ["ef12fef2e3ea2cbb", "short second zq0 sample", "Cyber", "Sub", "harmful", "0", "True", "", "constitution", "what zq0 is about", "", "", "short", "1", "short", "neutral", "anonymous", "statement", "explicit", "single"],
-    ["e8d79b974eb3b02d", "short third zq0 sample", "Cyber", "Sub", "harmful", "0", "True", "", "constitution", "what zq0 is about", "", "", "short", "2", "very_long", "casual", "researcher", "question", "implicit", "single"],
-    ["e53b968adbf929ed", "short first zq1 sample", "Cyber", "Sub", "benign", "0", "True", "", "constitution", "what zq1 is about", "", "", "short", "0", "fragment", "technical", "fiction_writer", "question", "euphemistic", "single"],
-    ["f2a41a260a237f36", "short second zq1 sample", "Cyber", "Sub", "benign", "0", "True", "", "constitution", "what zq1 is about", "", "", "short", "1", "very_long", "neutral", "journalist", "advice", "explicit", "single"],
     ["e471930187f4f1be", "long first zq0 sample", "Cyber", "Sub", "harmful", "0", "True", "", "constitution", "what zq0 is about", "", "", "long", "0", "long", "formal", "parent", "opinion_or_validation", "euphemistic", "single"],
     ["c6d6c38c9483b9b9", "long second zq0 sample", "Cyber", "Sub", "harmful", "0", "True", "", "constitution", "what zq0 is about", "", "", "long", "1", "short", "neutral", "anonymous", "statement", "explicit", "single"],
     ["2014365ca9e94b03", "long third zq0 sample", "Cyber", "Sub", "harmful", "0", "True", "", "constitution", "what zq0 is about", "", "", "long", "2", "very_long", "casual", "researcher", "question", "implicit", "single"],
@@ -97,7 +92,7 @@
     ["9bf7fbc33e653c59", "long second zq3 sample", "Fraud", "Sub", "dual_use_benign", "0", "True", "", "constitution", "what zq3 is about", "", "", "long", "1", "very_long", "casual", "hobbyist", "advice", "euphemistic", "single"],
     ["eca2f5cdd2743dc6", "long third zq3 sample", "Fraud", "Sub", "dual_use_benign", "0", "True", "", "constitution", "what zq3 is about", "", "", "long", "2", "short", "technical", "office_worker", "statement", "implicit", "single"]
    ],
-   "counts": {"build": {"accepted": 116, "rows": 116}, "constitution": {"rows": 4}, "inputs": {"accepted": 11, "rows": 11}, "jailbreaks": {"accepted": 31, "rows": 32}, "outputs": {"accepted": 28, "rows": 32}, "paraphrase": {"accepted": 41, "rows": 44}}
+   "counts": {"build": {"accepted": 80, "rows": 80}, "constitution": {"rows": 4}, "inputs": {"accepted": 11, "rows": 11}, "jailbreaks": {"accepted": 21, "rows": 22}, "outputs": {"accepted": 20, "rows": 22}, "paraphrase": {"accepted": 28, "rows": 31}}
   }
  }
 }
