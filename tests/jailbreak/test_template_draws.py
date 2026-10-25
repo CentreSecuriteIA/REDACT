@@ -1,10 +1,10 @@
 """What the template techniques write, pinned by digest.
 
 Every registered technique that draws a variant from a template file (it
-carries a ``variant_pool``, or is ``to_json``: framing, the persona
-templates, the fake turns, structural, the neutral containers, the payload
-splits, the word art and wording techniques, the request families, small
-talk, the benign roles and the encodings with decode hints) runs on two
+carries a ``variant_pool``: framing, the persona templates, the fake turns,
+structural, the neutral containers, the payload splits, the word art and
+wording techniques, the request families, small talk, the benign roles and
+the encodings with decode hints) runs on two
 neutral probes for six seeds: three calls in a row on one
 ``random.Random(seed)`` per probe. A technique
 that calls a model is answered from a script of the test's own (a marked
@@ -48,10 +48,9 @@ _PROBES = (
 _SEEDS = range(6)
 _CALLS = 3
 
-#: The registry's techniques with a pool, and ``to_json``, whose wrapper is
-#: written in code until the next eval review but which the eval pool holds.
+#: The registry's techniques with a pool.
 _TECHNIQUES = {fn.__name__: fn for fn in all_techniques()
-               if hasattr(fn, "variant_pool") or fn.__name__ == "to_json"}
+               if hasattr(fn, "variant_pool")}
 
 #: The word a model marks in each probe.
 _MARKED = dict(zip(_PROBES, ("plants", "hello"), strict=True))

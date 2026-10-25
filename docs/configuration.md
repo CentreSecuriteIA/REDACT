@@ -1052,7 +1052,11 @@ therefore random now, where the plain encoder is not): a plan kept from before r
 techniques and combinations as they were, and its pending units draw hints,
 so a run resumed across this change holds encoded texts with and without
 one. No combination, pool or round changes, and the `eval` and natural
-kinds draw no hinted encoding.
+kinds draw no hinted encoding. (The second eval release then gave the five
+heavy encodings of the eval pool hints too, 26 hinted encodings in all: about
+half the eval rows that draw `to_base64`, `to_unicode_escape`,
+`to_ascii_ordinal`, `to_morse` or `to_braille` come with a hint, and their
+`technique_info` gains `hint=<name>`.)
 
 **Release note: the payload split.** Two techniques of a new obfuscation
 family, `payload_split` (spec 1.3, order 65, complexity 2, attack only):

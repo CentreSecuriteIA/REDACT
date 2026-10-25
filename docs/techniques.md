@@ -599,6 +599,11 @@ generation model.
 - `framing` directives are transforms that change the scenario or the
   intent. Each has named template variants in
   `configs/jailbreak/hacking/framing_templates.json`; one is drawn per call.
+  `to_nefarious_goal` has the asker state a bad goal in the first person
+  (eight variants, none a legitimate role: the second eval release
+  rewrote the four that were a researcher, a tester, a scholar and a
+  journalist, which read as `to_noble_goal`'s pretexts under a label that
+  said the opposite).
 - `persona_template` (spec version 1.3) sets the prompt in a fixed frame
   for one of eleven well-known jailbreak personas, a technique each
   (`to_dan_persona_template` to `to_liberated_model_persona_template`), with
@@ -842,21 +847,42 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   and fullwidth and math-styled Unicode (math-styled drawing one
   Mathematical Alphanumeric style per call, reported in `math_style=<name>`).
   Hex, binary, HTML entities, base32 and base85 are `heavy`, the rest `light`.
-  Spec version 1.3 gives 21 of the 27 encodings *decode hints*: at the spec's
+  Spec version 1.3 gives 21 of the 27 encodings *decode hints*, and the
+  second eval release the five heavy encodings of the eval pool too, 26 in
+  all: at the spec's
   `decode_hint_rate` (0.5), such an encoding writes one of four hints around
   the encoded text, drawn by `rng` after the encoding, which says how to
   decode it (the Caesar cipher's states the shift that call used). The hints
   are in `obfuscation/decode_hints.json`, a pool of four per technique; the
   info gains `hint=<name>` when a hint was written, and the kind's variants
   table counts them. An encoding that changed nothing (a text of digits under
-  ROT13) gets none. Six encodings have none: the five of the eval pool,
-  `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`, `to_morse` and
-  `to_braille`, whose hints would change the pinned eval pool's text, and `to_leetspeak_basic`,
-  which the natural kind draws; import fails for a pool of hints that names one
-  (`NEVER_HINTED` in `obfuscation/encoding.py`). The ten `to_sensitive_words_encode_*` techniques
+  ROT13) gets none. One encoding has none, `to_leetspeak_basic`, which the
+  natural kind draws; import fails for a pool of hints that names it
+  (`NEVER_HINTED` in `obfuscation/encoding.py`). The eval pool's `to_base64`,
+  `to_unicode_escape`, `to_ascii_ordinal`, `to_morse` and `to_braille` write
+  a hint on about half their rows since the second eval release: their
+  hinted rows' text moved, their unhinted rows' did not (the hint is drawn
+  after the encoding, from the technique's own generator). The ten `to_sensitive_words_encode_*` techniques
   call the plain encoders, so they carry none.
-- `structural` wraps the text in JSON, XML or markdown. `to_json` keeps
-  non-ASCII characters as they are.
+- `structural` wraps the text in JSON, XML or markdown. Each of its three
+  techniques draws one of the variants of its pool in
+  `obfuscation/structural_templates.json`: ten for `to_json` (its first
+  variant is the wrapper it always wrote), nine each for `to_xml` and
+  `to_markdown` (their first is the template each always had). The
+  variants differ in structure, not only in wording: a flat record, a
+  JSON-RPC call, a chat payload, a configuration, a nested directive, a
+  ticket, a schema instance, a task list and an event for JSON; a policy
+  update, a configuration patch, a SOAP envelope, a command, a form and a
+  rule set for XML; a changelog, a README, a runbook, a settings table, a
+  checklist, an API reference, a memo and a wiki page for Markdown. Every
+  variant states an override of the usual guidelines, the technique's
+  point. `to_json` writes the prompt as the inside of a JSON string, so
+  each JSON variant parses whatever the prompt holds, and keeps non-ASCII
+  characters as they are; `to_xml` and `to_markdown` write it as it is. The
+  fields (a priority and a format for JSON, one of three policy ids for XML)
+  are drawn first, in the order they were drawn before the pools, and the
+  variant after them; every JSON variant holds both fields and every XML
+  variant the policy id, so the info is true of the text.
 - `neutral_container` (spec version 1.2) places the text in an everyday
   document, the formats a classifier meets in real traffic. Each of its six
   pure techniques draws one of eight variants of its pool in
@@ -954,7 +980,13 @@ file under `configs/jailbreak/requests/`. The `answer_language` techniques
 are generated from the rows of `configs/jailbreak/languages.json` marked
 `answer_language` ([the language table](#the-language-table)), so a new
 language is one row. `to_impersonate_good_person` has eight
-profession variants and `to_use_past_tense` four historical framings.
+profession variants and `to_use_past_tense` eight historical framings, each
+asking for the account in the past. Each continuation variant gives the
+prompt the place its text speaks of: `to_fill_in_blank` leaves a blank to
+fill after it, `to_continue_instructions` makes it the first numbered entry,
+`to_complete_story` says the story opens with it (the second eval release
+changed the variants that spoke of a blank, a numbered list or a story the
+prompt was not in).
 
 Spec version 1.3 added three attack-only answer formats, eight variants
 each: `to_dual_answer` asks for two answers, one after the other,
@@ -1014,10 +1046,12 @@ directive and variant of a fault. A pool should hold at least 8 variants
 (a request or framing directive, a container, a fake turn, the payload split's reassembly, the
 word art's decoding, the wording's key and puzzles), 12 for a benign role, 20 for small talk, 6 for the
 persona templates' mechanics and 4 for an encoding's decode hints;
-13 of the 85 pools are below their floor today (the five
-framing, the four continuation, the two structural, `refusal_then_comply` and
-`past_tense`, each with 4, or 1): the techniques of the eval pool, whose
-text is pinned until the next eval review. A test ratchets the rest
+None of the 91 pools is below its floor today. The pools of the eval-pool
+techniques that were (the five framing, the four continuation,
+`refusal_then_comply` and `past_tense`, each with 4) have 8 since the second
+eval release, which changed the eval text and pinned it again; the structural
+pools have 9 or 10. A test ratchets the counts and fails on a variant that
+repeats another in its pool
 ([extending.md](extending.md#add-variants-to-a-template-pool)).
 
 The info names the variant drawn: `variant=<name>` for the framing
@@ -1032,10 +1066,11 @@ persona templates, which name the mechanic drawn
 (`category=<key>_persona_template;variant=<mechanic>`);
 `hint=<name>` after an encoding's own info (`shift=<n>;hint=<name>`) when
 it wrote a decode hint; `style=<name>` for
-continuation. Structural's `to_xml` and `to_markdown` have one template
-each and name none (`to_xml`'s info names its policy id), and `to_json`
-writes its wrapper in code. Continuation and structural are drawn by the
-eval pool, so their infos stay as they are until the next eval review.
+continuation, and `variant=<name>` after the fields the wrapper drew for
+the structural techniques (`priority=<p>;format=<f>;variant=<name>` for
+`to_json`, `policy_id=<id>;variant=<name>` for `to_xml`, `variant=<name>`
+for `to_markdown`). Continuation is drawn by the eval pool, so its info
+stays as it is until the next eval review.
 After a run, `<kind>.variants.csv` counts the rows that drew each variant
 ([stages/jailbreaks.md](stages/jailbreaks.md#files)).
 

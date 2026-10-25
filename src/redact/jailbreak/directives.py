@@ -13,12 +13,11 @@ with a ``name``, its text and optionally a ``weight``:
   directive per encoding, named after its technique);
 - ``{directive: [{"name", "prefix", "suffix"}, ...]}``: continuation, which
   puts the prompt between the two, so they hold no slot;
-- ``{technique: {"template", ...}}``: structural's ``to_xml`` and
-  ``to_markdown``, one template each, read as a pool of one variant named
-  after its entry; the entry's other keys (``policy_ids``) are its
-  technique's own. ``to_json`` still writes its wrapper in
-  ``obfuscation/structural.py``; moving it into the file waits for the
-  next eval review.
+- ``{key: {"template", ...}}``: one template, read as a pool of one variant
+  named after its entry (the persona frames of ``persona_templates.json``);
+  the entry's other keys are its technique's own. A file may also hold a
+  list its module reads for itself (structural's ``policy_ids``), which
+  names no pool.
 
 ``personas.json`` and ``cognitive_techniques.json`` define personas and
 scenarios, not variants: their modules read them with :func:`load_templates`.

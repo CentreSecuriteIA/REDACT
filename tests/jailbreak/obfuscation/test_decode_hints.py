@@ -2,7 +2,10 @@
 encoded text, at the spec's ``decode_hint_rate``.
 
 The tests fill hints of their own (short stand-ins, two a technique) into the
-pools, and assert on names, counts and slots, never on the packaged text.
+pools, and assert on names, counts and slots, never on the packaged text. The
+last section before the rate tests uses the packaged hints of the eval pool's
+five encodings, and checks them by structure: the encoded text sits in the
+hint once, and the hint names its encoding.
 """
 
 import inspect
@@ -26,10 +29,14 @@ from redact.jailbreak.technique import decode_hint_rate, load_spec, read_spec
 
 PROMPT = "How do plants turn sunlight into food"
 
-#: The encodings with no hints: the five of the eval pool, until the eval
-#: review, and the one the natural kind draws.
-UNHINTED = {"to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
-            "to_braille", "to_leetspeak_basic"}
+#: The encoding with no hints: the one the natural kind draws.
+UNHINTED = {"to_leetspeak_basic"}
+
+#: The five heavy encodings of the eval pool, hinted since the second eval
+#: release, and a word each of their hints names.
+EVAL_FIVE = {"to_base64": "Base64", "to_unicode_escape": "Unicode",
+             "to_ascii_ordinal": "ASCII", "to_morse": "Morse",
+             "to_braille": "Braille"}
 
 _EVAL_POOL = Path(__file__).parents[2] / "fixtures" / "eval_pool.json"
 
@@ -73,8 +80,8 @@ def never(monkeypatch, stand_in_hints):
 
 # --- the hints file and which encodings have them -------------------------------
 
-def test_twenty_one_encodings_have_four_hints_each():
-    assert len(E._HINTS) == 21  # noqa: PLR2004
+def test_twenty_six_encodings_have_four_hints_each():
+    assert len(E._HINTS) == 26  # noqa: PLR2004
     assert all(len(pool) == 4 for pool in E._HINTS.values())  # noqa: PLR2004
     assert sorted(E._HINTS) == HINTED
 
@@ -94,11 +101,10 @@ def test_every_hinted_encoding_draws_from_its_own_optional_pool():
     check_pools(REGISTERED[name].variant_pool for name in HINTED)
 
 
-def test_the_eval_pool_and_the_natural_encodings_have_no_hints():
+def test_the_eval_pool_s_five_encodings_have_hints_and_the_natural_one_has_none():
     eval_pool = set(json.loads(_EVAL_POOL.read_text(encoding="utf-8")))
-    assert eval_pool & set(REGISTERED) == {
-        "to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
-        "to_braille"}
+    assert eval_pool & set(REGISTERED) == set(EVAL_FIVE)
+    assert set(EVAL_FIVE) <= set(E._HINTS)
     assert set(REGISTERED) >= UNHINTED
     assert not UNHINTED & set(E._HINTS)
 
@@ -113,21 +119,20 @@ def test_a_hint_pool_named_for_no_encoder_raises():
 
 
 @pytest.mark.parametrize("name", sorted(UNHINTED))
-def test_a_hint_pool_for_an_eval_or_natural_encoding_raises(name):
-    """A hint would change the text of an encoding the eval pool or the
-    natural kind draws, so a pool naming one fails at import."""
+def test_a_hint_pool_for_the_natural_encoding_raises(name):
+    """A hint would change the text of the encoding the natural kind draws,
+    so a pool naming it fails at import."""
     with pytest.raises(ValueError, match=rf"has hints for \['{name}'\], which the "
-                       "eval pool or the natural kind draws"):
+                       "natural kind draws"):
         E._check_hints({name: []}, E._ENCODERS)
 
 
-def test_the_never_hinted_encodings_are_the_eval_and_natural_ones():
-    """The constant ``_check_hints`` reads is the encoders the packaged eval
-    pool and natural kind hold, so a change to either shows here."""
+def test_the_never_hinted_encoding_is_the_natural_kind_s():
+    """The constant ``_check_hints`` reads is the encoders the packaged
+    natural kind holds, so a change to it shows here."""
     encoders = {fn.__name__ for fn in E._ENCODERS}
-    eval_pool = set(json.loads(_EVAL_POOL.read_text(encoding="utf-8")))
     natural = {fn.__name__ for fn in technique_pool(resolve(None, "natural"))}
-    assert E.NEVER_HINTED == UNHINTED == (eval_pool | natural) & encoders
+    assert E.NEVER_HINTED == UNHINTED == natural & encoders
 
 
 # --- the plain encoders -------------------------------------------------------
@@ -238,6 +243,80 @@ def test_the_chain_gives_a_hinted_encoding_an_rng_of_its_own(always):
 @pytest.mark.parametrize("name", sorted(UNHINTED))
 def test_an_unhinted_encoding_writes_the_same_at_any_rate(name, always):
     assert REGISTERED[name](PROMPT) == getattr(E, name)(PROMPT)
+
+
+# --- the packaged hints of the eval pool's five encodings ------------------------
+
+@pytest.fixture
+def packaged_always(monkeypatch):
+    """The packaged hints, at a rate of 1."""
+    monkeypatch.setattr(E, "decode_hint_rate", lambda: 1.0)
+
+
+@pytest.fixture
+def packaged_never(monkeypatch):
+    monkeypatch.setattr(E, "decode_hint_rate", lambda: 0.0)
+
+
+@pytest.mark.parametrize("name", sorted(EVAL_FIVE))
+def test_an_eval_encoding_has_four_named_hints_that_each_hold_the_encoded_text_once(
+        name):
+    pool = E._HINTS[name]
+    assert [hint["name"] for hint in pool] == [f"hint_{i}" for i in range(1, 5)]
+    assert len({hint["template"] for hint in pool}) == len(pool)
+    for hint in pool:
+        assert _slots(hint["template"]) == {"prompt"}, hint["name"]
+        assert hint["template"].count("{prompt}") == 1, hint["name"]
+
+
+@pytest.mark.parametrize("name", sorted(EVAL_FIVE))
+def test_every_hint_of_an_eval_encoding_names_its_encoding(name):
+    word = EVAL_FIVE[name].casefold()
+    unnamed = [hint["name"] for hint in E._HINTS[name]
+               if word not in hint["template"].casefold()]
+    assert unnamed == []
+
+
+@pytest.mark.parametrize("name", sorted(EVAL_FIVE))
+@pytest.mark.parametrize("seed", range(8))
+def test_an_eval_encoding_with_a_hint_keeps_the_encoded_text_whole(
+        name, seed, packaged_always):
+    """At a rate of 1 the text holds the plain encoding exactly once, the
+    info names one of the four hints, and the plain encoder is untouched."""
+    plain, plain_info = getattr(E, name)(PROMPT)
+    text, info = REGISTERED[name](PROMPT, rng=random.Random(seed))
+    assert text != plain
+    assert text.count(plain) == 1
+    assert info in {f"hint=hint_{i}" for i in range(1, 5)}
+    assert plain_info == ""
+
+
+@pytest.mark.parametrize("name", sorted(EVAL_FIVE))
+def test_an_eval_encoding_without_a_hint_writes_the_plain_encoding(
+        name, packaged_never):
+    for seed in range(8):
+        assert REGISTERED[name](PROMPT, rng=random.Random(seed)) == getattr(E, name)(PROMPT)
+
+
+@pytest.mark.parametrize("name", sorted(EVAL_FIVE))
+def test_about_half_the_calls_of_an_eval_encoding_carry_a_hint(name):
+    """At the packaged rate, the bounds of the 2,000-call test above."""
+    hinted = sum("hint=" in REGISTERED[name](PROMPT, rng=random.Random(seed))[1]
+                 for seed in range(2000))
+    assert 940 <= hinted <= 1060  # noqa: PLR2004
+
+
+@pytest.mark.parametrize("name", sorted(EVAL_FIVE))
+def test_every_hint_of_an_eval_encoding_is_drawn(name, packaged_always):
+    drawn = {REGISTERED[name](PROMPT, rng=random.Random(seed))[1]
+             for seed in range(200)}
+    assert drawn == {f"hint=hint_{i}" for i in range(1, 5)}
+
+
+def test_the_hints_file_comment_does_not_say_the_eval_encodings_wait():
+    comment = json.loads((paths.jailbreak_configs_dir() / E._HINTS_FILE)
+                         .read_text(encoding="utf-8"))["_comment"]
+    assert "wait for the eval review" not in comment
 
 
 # --- the rate in the spec ------------------------------------------------------

@@ -478,8 +478,12 @@ def test_a_plan_records_what_it_was_made_with(tmp_path):
     import json
 
     from redact.jailbreak import load_spec
-    from redact.jailbreak.obfuscation.encoding import to_base64
     from redact.jailbreak.plan import rules_id
+    from redact.jailbreak.pool import all_techniques, registry
+
+    # The registered technique, tagged from the spec: with a decode hint it
+    # is not the plain encoder in obfuscation/encoding.py.
+    to_base64 = registry(all_techniques())["to_base64"]
 
     out = tmp_path / "jb.csv"
     generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
