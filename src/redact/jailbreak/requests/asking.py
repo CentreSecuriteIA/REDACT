@@ -1,4 +1,5 @@
-"""Asking techniques: an innocuous-question framing, or a request for details.
+"""Asking techniques: an innocuous-question framing, a request for details,
+or an urgent ask (spec 1.3).
 
 ``info`` is ``type=<name>;variant=<variant>``.
 """
@@ -26,9 +27,16 @@ def to_ask_for_details(prompt: str, *, rng: Random | None = None) -> tuple[str, 
     return _apply("ask_for_details", prompt, rng=rng)
 
 
+@uses_pool(_FILE, "ask_with_urgency")
+def to_ask_with_urgency(prompt: str, *, rng: Random | None = None) -> tuple[str, str]:
+    """Prepend a note of urgency to the prompt."""
+    return _apply("ask_with_urgency", prompt, rng=rng)
+
+
 def get_asking_functions() -> list[Callable]:
     """Return all question-framing technique functions."""
     return [
         to_innocuous_question,
         to_ask_for_details,
+        to_ask_with_urgency,
     ]

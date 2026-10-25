@@ -13,6 +13,7 @@ from redact.jailbreak.manipulation.benign import (
     load_benign_data,
 )
 from redact.llms.backends import ComputeConfig
+from redact.llms.client import ModelClient
 from tests.conftest import (
     Killed,
     MockBackend,
@@ -30,6 +31,17 @@ def _reply(n: int = _PAIRS) -> str:
     return "\n\n".join(
         f"**Prompt {i}:**\n**Question:** Question {i}?\n**Answer:** Answer {i}."
         for i in range(1, n + 1))
+
+
+def _yes() -> ModelClient:
+    """A check model that accepts every pair."""
+    return make_client(MockBackend("Yes", model="mock-check"), "mock-check")
+
+
+def _generate(client, out, **kwargs) -> dict:
+    """The benign data, quietly, with :func:`_yes` as the check model."""
+    return get_or_generate_benign_data(client, out, verbose=False, check=_yes(),
+                                       **kwargs)
 
 
 def _taxonomy(subcategories: int) -> dict:
@@ -87,7 +99,7 @@ class TestGeneration:
         monkeypatch.setattr(B, "drive_units", recording)
         backend, subcategories, batch_size = _WidthBackend(_reply()), 5, 16
         data = get_or_generate_benign_data(
-            make_client(backend), tmp_path / "benign.csv", verbose=False,
+            make_client(backend), tmp_path / "benign.csv", verbose=False, check=_yes(),
             taxonomy=_taxonomy(subcategories), batch_size=batch_size)
         units = 2 * subcategories           # a short and a long unit each
         assert seen["pool_size"] >= units and seen["cap"] == batch_size
@@ -103,7 +115,7 @@ class TestGeneration:
         }, taxonomy_dir=tax_dir, verbose=False)
         backend = MockBackend(_reply())
         data = get_or_generate_benign_data(
-            make_client(backend), out, verbose=False, taxonomy="mine",
+            make_client(backend), out, verbose=False, check=_yes(), taxonomy="mine",
             taxonomy_dir=tax_dir)
 
         units = [(main, sub, kind) for main, sub in
@@ -122,8 +134,7 @@ class TestGeneration:
     def test_a_finished_run_makes_no_call(self, tmp_path):
         out, backend, units = tmp_path / "benign.csv", MockBackend(_reply()), 4
         for _ in range(2):
-            get_or_generate_benign_data(make_client(backend), out, verbose=False,
-                                        taxonomy=_taxonomy(units // 2))
+            _generate(make_client(backend), out, taxonomy=_taxonomy(units // 2))
         assert len(backend.calls) == units
         assert len(pd.read_csv(out)) == units * _PAIRS
         assert lock_is_free(_ledger(out).path)
@@ -136,15 +147,13 @@ class TestGeneration:
         units, saved = 40, 32               # CommitBuffer saves every 32 units
         kill_after_rows(monkeypatch, B, on_call=2)
         with pytest.raises(Killed):
-            get_or_generate_benign_data(make_client(backend), out, verbose=False,
-                                        taxonomy=_taxonomy(units // 2))
+            _generate(make_client(backend), out, taxonomy=_taxonomy(units // 2))
         landed = out.read_bytes()
         assert len(pd.read_csv(out)) == units * _PAIRS      # every row landed
         assert len(_ledger(out).completed()) == saved       # the last 8 acks did not
         assert lock_is_free(_ledger(out).path)
 
-        get_or_generate_benign_data(make_client(backend), out, verbose=False,
-                                    taxonomy=_taxonomy(units // 2))
+        _generate(make_client(backend), out, taxonomy=_taxonomy(units // 2))
         assert len(backend.calls) == units + (units - saved)    # only those 8 again
         df = pd.read_csv(out)
         assert len(df) == units * _PAIRS
@@ -162,12 +171,11 @@ class TestGeneration:
         old.to_csv(out, index=False)
 
         # Without a client the cache is read as it is.
-        data = get_or_generate_benign_data(None, out, verbose=False)
+        data = _generate(None, out)
         assert data["all_subcategories"] == ["s0", "s1"] and len(data["long"]) == 1
 
         backend = MockBackend(_reply())
-        data = get_or_generate_benign_data(make_client(backend), out, verbose=False,
-                                           taxonomy=_taxonomy(2))
+        data = _generate(make_client(backend), out, taxonomy=_taxonomy(2))
         assert len(backend.calls) == 1                       # s1's long pairs
         df = pd.read_csv(out)
         pd.testing.assert_frame_equal(df.iloc[:len(old)], old)
@@ -180,8 +188,7 @@ class TestGeneration:
         backend = MockBackend(_reply(_PAIRS - 1))
         for _ in range(2):
             with pytest.raises(ValueError, match="rejected"):
-                get_or_generate_benign_data(make_client(backend), out, verbose=False,
-                                            taxonomy=_taxonomy(1))
+                _generate(make_client(backend), out, taxonomy=_taxonomy(1))
             # Two units, three attempts each, and none again on resume.
             assert len(backend.calls) == 2 * 3
         assert not out.exists()
@@ -193,29 +200,197 @@ class TestGeneration:
         out = tmp_path / "benign.csv"
         replies = [_reply(), _reply(1), _reply(1), _reply()]
         backend = _WidthBackend(replies)
-        data = get_or_generate_benign_data(make_client(backend), out, verbose=False,
-                                           taxonomy=_taxonomy(1))
+        data = _generate(make_client(backend), out, taxonomy=_taxonomy(1))
         assert len(backend.calls) == len(replies)
         assert len(data["short"]) == len(data["long"]) == _PAIRS
 
-    def test_the_prompt_overlay_reaches_the_prompt(self, tmp_path, monkeypatch):
+    def test_the_prompt_overlay_reaches_the_prompts(self, tmp_path, monkeypatch):
         overlays, load = [], B.load_prompt
         monkeypatch.setattr(B, "load_prompt", lambda pipeline, name, prompt_dir: (
-            overlays.append(prompt_dir) or load(pipeline, name)))
-        get_or_generate_benign_data(make_client(MockBackend(_reply())),
-                                    tmp_path / "benign.csv", verbose=False,
-                                    taxonomy=_taxonomy(1), prompt_dir=tmp_path / "mine")
-        assert overlays == [tmp_path / "mine"]
+            overlays.append((name, prompt_dir)) or load(pipeline, name)))
+        _generate(make_client(MockBackend(_reply())), tmp_path / "benign.csv",
+                  taxonomy=_taxonomy(1), prompt_dir=tmp_path / "mine")
+        assert overlays == [("benign_generation", tmp_path / "mine"),
+                            ("benign_check", tmp_path / "mine")]
 
     def test_a_taxonomy_without_a_category_is_refused(self, tmp_path):
         with pytest.raises(ValueError, match="no category"):
-            get_or_generate_benign_data(make_client(MockBackend(_reply())),
-                                        tmp_path / "benign.csv", verbose=False,
-                                        taxonomy={"name": "empty", "categories": {}})
+            _generate(make_client(MockBackend(_reply())), tmp_path / "benign.csv",
+                      taxonomy={"name": "empty", "categories": {}})
 
     def test_no_cache_and_no_client_is_refused(self, tmp_path):
         with pytest.raises(ValueError, match="no client"):
-            get_or_generate_benign_data(None, tmp_path / "benign.csv", verbose=False)
+            _generate(None, tmp_path / "benign.csv")
+
+
+class _Fake(MockBackend):
+    """A backend that answers each request with ``reply(messages, temperature)``
+    and records it."""
+
+    def __init__(self, reply, model: str):
+        super().__init__(model=model)
+        self.reply, self.requests = reply, []
+
+    def generate(self, messages_list, *, temperature=None, **kwargs):
+        replies = []
+        for messages in messages_list:
+            self.requests.append({"messages": messages, "temperature": temperature})
+            replies.append(self.reply(messages, temperature))
+        return replies
+
+
+#: The units of :func:`_run`'s one subcategory: a short and a long one.
+_UNITS = 2
+
+
+def _one_pair_prompts() -> tuple[str, ...]:
+    """What the generation prompt says when it asks for one pair (the
+    taxonomy of :func:`_taxonomy`, its first subcategory), for each answer
+    type."""
+    from redact.llms.prompting import build_messages, load_prompt
+
+    config = load_prompt("jailbreak", "benign_generation")
+    return tuple(build_messages(config, sub_category="s0", main_category="Main",
+                                num_samples="1", answer_style=style)[-1]["content"]
+                 for style in config["answer_styles"].values())
+
+
+def _asks_one(messages) -> bool:
+    return messages[-1]["content"].startswith(_one_pair_prompts())
+
+
+def _again(n: int = 1) -> str:
+    """A reply asked for one pair: ``n`` pairs, each the same."""
+    return "\n\n".join("**Question:** Again?\n**Answer:** Again." for _ in range(n))
+
+
+def _generator(again=_again) -> _Fake:
+    """The generation model: the unit's eight pairs, or one when asked for one."""
+    return _Fake(lambda messages, _t: again() if _asks_one(messages) else _reply(),
+                 "mock-gen")
+
+
+def _checker(rejects) -> _Fake:
+    """A check model that rejects a pair whose check prompt holds any of
+    ``rejects``, with a verdict naming it."""
+    def verdict(messages, _temperature):
+        content = str(messages)
+        hit = next((text for text in rejects if text in content), None)
+        return "Yes" if hit is None else f"No, {hit} is not benign."
+    return _Fake(verdict, "mock-check")
+
+
+def _run(tmp_path, gen: _Fake, check: _Fake | None, units: int = 1):
+    out = tmp_path / "benign.csv"
+    data = get_or_generate_benign_data(
+        make_client(gen, gen.model), out, verbose=False,
+        check=make_client(check, check.model) if check else None,
+        taxonomy=_taxonomy(units))
+    return out, data
+
+
+def _acks(out) -> list[dict]:
+    return [ack for ack in (json.loads(line)
+                            for line in _ledger(out).path.read_text().splitlines())
+            if "answer_type" in ack]
+
+
+class TestCheck:
+    def test_each_pair_is_read_by_the_check_model_at_the_check_temperature(
+            self, tmp_path):
+        from redact.llm_pipeline import CHECK_TEMPERATURE
+
+        gen, check = _generator(), _checker([])
+        out, data = _run(tmp_path, gen, check)
+        assert len(gen.requests) == _UNITS           # one reply per unit
+        assert len(check.requests) == 2 * _PAIRS     # each pair once
+        assert {r["temperature"] for r in check.requests} == {CHECK_TEMPERATURE}
+        shown = [str(r["messages"]) for r in check.requests]
+        for i in range(1, _PAIRS + 1):
+            assert sum(f"Question {i}?" in s and f"Answer {i}." in s
+                       for s in shown) == _UNITS     # the short and the long unit
+        assert all("Main / s0" in s for s in shown)
+        assert len(data["short"]) == len(data["long"]) == _PAIRS
+        assert [ack.get("rejected_pairs") for ack in _acks(out)] == [None, None]
+
+    def test_without_a_check_model_the_generation_model_checks(self, tmp_path):
+        from redact.llm_pipeline import CHECK_TEMPERATURE
+
+        gen = _Fake(lambda messages, temperature: (
+            "Yes" if temperature == CHECK_TEMPERATURE else _reply()), "mock-gen")
+        _out, data = _run(tmp_path, gen, None)
+        temperatures = [r["temperature"] for r in gen.requests]
+        assert temperatures.count(CHECK_TEMPERATURE) == 2 * _PAIRS
+        assert len(data["short"]) == _PAIRS
+
+    def test_a_rejected_pair_is_asked_for_alone_again_with_the_verdict(self, tmp_path):
+        from redact.llm_pipeline import CHECK_TEMPERATURE
+
+        gen, check = _generator(), _checker(["Question 3?"])
+        out, data = _run(tmp_path, gen, check)
+        again = [r for r in gen.requests if _asks_one(r["messages"])]
+        assert len(again) == _UNITS                  # pair 3 of each unit
+        assert all("No, Question 3? is not benign." in r["messages"][-1]["content"]
+                   for r in again)
+        # The new pair was checked and accepted, and takes the old one's place;
+        # its check, as the first, at the check temperature.
+        rechecks = [r for r in check.requests if "Again?" in str(r["messages"])]
+        assert len(rechecks) == _UNITS
+        assert {r["temperature"] for r in rechecks} == {CHECK_TEMPERATURE}
+        assert {r["temperature"] for r in check.requests} == {CHECK_TEMPERATURE}
+        questions = [pair["prompt"] for pair in data["short"]]
+        assert "Question 3?" not in questions and "Again?" in questions
+        assert len(questions) == _PAIRS
+        assert [ack.get("rejected_pairs") for ack in _acks(out)] == [None, None]
+
+    def test_a_pair_rejected_every_time_is_left_out_and_counted(self, tmp_path):
+        """Three generations of the pair in all: the reply's, then two alone,
+        each with the last verdict."""
+        gen, check = _generator(), _checker(["Question 3?", "Again?"])
+        out, data = _run(tmp_path, gen, check)
+        again = [r for r in gen.requests if _asks_one(r["messages"])]
+        assert len(again) == 2 * 2
+        assert "No, Again? is not benign." in again[-1]["messages"][-1]["content"]
+        assert len(data["short"]) == len(data["long"]) == _PAIRS - 1
+        assert {pair["prompt"] for pair in data["short"]} & {"Question 3?",
+                                                               "Again?"} == set()
+        acks = _acks(out)
+        assert [ack.get("rejected_pairs") for ack in acks] == [1, 1]
+        assert [ack.get("status") for ack in acks] == [None, None]
+
+    def test_a_unit_whose_every_pair_is_rejected_is_acked_rejected(self, tmp_path):
+        gen, check = _generator(), _checker(["Question", "Again?"])
+        with pytest.raises(ValueError, match="No benign pairs.*every pair rejected"):
+            _run(tmp_path, gen, check)
+        out = tmp_path / "benign.csv"
+        assert not out.exists()
+        assert [(ack["status"], ack["rejected_pairs"]) for ack in _acks(out)] == [
+            ("rejected", _PAIRS), ("rejected", _PAIRS)]
+        # Acked, so a resume asks for nothing.
+        before = len(gen.requests)
+        with pytest.raises(ValueError, match="No benign pairs"):
+            _run(tmp_path, gen, check)
+        assert len(gen.requests) == before
+
+    def test_a_reply_that_is_not_one_pair_is_asked_again_without_a_check(
+            self, tmp_path):
+        from redact.content_moderation.feedback import NOT_ONE_PAIR
+
+        def reply(messages, _temperature):
+            """Two pairs when first asked for one, one pair once told."""
+            if not _asks_one(messages):
+                return _reply()
+            return _again(1 if NOT_ONE_PAIR in messages[-1]["content"] else 2)
+
+        gen, check = _Fake(reply, "mock-gen"), _checker(["Question 3?"])
+        _out, data = _run(tmp_path, gen, check)
+        again = [r for r in gen.requests if _asks_one(r["messages"])]
+        assert len(again) == 2 * 2
+        assert sum(NOT_ONE_PAIR in r["messages"][-1]["content"]
+                   for r in again) == _UNITS
+        # The two-pair reply got no check call; the one-pair reply did.
+        assert sum("Again?" in str(r["messages"]) for r in check.requests) == _UNITS
+        assert "Again?" in [pair["prompt"] for pair in data["short"]]
 
 
 class TestLoadBenignData:

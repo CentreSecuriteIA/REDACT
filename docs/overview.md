@@ -133,8 +133,10 @@ params, resolved augmentations, `resume`). Then:
 2. `telemetry.install` opens the trace file.
 3. `report_prompt_sources` logs which prompts the overlay replaces, and
    `report_config_sources` which config files the `config_dir` replaces,
-   warning about those it cannot and naming the packaged natural families
-   its copy of `augmentations.json` does not allow.
+   warning about those it cannot, naming the packaged natural families
+   its copy of `augmentations.json` does not allow and, in an eval run,
+   the techniques its copies add to the eval pool, and the families a
+   differing copy of the run's dataset type file draws none of.
 4. `capabilities.set_run_serving` makes every client of the run use the
    recipe's `backend_type` and `workers` for each model.
 5. `_plan_phases` plans the local models stage by stage, logs each plan and

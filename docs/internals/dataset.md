@@ -197,7 +197,7 @@ unless `manifest_path` names it), gives the lock back, then removes the
 files in `also`. The fronts call it with `resume=False` for a stage skipped
 for want of accepted rows: outputs, each paraphrase target, and each
 jailbreak kind. A jailbreak kind is also cleared when its `entry_types`
-match no input. `also` holds the `.coverage.csv` and `.plan.json` of the
+match no input or its pool is empty. `also` holds the `.coverage.csv` and `.plan.json` of the
 outputs stage and of a kind, and a kind's `.variants.csv`.
 
 ### The lock
@@ -275,9 +275,9 @@ inputs and outputs stages.
 
 | Function | Does |
 |---|---|
-| `dealing.Dealer(weights, key)` | Running counts of one group: `pick(rng, names)` takes the name with the lowest count over weight, ties broken by `rng`; `pick_member(rng, names)` the name with the lowest count in its own `members` counter (a family's techniques), ties broken by `rng`, kept apart from `counts` so `pick` deals the same with or without it; `include(part, rate)` deals an optional part at its rate with an offset seeded per group and part; `spent` counts the cost the group's units spent, and `bank(per_unit)` is what the units before the current one left unspent of `per_unit` each (`per_unit × (position − 1) − spent`, never below 0); neither changes what `pick` and `include` deal; the jailbreak planner's [group budget](../configuration.md#the-group-budget) reads them |
+| `dealing.Dealer(weights, key)` | Running counts of one group: `pick(rng, names)` takes the name with the lowest count over weight, ties broken by `rng`; `pick_member(rng, names)` the name with the lowest count in its own `members` counter (a family's techniques), ties broken by `rng`, kept apart from `counts` so `pick` deals the same with or without it; `include(part, rate)` deals an optional part at its rate with a jitter seeded per group, part and position; `spent` counts the cost the group's units spent, and `bank(per_unit)` is what the units before the current one left unspent of `per_unit` each (`per_unit × (position − 1) − spent`, never below 0); neither changes what `pick` and `include` deal; the jailbreak planner's [group budget](../configuration.md#the-group-budget) reads them |
 | `dealing.stable_seed(*parts)` | A seed from the parts, the same in every process: the first 16 hex digits of the SHA-256 of the parts joined by `::` |
-| `planfile.plan_path(manifest)`, `coverage_path(manifest)`, `variants_path(manifest)` | `<stem>.plan.json`, `<stem>.coverage.csv` and `<stem>.variants.csv` (the jailbreak kind's variants table) beside a manifest |
+| `planfile.plan_path(manifest)`, `coverage_path(manifest)`, `variants_path(manifest)`, `scenarios_path(manifest)` | `<stem>.plan.json`, `<stem>.coverage.csv`, `<stem>.variants.csv` (the jailbreak kind's variants table) and `<stem>.scenarios.csv` (its scenarios table) beside a manifest |
 | `planfile.plan_record(**made_with)` | What a plan is made with, as JSON reads it back |
 | `planfile.write_plan(manifest, record)` | Writes the plan file |
 | `planfile.read_plan(manifest)` | The record the plan file holds; `None` without a plan file |
@@ -304,7 +304,7 @@ taxonomy format.
 | outputs | `artifact=output_responses.csv` | `input_id`, `iteration` | `accepted` |
 | paraphrase | `artifact=paraphrases_<target>.csv` | `input_id`, `iteration` (inputs); `response_id`, `iteration` (outputs) | `paraphrase_model`, `status`; `input_id` (outputs); `reason`, `min_words` when `skipped` |
 | jailbreaks, per kind | `artifact=jailbreaks.csv` or `variations.csv` | `input_id`, `iteration` | |
-| benign data (jailbreaks) | `artifact=benign_samples.csv`, always `resume=True` | `main_category`, `sub_category`, `answer_type` | `status`, `attempts` when rejected |
+| benign data (jailbreaks) | `artifact=benign_samples.csv`, always `resume=True` | `main_category`, `sub_category`, `answer_type` | `status`, `attempts` when rejected; `rejected_pairs`, the pairs the check left out |
 | conversations | `artifact=conversations.csv` | `input_id`, `iteration` | `stop_reason` |
 | scoring | `artifact=conversations_scored.csv`, no manifest | `sample_id` | |
 

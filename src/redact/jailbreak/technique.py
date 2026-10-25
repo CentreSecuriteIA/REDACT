@@ -28,12 +28,34 @@ from redact.llm_pipeline import LLMRequest
 
 _CONFIGS = paths.jailbreak_configs_dir()
 _SPEC_PATH = _CONFIGS / "combination_spec.json"
+_SPEC = "combination_spec.json"
 
 #: The keys of a generator entry that say where its rows come from and how
 #: their techniques are named; every other key goes into each entry it makes.
 _GENERATOR_KEYS = ("file", "where", "name")
 #: The keys a data row may give its technique's entry, over the generator's.
+#: A row's ``<family>_since`` (``translation_since``) is read over its
+#: ``since`` for that family's technique alone.
 _ROW_KEYS = ("complexity", "since", "deprecated")
+#: The keys a technique entry may give (:func:`tag` reads them); a key
+#: starting with ``_`` is a comment.
+TECHNIQUE_KEYS = ("families", "complexity", "requires_llm", "requires_benign",
+                  "encode_weight", "needs_latin", "max_tokens",
+                  "cross_incompatible_with", "kinds", "check", "calls", "since",
+                  "deprecated")
+#: The keys a family entry may give.
+FAMILY_KEYS = ("layer", "dimension", "within_layer_order", "cross_incompatible_with",
+               "kinds", "check", "calls", "description")
+#: What an ``encode_weight`` may be.
+ENCODE_WEIGHTS = ("light", "heavy", None)
+#: A technique's complexity, the units of a round's budget.
+MAX_COMPLEXITY = 3
+#: A spec ``layer_rates`` key that is not a layer: the request obfuscation's.
+_REQUEST_OBFUSCATION = "request_obfuscation"
+#: What ``request_obfuscation_allowed_families`` may name, and the family
+#: the request obfuscation it allows is drawn from: the key of
+#: ``request_obfuscation_refuses`` its rules are read under.
+_REQUEST_OBFUSCATION_FAMILIES = {"translation": "translation", "encode_light": "encode"}
 
 DISCARDED = "DISCARDED"
 
@@ -45,8 +67,11 @@ DEFAULT_KINDS = ("adversarial",)
 #: What a spec ``check`` may name: how a technique's model reply is checked.
 #: ``typos``, the typo check; ``scenario``, the scenario check; ``word_list``,
 #: the strict parse of a marked-word list; ``translate``, translation's own
-#: check and retry. The spec only declares it; the technique runs the check.
-CHECKS = ("typos", "scenario", "word_list", "translate")
+#: check and retry; ``preserve``, the check that a rewrite is the prompt's own
+#: request; ``meaning``, a code gate plus a check that a code-switched or
+#: romanized rewrite keeps the prompt's meaning. The spec only declares it;
+#: the technique runs the check.
+CHECKS = ("typos", "scenario", "word_list", "translate", "preserve", "meaning")
 
 #: The spec version of a technique whose entry gives no ``since``: the
 #: techniques the library had before the spec dated them.
@@ -55,8 +80,9 @@ _VERSION = re.compile(r"[0-9]+(\.[0-9]+)*")
 
 #: The ISO 15924 code of the Latin script. A translation technique's
 #: ``script`` names the script it writes (``obfuscation/translation.py``);
-#: a technique tagged ``needs_latin`` changes only Latin text, so the rules
-#: keep it from a translation into any other.
+#: a technique tagged ``needs_latin`` changes only Latin text. No rule reads
+#: either: the family rules keep every such technique from every translation
+#: (``translation`` refuses ``encode`` and ``noise``), and a test asserts it.
 LATIN = "Latn"
 
 TechniqueResult = tuple[str, str]
@@ -110,22 +136,82 @@ def read_spec(path: Path) -> dict:
     technique, named ``name`` with ``{slug}`` the row's ``slug``, whose
     entry is ``families`` (the generator's family) and the generator's
     other keys, with the row's ``complexity``, ``since`` and ``deprecated``
-    over them. A row's technique still needs its function, which the
-    family's module builds from the same file. A key starting with ``_`` is
-    a comment.
+    over them; the row's ``<family>_since`` (``translation_since``) is that
+    family's ``since``, for a language one of whose families came in a later
+    spec version than its row. A row's technique still needs its function,
+    which the family's module builds from the same file. A key starting
+    with ``_`` is a comment. ``layers_off_by_default`` (absent is none)
+    lists layers of ``layer_order`` that a kind of the augmentation section
+    denies unless
+    its ``layers.allow`` names them
+    (:func:`redact.jailbreak.augmentation.resolve`). ``decode_hint_rate``
+    (absent is 0) is the share of hinted encodings written with a hint
+    (:func:`decode_hint_rate`). ``heavy_encoding_weight`` (absent is none)
+    is the weight the heavy full-text encodings are dealt at beside the
+    ``encode`` family in a budget draw (:func:`heavy_encoding_weight`).
+
+    What :func:`tag` does not read off a technique is checked here: each
+    family's keys (:data:`FAMILY_KEYS`) and ``layer``, the spec's
+    ``layer_rates``, each generator's family and each data row
+    (:func:`_checked_row`), so a bad spec fails at import.
 
     Raises:
         ValueError: A generator makes a name the spec, or another of its
-            rows, has already.
+            rows, has already, or is keyed by no family of the spec; a row
+            is malformed; a family has an unknown key or a layer that is
+            not in ``layer_order``; ``layers_off_by_default`` is not a list
+            of layers of ``layer_order``; a ``layer_rates`` entry is not a
+            number from 0 to 1 for a layer or ``request_obfuscation``;
+            ``request_obfuscation_refuses`` is not an object keyed by the
+            families a request obfuscation is drawn from, each with a list
+            of obfuscation-layer families
+            (:func:`_check_request_obfuscation_refuses`);
+            ``decode_hint_rate`` is not a number from 0 to 1; or
+            ``heavy_encoding_weight`` is not a number above 0 and at most 1.
     """
     spec = json.loads(Path(path).read_text(encoding="utf-8"))
+    layers, off = spec["layer_order"], spec.get("layers_off_by_default", [])
+    if not isinstance(off, list) or any(name not in layers for name in off):
+        raise ValueError(
+            f"combination_spec.json: layers_off_by_default must be a list of "
+            f"layers of layer_order, got {off!r}; write names of {layers}.")
+    rate = spec.get("decode_hint_rate", 0)
+    if not _is_rate(rate):
+        raise ValueError(
+            f"combination_spec.json: decode_hint_rate must be a number from 0 "
+            f"to 1, the share of hinted encodings written with a hint, got "
+            f"{rate!r}.")
+    heavy = spec.get("heavy_encoding_weight", 1)
+    if not (_is_rate(heavy) and heavy > 0):
+        raise ValueError(
+            f"combination_spec.json: heavy_encoding_weight must be a number "
+            f"above 0 and at most 1, the weight the heavy full-text encodings "
+            f"are dealt at beside the encode family in a budget draw, got "
+            f"{heavy!r}; leave it out to deal them as encode's members.")
+    _check_families(spec["families"], layers)
+    _check_request_obfuscation_refuses(spec)
+    for key, rate in spec.get("layer_rates", {}).items():
+        if not key.startswith("_") and (
+                key not in [*layers, _REQUEST_OBFUSCATION] or not _is_rate(rate)):
+            raise ValueError(
+                f"{_SPEC}: layer_rates[{key!r}] must be a number from 0 to 1 for a "
+                f"layer of layer_order or {_REQUEST_OBFUSCATION}, got {rate!r}.")
     techniques = dict(spec["techniques"])
-    for family, generator in spec.get("generators", {}).items():
-        if family.startswith("_"):
-            continue
+    generators = {family: generator
+                  for family, generator in spec.get("generators", {}).items()
+                  if not family.startswith("_")}
+    readers: dict[str, list[str]] = {}      # a data file: the families it makes
+    for family, generator in generators.items():
+        if family not in spec["families"]:
+            raise ValueError(
+                f"{_SPEC}: generators has {family!r}, which is not a family; key "
+                "each generator by the family its techniques belong to.")
+        readers.setdefault(generator["file"], []).append(family)
+    for family, generator in generators.items():
         given = {key: value for key, value in generator.items()
                  if key not in _GENERATOR_KEYS and not key.startswith("_")}
         for row in data_rows(generator["file"], Path(path).parent):
+            _checked_row(row, family, generator, readers[generator["file"]])
             if "where" in generator and not row[generator["where"]]:
                 continue
             name = generator["name"].format(slug=row["slug"])
@@ -134,16 +220,144 @@ def read_spec(path: Path) -> dict:
                     f"combination_spec.json: the generator of {family!r} makes "
                     f"{name!r}, which the spec has already; give its row in "
                     f"{generator['file']} another slug.")
-            techniques[name] = {"families": [family], **given,
-                                **{key: row[key] for key in _ROW_KEYS if key in row}}
+            entry = {"families": [family], **given,
+                     **{key: row[key] for key in _ROW_KEYS if key in row}}
+            if f"{family}_since" in row:
+                entry["since"] = row[f"{family}_since"]
+            techniques[name] = entry
     return {**spec, "techniques": techniques}
+
+
+def _is_rate(value) -> bool:
+    """Whether ``value`` is a number from 0 to 1 (not a bool)."""
+    return (not isinstance(value, bool) and isinstance(value, int | float)
+            and 0 <= value <= 1)
+
+
+def _check_families(families: dict, layers: list) -> None:
+    """Raise unless each family gives only :data:`FAMILY_KEYS` (``_`` keys
+    are comments) and a ``layer`` of ``layers``: a family with another
+    layer would put its techniques where no layer order reads them."""
+    for name, family in families.items():
+        unknown = [key for key in family
+                   if key not in FAMILY_KEYS and not key.startswith("_")]
+        if unknown:
+            raise ValueError(
+                f"{_SPEC}: family {name!r} has unknown key(s) {unknown}; write only "
+                f"{list(FAMILY_KEYS)}.")
+        if family.get("layer") not in layers:
+            raise ValueError(
+                f"{_SPEC}: the layer of family {name!r} must be one of layer_order, "
+                f"{layers}, got {family.get('layer')!r}.")
+
+
+def _check_request_obfuscation_refuses(spec: dict) -> None:
+    """Raise unless the spec's ``request_obfuscation_refuses`` is an object
+    whose every entry (``_`` keys are comments) is keyed by a family a
+    request obfuscation is drawn from and holds a list of obfuscation-layer
+    families: what :func:`redact.jailbreak.rules.after_request_obfuscation`
+    reads. The keys mirror ``request_obfuscation_allowed_families``:
+    ``translation``, and ``encode`` for the light encodings it calls
+    ``encode_light`` (the light sensitive-word encodings are ``encode``'s
+    too). The request obfuscation is drawn after every other layer's pick
+    but the obfuscations', so a family of another layer, drawn already,
+    would refuse nothing, as would another key."""
+    table = spec.get("request_obfuscation_refuses", {})
+    if not isinstance(table, dict):
+        raise ValueError(
+            f"{_SPEC}: request_obfuscation_refuses must be an object of the "
+            f"families a request obfuscation is drawn from, got {table!r}.")
+    drawn = sorted(_REQUEST_OBFUSCATION_FAMILIES[name]
+                   for name in spec.get("request_obfuscation_allowed_families", [])
+                   if name in _REQUEST_OBFUSCATION_FAMILIES)
+    obfuscations = {name for name, family in spec["families"].items()
+                    if family.get("layer") == "obfuscation"}
+    for key, refused in table.items():
+        if key.startswith("_"):
+            continue
+        if key not in drawn:
+            raise ValueError(
+                f"{_SPEC}: request_obfuscation_refuses[{key!r}] must be keyed by a "
+                f"family a request obfuscation is drawn from, one of {drawn} "
+                "(encode for the light encodings request_obfuscation_allowed_"
+                "families calls encode_light); no other key is read.")
+        if not isinstance(refused, list) or any(
+                name not in obfuscations for name in refused):
+            raise ValueError(
+                f"{_SPEC}: request_obfuscation_refuses[{key!r}] must be a list of "
+                f"obfuscation-layer families of the spec, got {refused!r}; the "
+                "request obfuscation is drawn after every other layer's pick, so "
+                "it can keep out only an obfuscation.")
+
+
+def _checked_row(row: dict, family: str, generator: dict,
+                 families: list[str]) -> None:
+    """Raise unless the data row ``row`` of its generator's file (its slug
+    checked by :func:`data_rows`) gives what the generator reads: its
+    ``where`` column true or false, a ``complexity`` from 0 to 3, versions
+    in ``since``, ``deprecated`` and each ``<family>_since``, whose family
+    must be one of ``families``, those whose generators read the file. The
+    message names the data file and the row, not the spec."""
+    file, slug = generator["file"], row["slug"]
+    where = generator.get("where")
+    if where is not None and not isinstance(row.get(where), bool):
+        raise ValueError(
+            f"{file}: row {slug!r} must give {where!r} true or false, the column "
+            f"the generator of {family!r} in {_SPEC} reads (its where), got "
+            f"{row.get(where)!r}.")
+    if "complexity" in row:
+        _checked_complexity(f"{file}: the complexity of row {slug!r}",
+                            row["complexity"])
+    for key, value in row.items():
+        if key.endswith("_since") and key.removesuffix("_since") not in families:
+            raise ValueError(
+                f"{file}: row {slug!r} gives {key!r}, which names no family made "
+                f"from this file; write <family>_since for one of {families}.")
+        if key in ("since", "deprecated") or key.endswith("_since"):
+            _checked_version(f"row {slug!r}", key, value, file=file)
+
+
+def _checked_complexity(whose: str, complexity) -> int:
+    """``complexity``, checked to be a whole number from 0 to
+    :data:`MAX_COMPLEXITY`; ``whose`` starts the message."""
+    if type(complexity) is not int or not 0 <= complexity <= MAX_COMPLEXITY:
+        raise ValueError(
+            f"{whose} must be a whole number from 0 to {MAX_COMPLEXITY}, got "
+            f"{complexity!r}.")
+    return complexity
+
+
+def decode_hint_rate() -> float:
+    """The spec's ``decode_hint_rate``: the probability that a hinted
+    encoding (``obfuscation/decode_hints.json``) writes its text with a hint
+    to decode it; 0 when the spec gives none."""
+    return load_spec().get("decode_hint_rate", 0)
+
+
+def heavy_encoding_weight() -> float | None:
+    """The spec's ``heavy_encoding_weight``: the weight, times the ``encode``
+    family's, that a budget draw's obfuscations deal the heavy full-text
+    encodings at, under a name of their own beside the family
+    (:data:`redact.jailbreak.sampling.HEAVY_ENCODINGS`); ``None`` when the
+    spec gives none, and they are dealt as encode's members."""
+    return load_spec().get("heavy_encoding_weight")
 
 
 def data_rows(file: str, folder: Path = _CONFIGS) -> list[dict]:
     """The rows of the data file ``file`` under ``folder``
     (``configs/jailbreak/`` by default): a JSON object whose ``rows`` list
-    holds one row per technique."""
-    return json.loads((Path(folder) / file).read_text(encoding="utf-8"))["rows"]
+    holds one row per technique, each named by its ``slug``.
+
+    Raises:
+        ValueError: A row has no ``slug``, or an empty one.
+    """
+    rows = json.loads((Path(folder) / file).read_text(encoding="utf-8"))["rows"]
+    for index, row in enumerate(rows):
+        if not isinstance(row.get("slug"), str) or not row["slug"]:
+            raise ValueError(
+                f"{file}: row {index} has no slug, the name its techniques are "
+                "made from; give it one.")
+    return rows
 
 
 def family_kinds(family: str) -> list[str]:
@@ -198,12 +412,12 @@ def version_key(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version.split("."))
 
 
-def _checked_version(whose: str, key: str, version) -> str:
+def _checked_version(whose: str, key: str, version, file: str = _SPEC) -> str:
     """``version``, checked to be dotted whole numbers, as :func:`version_key`
-    reads them."""
+    reads them; the message names ``file``, the one that gives it."""
     if not isinstance(version, str) or not _VERSION.fullmatch(version):
         raise ValueError(
-            f"combination_spec.json: the {key} of {whose} must be a version of "
+            f"{file}: the {key} of {whose} must be a version of "
             f'dotted whole numbers, such as "1.1", got {version!r}.')
     return version
 
@@ -213,8 +427,10 @@ def tag(funcs: list[Callable]) -> None:
 
     ``families``, ``complexity`` (0-3), ``requires_llm``, ``requires_benign``,
     ``encode_weight`` (``"light"``, ``"heavy"`` or None), ``needs_latin``
-    (whether it changes only Latin text, so a translation into another
-    script would leave it nothing to do; False when absent), ``max_tokens``
+    (whether it changes only Latin text, which a translation into another
+    script would leave it nothing to do on; no rule reads it, a test asserts
+    the family rules refuse it beside each such translation; False when
+    absent), ``max_tokens``
     (the reply limit of its model calls, None for the model's default) and
     ``cross_incompatible_with`` (the families the technique itself may not
     join, beside its families' own) come from the technique's entry;
@@ -231,8 +447,13 @@ def tag(funcs: list[Callable]) -> None:
     once, when ``redact.jailbreak`` is imported.
 
     Raises:
-        ValueError: A technique's ``max_tokens`` is not a whole number of at
-            least 1, its ``needs_latin`` not true or false, its ``kinds``
+        ValueError: A technique's entry has a key not in
+            :data:`TECHNIQUE_KEYS`, its ``families`` is not a non-empty list
+            of the spec's families, its ``complexity`` not a whole number
+            from 0 to 3, its ``requires_llm``, ``requires_benign`` or
+            ``needs_latin`` not true or false, its ``encode_weight`` not one
+            of :data:`ENCODE_WEIGHTS`, its ``max_tokens`` not a whole number
+            of at least 1, its ``kinds``
             (or its family's) not a list of
             :data:`KINDS`, its ``check`` not one of :data:`CHECKS`, its
             ``calls`` not a whole number or a ``[low, high]`` pair of them,
@@ -254,8 +475,25 @@ def tag(funcs: list[Callable]) -> None:
         if name not in techniques:
             continue
         t = techniques[name]
+        unknown = [key for key in t
+                   if key not in TECHNIQUE_KEYS and not key.startswith("_")]
+        if unknown:
+            raise ValueError(
+                f"Technique {name!r} has unknown key(s) {unknown} in {_SPEC}; "
+                f"write only {list(TECHNIQUE_KEYS)}.")
         fn.families = t.get("families", [])
-        fn.complexity = t.get("complexity", 1)
+        if (not isinstance(fn.families, list) or not fn.families
+                or any(family not in families for family in fn.families)):
+            raise ValueError(
+                f"Technique {name!r}: families must be a non-empty list of "
+                f"families of {_SPEC}, got {fn.families!r}.")
+        fn.complexity = _checked_complexity(
+            f"Technique {name!r}: complexity", t.get("complexity", 1))
+        for flag in ("requires_llm", "requires_benign", "needs_latin"):
+            if not isinstance(t.get(flag, False), bool):
+                raise ValueError(
+                    f"Technique {name!r}: {flag} must be true or false, got "
+                    f"{t[flag]!r}.")
         fn.requires_llm = t.get("requires_llm", False)
         # Needs pre-generated benign Q&A data (FSH/DAP). Distinct from
         # requires_llm: the data is generated once up front, not per call — so
@@ -263,17 +501,16 @@ def tag(funcs: list[Callable]) -> None:
         # strictly no-LLM (pure_only) run.
         fn.requires_benign = t.get("requires_benign", False)
         fn.encode_weight = t.get("encode_weight", None)
-        needs_latin = t.get("needs_latin", False)
-        if not isinstance(needs_latin, bool):
+        if fn.encode_weight not in ENCODE_WEIGHTS:
             raise ValueError(
-                f"Technique {name!r}: needs_latin must be true or false, got "
-                f"{needs_latin!r}.")
-        fn.needs_latin = needs_latin
+                f"Technique {name!r}: encode_weight must be \"light\", \"heavy\" "
+                f"or absent, got {fn.encode_weight!r}.")
+        fn.needs_latin = t.get("needs_latin", False)
         fn.cross_incompatible_with = t.get("cross_incompatible_with", [])
         # Reply limit for the technique's LLM calls; None keeps the model's
         # default. chain.run_chain puts it on each request.
         limit = t.get("max_tokens")
-        if limit is not None and (not isinstance(limit, int) or limit < 1):
+        if limit is not None and (type(limit) is not int or limit < 1):
             raise ValueError(
                 f"Technique {name!r}: max_tokens must be a whole number of at "
                 f"least 1, got {limit!r}.")

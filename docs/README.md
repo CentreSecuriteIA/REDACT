@@ -37,6 +37,13 @@ extend REDACT.
   technique, a stage or a taxonomy, and how to change a dataset type.
 - [techniques.md](techniques.md): every jailbreak technique by layer and
   family, for allow and deny lists, and the eval and natural pools.
+- [catalog.md](catalog.md): the technique catalog, generated from the code
+  (`scripts/catalog.py`): every registered technique with its tags, model
+  calls, template variants, prompts and pools, the techniques it combines
+  with and the families it never meets, a family by family matrix, the
+  layers and pools, the prompt inventory and the combination sizes each
+  packaged kind plans; [catalog.json](catalog.json) holds the same, with
+  each technique's full list of refused partners.
 - [api/index.md](api/index.md): the API reference, generated from the
   docstrings.
 

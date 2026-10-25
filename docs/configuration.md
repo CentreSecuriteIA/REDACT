@@ -59,20 +59,39 @@ types: a recipe naming one stops when it loads, before any stage runs.
 | `augmentations` | none: the packaged default | the adversarial kind below; `natural` off |
 
 The eval adversarial kind attacks the harmful inputs only, with a pool of
-hard techniques whose label stays certain: the families `encode` (less the
-22 encodings `techniques.deny` names, the seven light ones of before spec 1.2
-and the fifteen it added, which leaves its five original `heavy` ones; and
-less `sensitive_words`), `fsh` and `dap` (less
-their four many-shot variants), `framing`, `structural`, `ascii_art`,
-`continuation`, `temporal`; the eight low-resource
-translations (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`,
-`to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`), with
-`"translation": true` and `family_weights` `{"translation": 3}`; and
-`to_refusal_then_comply`. It runs two count-driven rounds, one technique
+techniques whose label stays certain (eval pool v2, 126 techniques in 22
+families; [the release note](#release-notes) says what each release
+admitted): the families `encode` (less the 22 encodings `techniques.deny`
+names, the seven light ones of before spec 1.2 and the fifteen it added,
+which leaves its five original `heavy` ones and spec 1.4's
+`to_letter_spacing`; and less `sensitive_words`), `fsh` and `dap` (less their four many-shot
+variants), `framing`, `structural`, `ascii_art`, `continuation`, and since
+eval pool v2 `persona_template`, `indirect`, `distractor_prefix`,
+`distractor_suffix`, `impersonation`, `asking`, `guardrail_address`,
+`neutral_container`, `transliteration`, `fake_turns` and `suffixes` (less
+its four noise suffixes, which `techniques.deny` names, so the 24 published
+strings stay); the eight low-resource translations (`to_swahili`,
+`to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`,
+`to_bengali`, `to_javanese`), with `"translation": true` and
+`family_weights` `{"translation": 3}`; the eight answer languages of those
+translations (`to_ask_answer_in_swahili` ... `to_ask_answer_in_javanese`,
+since v2); and `to_refusal_then_comply` and `to_use_past_tense`. The answer
+languages and these two are named under `techniques.allow` rather than
+their families, so a technique the library adds to `answer_language`,
+`answer_format` or `temporal` does not reach the eval pool (the families it
+allows whole name each later member under `techniques.deny`).
+It runs two count-driven rounds, one technique
 then two (`rounds` `[{"exact_techniques": 1}, {"exact_techniques": 2}]`),
 with `allow_request_obfuscation` false, written out since the packaged
 attacks have it true; a count round never reads it, so either way its draws
 are those made before the packaged attacks turned it on.
+
+The eval attacks are *pinned*: the 126 techniques, the two rounds and the
+text each technique draws for a seed stay the same from release to release,
+so the results of an eval run stay comparable; a test fails if one changes
+([techniques.md](techniques.md#the-eval-pool) says what is pinned and how it
+changes). They move only in an eval review: eval pool v2 was one, and eval
+files built before it are not comparable with those built after.
 
 Every eval input is explicit (`inputs.axes`: `{"directness": {"explicit": 1,
 "implicit": 0, "euphemistic": 0}}`): an implicit or euphemistic request is
@@ -198,11 +217,15 @@ names of the last two, are read for this release with a
 | `variations_path` | beside `output_path`, else `Datasets/variations.csv` | The natural kind's file |
 | `manifest_path` | `jailbreaks.manifest.jsonl` beside the output | The adversarial kind's plan, with its plan file `<stem>.plan.json`, coverage table and variants table beside it |
 | `benign_path` | `Data_cache/benign/benign_samples.csv` | The benign data, with its manifest and ledger beside it |
+| `scenarios` | `false` | Keep the scene each cognitive or persona technique built its prompt on in `<stem>.scenarios.csv` beside each kind's manifest ([the scenarios table](stages/jailbreaks.md#the-scenarios-table)) |
 
 The run passes the recipe's `gen`, `check` and `translation` models as
 `model`, `check_model` and `translation_model`: the `check` model checks
 what a technique's model writes, and left out it is the `gen` model, so no
-other model loads ([the stage's models](stages/jailbreaks.md#models)).
+other model loads ([the stage's models](stages/jailbreaks.md#models)). A
+`check` model of its own is created, planned and loaded for the stage only
+when a kind draws a technique it checks (the typo, scenario or rewrite
+check); the eval type's attacks draw none.
 The flat keywords (`include_hacking`, ..., `entry_types`) are also accepted
 here, with a `DeprecationWarning`, and applied over the adversarial kind (see
 [deprecated keywords](#deprecated-flat-keywords)). A key that only the
@@ -316,10 +339,16 @@ The shipped table has one such pair: `focus` is undecided against
 every sample is `single`; a params weight on `mixed` stops a run whose kinds
 draw those families. `authorship` (the `writer` axis) and `role_framing` are
 ruled distinct: who writes a message is not a role or scenario the message
-sets up, so the writer axis varies beside the persona, framing, cognitive and
-impersonation families and the natural kind's benign roles
+sets up, so the writer axis varies beside the persona, framing, cognitive,
+persona_template and impersonation families and the natural kind's benign roles
 (`tests/test_dimensions.py` records the ruling, and checks both dataset
-types and both example recipes).
+types and both example recipes). `to_synonym_substitution` and the
+`directness` axis are left unmarked by ruling too: the technique swaps the
+words a model marks for synonyms, which can name a subject less plainly, as
+`directness` (`request_intent`) does, but a family carries one tag, its
+family `sensitive_words` encodes, and marking `encoding` against
+`request_intent` would stop every training run, whose attacks draw it beside
+the varied axis (the same test file records it).
 
 The outputs stage's answer mode (`harmful` or `helpful`) is no axis and
 carries no tag: it picks the response's prompt, checker and label, the
@@ -357,11 +386,11 @@ Both kinds:
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `entry_types` | list or `null` | `null` | Augment only inputs of these entry types; `null` for all. A kind whose entry types match no input logs a WARNING and writes nothing |
+| `entry_types` | list or `null` | `null` | Augment only inputs of these entry types; `null` for all. A kind whose entry types match no input, or whose other keys leave its pool empty, logs a WARNING and writes nothing |
 | `translation` | bool | `true` in the adversarial kind, `false` in the natural one | Whether the kind draws the `translation` family. The family lists do not change it; `layers.deny`, `techniques.deny` and `pure_only` still apply |
-| `layers` | `{"deny": [...]}` | `{"deny": ["rewrite"]}` | Layers left out. The `rewrite` layer is off unless this list leaves it out; a list given replaces the default whole, so name `rewrite` in it to keep the layer off |
+| `layers` | `{"allow": [...], "deny": [...]}` | `{"deny": []}`, the `rewrite` layer off | `deny`: layers left out. `allow`: layers off by default to turn on, `[]` for none. A layer the spec lists in `layers_off_by_default` (`rewrite`) is left out unless `allow` names it, whatever `deny` says; `allow` may name only such a layer, one with a technique the kind draws (not `rewrite` in the natural kind), and a layer may not be under both |
 | `families` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: the natural families | Families admitted and removed |
-| `techniques` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: three techniques allowed, three denied | Techniques admitted and removed. Either `allow` names only what the spec's `kinds` let the kind draw. A technique the spec retired (`deprecated`) is drawn only when `allow` names it, with a `DeprecationWarning` |
+| `techniques` | `{"allow": [...] or null, "deny": [...]}` | adversarial: `{"allow": null, "deny": []}`; natural: three techniques allowed, three denied | Techniques admitted and removed. Either `allow` names only what the spec's `kinds` let the kind draw. A technique the spec retired (`deprecated`) is drawn only when `allow` names it, with a WARNING in the log (and a `DeprecationWarning`) |
 | `pure_only` | bool | `false` | Drop every technique that calls a model or needs benign data |
 | `family_weights` | `{family: number > 0}` | `{}` | A family's share within its layer when the plan deals families; 1 each by default |
 | `iterations` | int >= 1 | `1` | Units per input, numbered by `iteration` |
@@ -373,8 +402,8 @@ Adversarial only:
 | `rounds` | `null`, `"escalation"` or a list | `null` | The sampler settings per round; see [rounds](#rounds) |
 | `max_complexity` | int >= 0 | `6` | Budget mode: the most total complexity (each technique scores 0 to 3) |
 | `max_obfuscations` | int >= 0 | `2` | Budget mode: the most obfuscation families, the request obfuscation included |
-| `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `rewrite` (when `layers.deny` leaves it out; the spec's rate is 0), `hacking`, `manipulation` or `requests` technique, or, with `allow_request_obfuscation`, a `request_obfuscation` |
-| `allow_request_obfuscation` | bool | `true` (`false` in the eval type) | Allow one more technique after the request technique, at the `request_obfuscation` rate: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It is drawn before the other obfuscations, from what the earlier picks leave, and takes one of the `max_obfuscations` slots and its complexity from them; with `max_obfuscations` 0 there is none |
+| `layer_rates` | `{layer: 0..1}` | `{}`, the spec's rates | Target share of units that take a `rewrite` (when `layers.allow` names it; the spec's rate is 0), `hacking`, `manipulation` or `requests` technique, or, with `allow_request_obfuscation`, a `request_obfuscation` |
+| `allow_request_obfuscation` | bool | `true` (`false` in the eval type) | Allow one more technique after the request technique, for a unit that drew one (a unit without a request takes none), at the `request_obfuscation` rate over the group's units: a light `encode` technique (the light `to_sensitive_words_encode_*` among them), or a translation when the pool has one. It is drawn before the other obfuscations, from what the earlier picks leave, and takes one of the `max_obfuscations` slots and its complexity from them; with `max_obfuscations` 0 there is none |
 | `budget` | `"unit"`, `"group"` or `null` | `null`, as `"unit"` | `"unit"`: each unit may spend up to `max_complexity`. `"group"`: a unit may also spend what the group's earlier units left unspent of it, up to `max_unit_complexity`, so the group's mean stays at or below `max_complexity` ([the group budget](#the-group-budget)). A key of the kind, not of a round; the natural kind refuses it |
 | `max_unit_complexity` | int >= `max_complexity` | `max_complexity + 3` | With `"budget": "group"` only: the most one unit may spend. It may not be below `max_complexity` or any round's `max_complexity`; the natural kind refuses it |
 
@@ -386,19 +415,23 @@ Natural only:
 
 The packaged natural kind allows the families `typos`, `casual_writing`,
 `noise`, `neutral_container`, `answer_language`, `answer_format`, `asking`,
-`indirect`, `smalltalk_prefix`, `smalltalk_suffix`, `benign_role`; allows the
-techniques `to_leetspeak_basic`, `to_adversarial_suffix_punctuation`,
+`indirect`, `smalltalk_prefix`, `smalltalk_suffix`, `benign_role` and, since
+spec 1.4, `transliteration`, `code_switching` and `romanization` (the
+`dialect` family is not named: like the translation family it runs on the
+translation model and the translation switch auto-adds it when on);
+allows the techniques `to_leetspeak_basic`, `to_adversarial_suffix_punctuation`,
 `to_adversarial_suffix_emoji`; and denies `to_refusal_then_comply`,
 `to_apology_prevention`, `to_prefix_injection`. The spec's `kinds` narrow
-it further (step 6 below): its pool is 71 techniques
-([techniques.md](techniques.md#the-natural-pool)). A variation that leaves
+it further (step 6 below): its pool is 96 techniques
+(126 with `"translation": true`; [techniques.md](techniques.md#the-natural-pool)). A variation that leaves
 its input unchanged is rejected.
 
 ### How a kind's pool is built
 
 From every registered technique, in this order:
 
-1. remove the layers in `layers.deny` (`rewrite` by default);
+1. remove the layers in `layers.deny`, and those the spec has off by
+   default (`rewrite`) unless `layers.allow` names them;
 2. when `families.allow` or `techniques.allow` is a list, keep only the
    techniques of an allowed family or with an allowed name (with the switch
    on, `translation` counts as an allowed family unless `techniques.allow`
@@ -424,15 +457,20 @@ From every registered technique, in this order:
 - A value given replaces the default's whole value. A list replaces a list.
 - `layers`, `families` and `techniques` are overlaid list by list. An `allow`
   or `deny` given replaces the default's list of that name and keeps the
-  other. So a `layers.deny` given replaces the packaged `["rewrite"]`:
-  `{"deny": ["rewrite", "manipulation"]}` leaves out manipulation and keeps
-  the rewrite layer off, `{"deny": ["manipulation"]}` allows it.
+  other.
+- The layers the spec has off by default (`layers_off_by_default` in
+  `combination_spec.json`: `rewrite`) are added to `layers.deny` after the
+  overlay unless `layers.allow` names them. So `{"deny": ["manipulation"]}`
+  leaves out manipulation and keeps the rewrite layer off, and only
+  `{"allow": ["rewrite"]}` turns it on. A `layers.allow` naming a layer
+  that is on already raises.
 - A `deny` given without an `allow` also takes its names out of the default's
   `allow`. `"natural": {"families": {"deny": ["typos"]}}` is the natural
   default without typos. A deny that empties the default's allow raises:
   write the allow as well.
 - An `allow` list may not be empty: write `null` for all, or name what to
-  leave out under `deny`. A name may not be under both.
+  leave out under `deny` (`layers.allow` aside: a list, `[]` for none). A
+  name may not be under both.
 - The natural kind needs an allow list.
 - An allow list may name only families and techniques whose spec `kinds`
   hold the kind. A natural allow list naming one the natural kind does not
@@ -440,6 +478,14 @@ From every registered technique, in this order:
   ...) raises, naming it: a `config_dir` copy of `augmentations.json` made
   before these left the natural kind does, so take them out of its
   `families.allow`.
+- An allow list or `family_weights` naming a family or technique of a layer
+  the spec has off by default (`rewrite`) raises unless `layers.allow`
+  names the layer, saying to write `"layers": {"allow": ["rewrite"]}`: the
+  pool would drop it, and a kind that names nothing else would draw
+  nothing. One of a layer the kind's `layers.deny` names is left out with a
+  WARNING (the eval type's lists name `framing`, so an eval run that denies
+  `hacking` draws the other 31), and a `family_weights` entry of such a
+  layer raises.
 - `natural_only_families`, at the top of `augmentations.json`
   (`casual_writing` in the packaged file), are added to the adversarial `families.deny` unless the
   adversarial `families.allow` names them. A family the spec marks
@@ -457,17 +503,27 @@ list changes this; a
 `techniques.allow` that names some languages narrows the family to those
 (the eval type's eight low-resource languages).
 
-With the switch `false`, the translation an allow list names (the family or
-its techniques) and a `family_weights` entry for it are left out of the
-resolved kind, with a WARNING naming them:
-`augmentations.<kind>.translation is false, so the translation it names is
-left out: [...]`. So `"adversarial": {"translation": false}` over the eval
-type is a one-key override: its pool keeps the other 28 techniques. An allow
-list left empty by this is dropped when the other list still names
-something; when nothing but translation was allowed, the kind raises.
+With the switch `false`, the translation *and the dialect* an allow list names
+(the family or its techniques) and a `family_weights` entry for either are
+left out of the resolved kind, with a WARNING naming them:
+`augmentations.<kind>.translation is false, so the translation or dialect it
+names is left out: [...]`. So `"adversarial": {"translation": false}` over the
+eval type is a one-key override: its pool keeps the other 118 techniques. An
+allow list left empty by this is dropped when the other list still names
+something; when nothing but translation or dialect was allowed, the kind
+raises (`families.allow: ["dialect"]` with the switch off raises, it does not
+resolve to an empty pool).
 
-The packaged attacks have it `true`, drawing all 19 languages, and the
-natural kind `false`; the eval type narrows its attacks to the eight
+The switch also gates the `dialect` family (spec 1.4), which runs on the
+same model and is handled exactly like the translation family: with the
+switch on, an allow-list kind that names no specific translation language
+gets the whole translation family and the dialect family with it (so the
+packaged natural kind draws the six dialects when the switch is on without
+naming `dialect`); `false` removes it, and a `dialect` an allow list or
+`family_weights` names with the switch off is left out with the same WARNING,
+raising only if nothing else was allowed.
+The packaged attacks have it `true`, drawing all 24 languages and the six
+dialects, and the natural kind `false`; the eval type narrows its attacks to the eight
 low-resource languages. They run on the `translation` role's default,
 `translategemma-27b`, a local vLLM model
 (a GPU: about 34 GiB planned, beside the FP8 24B on one 80 or 96 GB card).
@@ -475,8 +531,8 @@ It translates paragraph by paragraph; each piece is checked, then translated
 back and judged by the generation model, up to 4 rounds
 ([stages/jailbreaks.md](stages/jailbreaks.md#models) gives the calls). The
 translation model is planned and loaded only when a kind's pool holds a
-translation technique (a rewrite technique, once there is one, calls the
-generation model, as the other model-written techniques do). An allow list admits the whole family while the switch
+translation or dialect technique (a rewrite technique calls the generation model, as
+the other model-written techniques do). An allow list admits the whole family while the switch
 is on, unless `techniques.allow` names some languages: a kind meant to draw
 only the techniques it lists says `"translation": false`.
 
@@ -520,14 +576,25 @@ The plan deals techniques per `(category, entry_type, iteration)` group
 rather than drawing each unit alone. In budget mode each of the `hacking`,
 `manipulation` and `requests` layers joins a share of the group's units equal
 to its rate: `layer_rates` over the spec's (hacking 0.5, manipulation 0.33,
-requests 0.7, request_obfuscation 0.5). The `rewrite` layer, once a kind
-allows it, joins first at its rate (the spec's 0); a count round reads no
+requests 0.7, request_obfuscation 0.5). The `rewrite` layer, once a kind's
+`layers.allow` names it, joins first at its rate (the spec's 0); a count round reads no
 rate and may draw a rewrite technique its pool holds. Within a layer, families are dealt by
 count over `family_weights`, so `{"persona": 2}` gives `persona` twice the
 share of each other hacking family; within a family, its techniques are
 dealt evenly among those a unit may take (the complexity budget still
 favours a family's cheaper techniques). `family_weights` may name only
-families the kind's pool draws. [internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)
+families the kind's pool draws. In a budget round the ten heavy full-text
+encodings (`to_base64`, `to_morse` and the others of `encode_weight` heavy
+that encode the whole text) are dealt in a slot of their own beside
+`encode`, at the spec's `heavy_encoding_weight` (0.25) times `encode`'s
+weight, so they are drawn about a quarter as often as a family: the slot is
+not a family, so `family_weights` cannot name it (`"encode:heavy"` raises
+as any name the kind does not draw); weight `encode` to move both. It is a
+quota in every budget round, not a floor: a round whose budget would have
+dealt them more as `encode`'s members, the escalation's last, draws fewer
+(the sixth change of the [first eval release](#release-notes)). A count round deals
+them as `encode`'s members.
+[internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)
 explains the dealing.
 
 `hacking` and `manipulation` exclude each other, so their rates should sum to
@@ -542,7 +609,7 @@ obfuscation layer's.
 
 A budget round lets each unit spend up to `max_complexity`. A unit that
 draws cheap techniques leaves the rest unspent, so a group's units spend
-less than `max_complexity` on average (5.77 of 6 in the table below). With
+less than `max_complexity` on average (5.60 of 6 in the table below). With
 `"budget": "group"` the units of a `(category, entry_type, iteration)` group
 share it: a unit may spend `max_complexity` plus what the group's earlier
 units left unspent of it, up to `max_unit_complexity` (`max_complexity + 3`
@@ -569,34 +636,37 @@ group has no bank, so it spends up to `max_complexity`.
   resume, naming `rounds`: run the kind with `resume=False`.
 
 What it does, measured over 3,000 units of the default adversarial kind in
-three groups (seed 42, `max_complexity` 6, ceiling 9;
-`python -m tests.jailbreak.simulate 3000 budget`):
+three groups (`max_complexity` 6, ceiling 9; `python -m tests.jailbreak.simulate
+3000 budget` prints seed 42), at spec 1.4 with `heavy_encoding_weight` 0.25.
+Each cell is seed 42, then the range over seeds 42 to 46:
 
 | | `"unit"` | `"group"` |
 |---|---|---|
-| Mean complexity per unit | 5.77 | 6.00 |
+| Mean complexity per unit | 5.60 (5.59 to 5.62) | 6.00 |
 | Highest complexity of one unit | 6 | 9 |
-| Units above 6 | 0 | 533 |
-| Obfuscations per unit | 1.71 | 1.77 |
-| Draws of complexity 3 or more | 1,555 | 1,647 |
-| `encode`: the top member's share of the family's draws, as a multiple of an even share | 8.19 | 6.57 |
-| `sensitive_words`: the same | 3.45 | 2.47 |
-| Of complexity 3 or more, drawn: `encode` (of 10) | all 10, 5 to 7 times each | all 10, 6 to 8 times each |
-| Of complexity 3 or more, drawn: `sensitive_words` (of 4) | all 4, 22 to 24 times each | all 4, 38 times each |
+| Units above 6 | 0 | 859 (819 to 867) |
+| Obfuscations per unit | 1.49 (1.49 to 1.51) | 1.66 |
+| Draws of complexity 3 or more | 1,267 (1,250 to 1,267) | 1,367 (1,356 to 1,367) |
+| `encode`: the top member's share of the family's draws, as a multiple of an even share | 7.44 (7.32 to 8.04) | 2.47 (2.47 to 3.48) |
+| `sensitive_words`: the same | 3.45 (3.24 to 3.57) | 1.58 (1.45 to 1.58) |
+| Of complexity 3 or more, drawn: `encode` (of 10) | all 10, 3 to 5 times each (3 to 6) | all 10, 3 to 6 times each (3 to 6) |
+| Of complexity 3 or more, drawn: `sensitive_words` (of 4) | all 4, 13 to 15 times each (10 to 16) | all 4, 10 to 44 times each (6 to 44) |
 
 The group budget evens out the cheap members of `encode` and
 `sensitive_words`, which the unit budget favours because a cheap one fits
 more units (the top member of each is the complexity-1 leetspeak), and
 spends the mean it is given. The heavy members stay rarer than those of
-complexity 2 under both budgets (each heavy `encode` member 5 to 7 times
-under the unit budget, against 33 to 34 for one of complexity 2): one of
-complexity 3 fits only a unit whose earlier picks leave 3 points, and `fsh`
-and `dap` refuse the heavy `encode` members (not the `sensitive_words`
+complexity 2 under both budgets (each heavy `encode` member 3 to 5 times
+under the unit budget at seed 42, against 27 to 29 for one of complexity 2):
+one of complexity 3 fits only a unit whose earlier picks leave 3 points, and
+`fsh` and `dap` refuse the heavy `encode` members (not the `sensitive_words`
 ones, which are drawn more). That skew toward the cheaper members is
-intended. The extra allowance goes to the obfuscations, the request
-obfuscation's included (2.58 complexity per unit against 2.81; the other
-layers spend the same). The draws of complexity 3 or more include 165 of the
-two `selected_many` variants under both budgets.
+intended; the ten heavy full-text encodings are dealt in a slot of their own
+at a quarter of a family's weight (above), without which they were drawn 0 to
+3 times each. The extra allowance goes to the obfuscations, the request
+obfuscation's included (2.54 complexity per unit against 2.94; the other
+layers spend the same). The draws of complexity 3 or more include 112 of the
+two `selected_many` variants under both budgets (108 to 112 over the seeds).
 
 ### Examples
 
@@ -641,9 +711,349 @@ the default) and in `params["jailbreaks"]`.
 
 ### Release notes
 
-**Upgrading from the previous release (spec version 1.0, now 1.2).** The
-jailbreak library grew from 151 techniques in 23 families to 192 active ones
-(199 registered, 7 retired) in 28 families and five layers. What that asks of
+**Release note: eval pool v2 (the third eval release).** An eval review
+widens the `eval` type's attacks from 36 techniques in 10 families to 126 in
+22 (`tests/fixtures/eval_pool.json`), admitting the pure families the eval
+never drew. Only the adversarial lists of `eval.json` change
+(`families.allow`, `techniques.allow`, `techniques.deny`): no rule, no
+technique and no spec version (it stays 1.4), and the 36 of the first pool
+stay. None of the 90 techniques added calls a model or needs the benign
+pairs, and each keeps the harmful request in its text, so the label stays
+certain. Admitted, and why:
+
+- `persona_template` (23): a persona's fixed frame with one of six
+  mechanics; the eval held no persona row, since the `persona` family has a
+  model write a scene.
+- `indirect` (6), `distractor_prefix` (3), `distractor_suffix` (3),
+  `impersonation` (3), `asking` (3): the request families the eval never
+  drew, each a template around the request.
+- `guardrail_address` (3): a line addressed to the classifier itself, the
+  attack aimed at what an eval measures; it applies to every eval input
+  (the attacks take the harmful ones only).
+- `neutral_container` (6): the request inside a code comment, a YAML
+  document, a CSV row, an email, a transcript line or a log entry, beside
+  `structural`'s three wrappers (the two families refuse each other).
+- `transliteration` (4): the English prompt written in Cyrillic, Greek,
+  Devanagari or Arabic letters by a fixed table; refused beside a
+  translation.
+- `fake_turns` (3): an invented system turn, assistant turn or earlier
+  exchange; no benign data.
+- `suffixes`: the 24 published adversarial suffixes of
+  `suffix_strings.json`; `techniques.deny` names the family's four noise
+  suffixes (random characters, not published attacks; two of them are the
+  natural kind's).
+- `to_letter_spacing` (`encode`, light, any script, hinted): taken out of
+  `techniques.deny`.
+- The eight answer languages of the eval's translations,
+  `to_ask_answer_in_swahili`, `_thai`, `_khmer`, `_nepali`, `_zulu`,
+  `_scots_gaelic`, `_bengali` and `_javanese`, named under
+  `techniques.allow` (not the whole `answer_language` family): the answer
+  asked for in the low-resource languages the eval already translates into.
+
+Not admitted, and why:
+
+- `sensitive_words`, `tokenbreak`, `wording`, `word_art` and
+  `to_payload_split_semantic`: a model marks the words or cuts the text, and
+  56 to 74% of their draws were measured discarded, so what an eval holds
+  would follow the marking model.
+- `to_payload_split`, the pure half of `payload_split` (it cuts at word
+  boundaries and calls no model): the review did not take it up. The
+  family goes in whole under `families.allow`, so admitting it would take
+  the technique by name under `techniques.allow` and leave its semantic
+  sibling out; a later eval review can.
+- `typos`, `casual_writing`, `noise`: surface noise, a natural variation
+  more than an attack (`typos` is also a model rewrite).
+- `cognitive`, `persona`: a model writes the scene, 26 to 32% discarded;
+  `persona_template` stands in for them.
+- `code_switching`, `romanization`, `dialect`: model-written, and their
+  quality cannot be checked offline (no native speaker reads them).
+- The `rewrite` layer: model rewrites, off in every packaged kind.
+- The natural-only families (`smalltalk_prefix`, `smalltalk_suffix`,
+  `benign_role`): no attack may draw them.
+- The many-shot `fsh` and `dap` variants: denied already.
+- The other eleven `answer_format` and two `temporal` techniques: the eval
+  keeps naming `to_refusal_then_comply` and `to_use_past_tense` alone; the
+  review did not take up the others.
+- The other 18 answer languages, the four noise suffixes and the 22 other
+  encodings stay out as before.
+
+| Family | Techniques, v1 → v2 | Rows per technique, v1 → v2 | Share of the rows, v1 → v2 |
+|---|---|---|---|
+| `translation` | 8 → 8 | 25-26 → 13-15 | 33.8% → 18.7% |
+| `encode` | 5 → 6 | 13-14 → 6-7 | 11.3% → 6.3% |
+| `fsh`, `dap` | 4, 4 → 4, 4 | 16-18 → 9-10 | 11.3% each → 6.3% each |
+| `framing` | 5 → 5 | 17 → 7-8 | 14.2% → 6.2% |
+| `structural` | 3 → 3 | 28-29 → 12-13 | 14.2% → 6.3% |
+| `ascii_art` | 1 → 1 | 68 → 37 | 11.3% → 6.2% |
+| `continuation` | 4 → 4 | 20-22 → 9-10 | 14.0% → 6.3% |
+| `temporal`, `answer_format` | 1, 1 → 1, 1 | 85-86 → 37-38 | 14.2-14.3% → 6.2-6.3% |
+| `persona_template` | 0 → 23 | → 1-2 | → 6.2% |
+| `suffixes` | 0 → 24 | → 1-3 | → 6.3% |
+| `answer_language` | 0 → 8 | → 4-6 | → 6.2% |
+| `indirect`, `neutral_container` | 0 → 6 each | → 6-7 | → 6.2% each |
+| `transliteration` | 0 → 4 | → 9-10 | → 6.3% |
+| `distractor_prefix`, `distractor_suffix`, `impersonation`, `asking`, `guardrail_address`, `fake_turns` | 0 → 3 each | → 12-13 | → 6.2-6.3% each |
+| All | 36 → 126 | | |
+
+The table is a plan of the packaged eval example's size, 300 harmful inputs
+in one group (one taxonomy category) at the eval's seed, 43, its two rounds
+600 rows; a round-2 row holds two families, so the shares add up to 150%.
+Each family is dealt an even share and the translation family three
+(`family_weights`), so each family goes from about an eighth of the rows to
+about a sixteenth, translation from a third to under a fifth. In 300 inputs
+two suffixes and five persona templates are not drawn when the inputs fall in
+three groups (their families have more members than picks in a group);
+every one of the 126 is drawn in 3,000 rows (1,500 inputs) at seeds 42 to
+46 in one, three or ten groups, twice at the least, and a test holds it at
+the eval's seed. No group falls short of a target: the count rounds set
+none. The plan calls a model less: of its 600 rows 273 drew a translation or
+a selected `fsh` or `dap` variant before and 150 now (45.5% to 25.0%), the
+spec's calls going from 476 to 2,506 to 262 to 1,382 (the translation
+model's from 406 to 2,436 to 224 to 1,344), and the rows that need the
+benign pairs from 136 to 76; in 3,000 inputs in three groups, 2,708 of 6,000
+rows to 1,493.
+
+Of the 7,875 pairs of the 126, the rules admit 5,613
+(`tests/fixtures/eval_pairs.json`, which records them per family pair now,
+as one per line would be too long to read), the 291 pairs of the first pool
+among them as before. Two of the rules kept as they were reach further now:
+lifting the manipulation block would admit 146 eval pairs (104 of the first
+pool and 42 of `fake_turns` beside a translation, a heavy encoding or ASCII
+art), and lifting `fake_turns`' refusal of `structural` and
+`neutral_container` 27 (none before). The text a technique draws for a seed is pinned by digest for 118 of the
+126 (`template_draws.json`, whose eval-pool guard covers them, so a change
+to their text is an eval review of its own): the template techniques, and,
+since a later fix, the transliterations, the published suffixes, the ASCII
+art and the fsh and dap techniques; the eight translations call the
+translation model and are tested by their requests instead.
+
+No axis is pinned for v2: `check_dimensions` passes as it did. The
+families admitted vary dimensions no axis of the eval type relates to
+(`surface_noise`, new with the suffixes, among them), the `writer` axis
+and `role_framing` stay distinct by the earlier ruling, `directness` stays
+pinned at `explicit` and `focus` is dealt one value, so the eval inputs are
+dealt as before and only the attacks move.
+
+Eval files built before this release are not comparable with those built
+after. The type's `dataset_type_hash` in the run records goes from
+`70d99166ba903f36` (the first eval release, `643c0ed`) to
+`9aa90d52e957ef31`, and the jailbreaks plan file's pool from 36 names to
+126. A kept eval plan raises on resume, naming `pool`, since the section
+admits families older than the plan, more than the library's growth: run
+the jailbreak stage of an eval run with `resume=False` (the stage starts
+over). A plan of 300 inputs in three groups at seed 43, which a digest pins,
+deals 281 of its 300 round-1 rows another technique and all 300 round-2
+rows another pair. A `config_dir` copy of `eval.json` made before this
+release (what `scaffold_setup` wrote at the first eval release, `643c0ed`)
+keeps the first pool and adds `to_letter_spacing` (its `encode` family is
+allowed whole there, and spec 1.4 added the technique to it): 37
+techniques in 10 families, none beyond the packaged type's. An eval run
+names the twelve families it lacks in a WARNING (`configs:
+dataset_types/eval.json in ... differs from the library's, and through it
+the eval run draws no technique of these families ...`). Write it again with
+`scaffold_setup(..., overwrite=True)`, delete it if you did not change it, or
+copy the packaged adversarial lists into it
+([refreshing a stale copy](#your-own-config-folder)).
+
+**Spec version 1.4.** What changes for a run you already have:
+
+- **Seventy-one techniques.** Spec 1.4 adds twelve persona templates, the 24
+  published adversarial suffixes, the letter spacing and the three
+  techniques of a new request family, `guardrail_address`, all attack only,
+  the Yoruba translation, and the 30 techniques of four language-mix
+  families (below): the library has 315 active techniques
+  (322 registered, 7 retired) in 41 families, the default attack pool goes
+  from 214 to 285 techniques in 34 families, the natural pool from 72 to 96
+  (126 with `"translation": true`, which adds the 24 translations, Yoruba
+  among them, and the six dialects), and the `eval` type's pool is
+  unchanged (36: it allows none of the new families and denies
+  `to_letter_spacing` by name; eval pool v2, above, then admitted the
+  twelve frames, the published suffixes, the letter spacing,
+  `guardrail_address` and `transliteration`). An attack plan kept from 1.3
+  resumes with
+  the growth WARNING naming them and does not draw them until planned again
+  with `resume=False`, and so does a natural plan (it names the 24
+  language-mix techniques that need no switch, and with its `translation`
+  switch on the dialects and Yoruba too); a fresh plan with the same seed
+  draws differently, since four families are larger, the request layer has
+  one family more and the obfuscation layer four more.
+- **Twelve persona templates.** `persona_template` has 23 frames now, each
+  drawing one of the same six mechanics: three each of emotional and family
+  appeals, legitimate experts and authorities, and simulated systems and
+  games, and one each built around a point and penalty system, a
+  persona-tagged opening and a stay-in-character reset.
+- **The Yoruba translation.** `to_yoruba` (its row of `languages.json` says
+  `"translation_since": "1.4"`) joins the default attack pool and the
+  natural pool with `"translation": true`. Yoruba is on watch: in the
+  measurement the judge rejected 40.7% of its calls and 7.4% of its units
+  were discarded after 4 rounds, so expect more calls and more discarded rows
+  for it than for the other languages.
+- **Four language-mix families.** The obfuscation layer gains `dialect` (6),
+  `code_switching` (10), `transliteration` (4) and `romanization` (10), at
+  `within_layer_order` 11 to 14, between `translation` and `typos`; all four
+  are marked adversarial and natural, so the packaged natural kind allows
+  them. `dialect` translates the prompt into a regional variant
+  (Brazilian Portuguese, Mexican Spanish, Canadian French, Egyptian Arabic,
+  German (Switzerland), Traditional Chinese) on the translation model, with the
+  translation machinery and its checks (on a machine translator also a
+  Traditional-character share for Traditional Chinese and no sharp s for
+  German (Switzerland), reasons `simplified` and `eszett`), so it follows the kind's
+  `translation` switch (`false` removes it) and plans the translation model.
+  `code_switching` and `romanization` are rewrites by the generation model
+  (a second language mixed into the English prompt; a non-Latin language
+  spelled in the Latin alphabet), each checked by a code gate (script share
+  or GlotLID, and a length band) and then by the check model for meaning, a
+  rejected rewrite made again once, so they add `meaning` to the spec's
+  checks and make a run with them plan the check model. A code-switch needs
+  a prompt of two words or more: a fresh plan does not draw one for a
+  one-word input, and one a kept plan names is discarded without a call
+  (`reason=too short to mix`); a Latin-script rewrite of four words or
+  fewer is read by GlotLID in windows of one or two words, whose labels
+  are less reliable than those of the four-word windows of a longer one.
+  `transliteration` is pure: the Latin letters written in Cyrillic, Greek,
+  Devanagari or Arabic script by a fixed table, tagged `needs_latin`. The
+  four families refuse what a translation refuses, `translation` and one
+  another. The prompts are `code_switch`, `code_switch_check`, `romanize`
+  and `romanize_check`; the languages and variants are the rows of
+  `code_switch_languages.json`, `romanization_languages.json` and
+  `dialect_variants.json`. No native speaker has checked any of them: the
+  gates and the check model are the whole check, and the dialect's region is
+  not checked at all ([techniques.md](techniques.md#what-the-families-do)).
+  A `config_dir` copy of `augmentations.json` made before does not allow the
+  four families in its natural kind, and the run says so at INFO.
+- **The benign pairs are checked.** Each pair the stage generates for `fsh`
+  and `dap` is read by the `check` model (else the `gen` model) and asked for
+  again when rejected; a cache written before is loaded as it is, unchecked.
+  To check it, delete `benign_samples.csv` and its two sidecars, so the
+  pairs are generated again. A recipe that names a separate `check` model now
+  has it planned for the jailbreak stage when the attacks draw `fsh` or `dap`,
+  which the eval type's do.
+- **`to_morse` and `to_braille` are tagged `needs_latin`.** No rule reads the
+  tag: no draw, pair or pin moves.
+- **Published adversarial suffixes** come from
+  `configs/jailbreak/obfuscation/suffix_strings.json`: 24 strings copied
+  from public GCG artifacts, each with its source and the model it was
+  optimized against, a technique per row (`to_adversarial_suffix_<slug>`,
+  the suffix appended after a space, the info `slug=<slug>`), attack only,
+  each refusing `ascii_art` (drawn as art, a suffix is no longer the token
+  string it was published as); the four noise
+  suffixes stay.
+- **Two techniques from the BELLS guardrail attacks.** `to_letter_spacing`
+  (the `encode` family, light, with four decode hints) puts a space between
+  every two characters a reader sees, the reference `space_between_letters`.
+  `guardrail_address` is a new request family of three techniques, the
+  reference `benign_instruction_for_classifier`: a line or block addressed
+  to a content classifier or supervisor, before or after the prompt, saying
+  the message is benign or already approved. It is a request-layer family
+  (one request per combination, competing with the others), and the plan
+  draws it for every input but an absolutely benign one
+  ([techniques.md](techniques.md)).
+- **The heavy encodings' slot is retuned to 0.25.** The four language-mix
+  families share the obfuscation layer's family-first picks among more
+  families, and the slot followed them down: at the spec's
+  `heavy_encoding_weight`, 0.2, the ten heavy full-text encodings were drawn
+  30 or 31 times in 3,000 units of the default attacks, where the weight was
+  set for about 40 (44 to 50 at spec 1.3). Over seeds 42 to 46 in one, three
+  and ten groups (15 plans of 3,000 units a weight) the mean is 30.1 at 0.2,
+  38.8 at 0.25, 46.5 at 0.3, 51.7 at 0.35 and 59.6 at 0.4, and one of the ten
+  goes undrawn in 2, 0, 0, 0 and 1 of the 15 plans (in ten groups), so the
+  weight is 0.25 now: 37 or 38 draws in one group, 38 or 39 in three, 40 in
+  ten, the least drawn of the ten 3 times in one and three groups and 1 to 3
+  in ten. The escalation's round 3 draws 36 of them (30 at 0.2) and round 4
+  27 or 28 (24). A plan of 300 inputs in 15 groups of 20 draws 8 to 11 at
+  any weight from 0.2 to 0.4: each small group's slot takes its first pick
+  early and its next only after more units than the group has. A count round
+  (the eval type, the natural kind, escalation rounds 1 and 2) does not read
+  the weight, so the eval draws do not move. A budget plan kept from before
+  resumes with the WARNING that the rules its combinations were drawn by
+  changed (its `rules` id holds the weight) and replays its combinations;
+  plan it again with `resume=False` to draw at 0.25.
+- **The second eval release (text only).** The eval pool, its pairs and its
+  pinned draws stayed as they were, but the text of some eval rows moved:
+  the variants of `to_nefarious_goal`, `to_fill_in_blank`,
+  `to_continue_instructions`, `to_complete_story` and `to_use_past_tense`
+  that did not read as a coherent request were rewritten (each keeps its
+  eight variants, its purpose, its slots and its info key); the eval's
+  short pools (the five framing and four continuation directives,
+  `refusal_then_comply`, `past_tense`) reached eight variants and `to_json`
+  became a pool like `to_xml` and `to_markdown`; and the five heavy
+  encodings of the eval pool write a decode hint on about half their rows
+  (`hint=<name>` in `technique_info`). Eval files built before it are not
+  comparable with those built after; `template_draws.json` pins the new
+  texts. Eval pool v2 (the third eval release, above) then widened the
+  pool.
+- **One more eval text change: `to_fill_in_blank`.** After eval pool v2, the
+  variant `blank_answer` of `to_fill_in_blank`, which repeated `fill_blank`
+  (9 of its 12 word trigrams were in the other), was written again as a
+  transcript with a blank reply. The pool keeps its eight variants, its info
+  key and its slots. In the eval type's plan (300 inputs, seed 43, three
+  groups) 4 of the 300 round-1 units and 6 of the 300 round-2 units hold the
+  technique, and the text of one unit moves (the one that drew
+  `blank_answer`). The pool, the pairs and the technique names of the pinned
+  draws do not move; `template_draws.json` does for this technique. A test
+  now fails when two variants of a continuation pool share more than half of
+  their word trigrams.
+- **The technique catalog.** [catalog.md](catalog.md) and `docs/catalog.json`
+  list every registered technique with its tags, model calls, template
+  variants, prompts and pools, the techniques it combines with and the rules
+  that refuse the others, generated from the code (`scripts/catalog.py`); a
+  test fails until both are written again after a change to the spec, a
+  rule, a pool, a template or a prompt. It changes no run.
+
+Three more changes of this release, none of which moves a plan, a pool or
+a draw, have notes of their own:
+
+**Release note: the persona is the answerer.** The `persona` techniques
+(the adversarial kind only; the `eval` type draws none) asked the model for a
+scene in which the persona would *ask* the text, and gave the construction the
+persona's description but never its name, so whether the final text asked the
+target to *play* the persona was left to the construction model. The scene
+prompt (`persona_scenario_generation`) now has a user put the text to the
+persona, which answers in character; `persona_invention` asks for a character
+who would answer it; and the construction is a prompt of its own,
+`jailbreak/persona_construction`, given the persona's `display_name` (the
+invented name for `to_invented_persona`), its description, the scene and the
+text, which asks the target to play the persona. The `cognitive` techniques,
+`to_persona_roleplay` among them, keep `scenario_generation` and
+`jailbreak_construction`. The calls (3 to 9; 4 to 12 for the invented
+persona), the info, the checks and the plan are unchanged: no plan raises or
+warns, and no pure technique's draw moves. Fresh plans and the pending units
+of a kept plan use the new prompts; finished rows keep their texts. An
+overlay of `jailbreak_construction` no longer reaches the persona
+techniques: copy `persona_construction` to change theirs. How the scenario
+check takes the new scenes, and how often the construction is discarded, is
+not measured yet: `scripts/persona_smoke.py` counts acceptance and discards
+per technique on a model.
+
+**Release note: the family and layer columns.** A build writes two more
+columns on its jailbreak and variation rows, read from `technique` through
+the library's registry: `families`, the first family of each technique, and
+`layers`, its layer, each `+`-joined in the order of `technique`, so a
+dataset can be split per family or per layer; a name the library does not
+register reads `?<name>` and `?`, and the build goes on
+([build](stages/build.md#the-families-and-layers-columns)).
+`complete_dataset.csv` has them after the jailbreak file's columns, and
+`eval_jailbreaks.csv` right after `technique`: an eval file built from now on
+has two more columns than one built before, so a reader that takes its
+columns by position, or compares two eval releases' headers, sees them. The
+stage files keep their columns, and nothing needs to run again: build again
+to get the columns. The build's run record now holds `spec_version`, the
+spec they were read off.
+
+**Release note: the scenarios table.** The jailbreak stage takes
+`scenarios` (a params key under `jailbreaks`; off by default): on, each kind
+keeps the scene each cognitive or persona technique built its prompt on in
+`<stem>.scenarios.csv` beside its manifest (`input_id`, `iteration`,
+`sample_id`, `technique`, `scenario`), so the model-written scenarios can
+be read beside the rows without growing `technique_info`, which still names
+the category only ([the scenarios table](stages/jailbreaks.md#the-scenarios-table)).
+Turning it on changes no row and no plan: a kept plan resumes with it, and
+the table holds the scenes of the units that run from then on. A fresh run
+removes the table with the kind's other files.
+
+**Upgrading from spec version 1.0 to 1.3.** The
+jailbreak library grew from 151 techniques in 23 families to 244 active ones
+(251 registered, 7 retired) in 36 families and five layers. What that asks of
 a run you already have, and what you will see; each point has its note below.
 
 - **One re-plan is planned: the adversarial kind.** The packaged attacks now
@@ -653,88 +1063,160 @@ a run you already have, and what you will see; each point has its note below.
   `resume=False`, or set `"allow_request_obfuscation": false` in the kind to
   keep the plan as it is.
 - **A kept plan warns when the library grew.** Resumed after the library
-  added or retired techniques, either kind keeps its plan with one WARNING
-  that names them. It does not draw the new techniques until it is planned
-  again with `resume=False`, and still replays the retired ones.
+  added or retired techniques, or changed its version or its rules, either
+  kind keeps its plan with one WARNING that names them and counts the
+  pending units whose combination today's rules refuse. It does not draw
+  the new techniques until it is planned again with `resume=False`, still
+  replays the retired ones, and its rows record the spec version the plan
+  was drawn at. A plan file written before this release records no rules,
+  so its first resume warns once.
 - **The natural kind's pool changed.** The spec's `kinds` narrowed it to the
   techniques marked natural, and spec 1.2 then grew it, to 71 techniques in
-  13 families by default (46 in 8 before; 90 with `"translation": true`). A
+  13 families by default (46 in 8 before); spec 1.3 added the urgent ask, to
+  72 (95 with `"translation": true`); spec 1.4 then added the 24
+  transliteration, code-switching and romanization techniques, to 96 (126
+  with `"translation": true`: the 24 translations and the six dialects). A
   natural plan made before the narrowing raises on resume: run the natural
   kind with `resume=False`. One made since resumes with the WARNING above.
   A `config_dir` copy of `augmentations.json` made before spec 1.2 does not
   draw the new natural families, and the run says so at INFO.
+- **A `config_dir` copy of `eval.json` widens the eval pool.** A copy made
+  before this release (what `scaffold_setup` wrote) keeps its old deny list,
+  so its eval attacks draw 57 techniques, not the pinned 36: the 21 the library
+  added to the families it allows, `to_atbash`, `to_base32`, `to_base85`,
+  `to_binary`, `to_caesar_cipher`, `to_dap_random_many`,
+  `to_dap_selected_many`, `to_fsh_random_many`, `to_fsh_selected_many`,
+  `to_fullwidth`, `to_hex`, `to_html_entities`, `to_lookalike_letters`,
+  `to_math_styled`, `to_reversed_characters`, `to_reversed_word_order`,
+  `to_reversed_words`, `to_url_encoding`, `to_use_future_tense`,
+  `to_use_historical_era` and `to_zero_width_noise`. An eval run names them
+  in a WARNING (`configs: the eval attacks of ... draw 21 technique(s) the
+  library's eval type does not ...`). Delete a copy you did not change, or
+  write it again with `scaffold_setup(..., overwrite=True)`
+  ([refreshing a stale copy](#your-own-config-folder)); to keep your edits,
+  add the 21 names to its adversarial `techniques.deny`. (Eval pool v2,
+  above, then admitted twelve families: a copy made before it draws the
+  first pool and `to_letter_spacing`, and an eval run names the families it
+  lacks in a WARNING.) The packaged type
+  now names `to_use_past_tense` under `techniques.allow` and no longer
+  allows the `temporal` family whole, so its pool, rounds and draws are the
+  same but its `dataset_type_hash` in run records is another.
 - **Fresh plans draw differently.** The same seed gives other combinations
   than at spec 1.0: the new techniques are dealt, the seven retired ones are
   not, a technique is drawn only for the inputs it applies to, several
-  rules are new, and the request obfuscation's families are counted apart
-  from the obfuscation layer's, so the attacks draw every technique of
-  their pool. The default attack pool is 178 techniques in 24 families
-  (142 in 22 before). The `eval` type's pool and draws are held, at 36
-  techniques in 10 families, but for the ASCII-art cap, which changes the font
-  `to_ascii_art` draws for texts of about 40 characters or more.
+  rules are new, the layers are dealt with a jitter per unit, the request
+  obfuscation is decided only for a unit that drew a request, and its
+  families are counted apart from the obfuscation layer's, so the attacks
+  draw every technique of their pool. The default attack pool is 214
+  techniques in 29 families (142 in 22 before; 178 in 24 at spec 1.2). The
+  `eval` type's pool is unchanged, at 36 techniques in 10 families (126 in
+  22 since eval pool v2, above), but its
+  draws moved: the ASCII-art cap changes the font `to_ascii_art` draws for
+  texts of about 40 characters or more, and the rules of the first eval release
+  (below) change which pairs of the pool one combination may hold.
+- **The first eval release moves the eval type's draws.** The pool is the same 36
+  techniques, but a translation now refuses every `encode` technique and
+  ASCII art the heavy full-text encodings, so the pool loses 44 of its 335
+  pairs, and the manipulation layer now applies last, around the finished
+  question, so 40 of the 291 pairs left (each `fsh` or `dap` technique
+  beside a wrapper or a request) write another text: eval files made before
+  this release are not comparable with those made after, and the spec's
+  version stays 1.3, so two things tell them apart: a row's `technique`
+  column lists its techniques in the order they applied (a manipulation
+  technique before the obfuscations and the request until this release,
+  after them since), and the `rules` id of the jailbreaks run record
+  (`Datasets/jailbreaks.run.json`, by kind) differs. A kept eval plan
+  replays its recorded combinations in their recorded order and warns on
+  resume that the rules changed; plan the eval type again with
+  `resume=False` to take them. Two more rules and a dealing slot change the
+  training attacks only: `sensitive_words` and `tokenbreak` refuse each
+  other; the request obfuscation, when it translates, keeps a suffix, a
+  wrapper and a container out of the unit (which makes the translation the
+  unit's only obfuscation); and a budget round deals the ten heavy full-text
+  encodings in a slot of their own at the spec's `heavy_encoding_weight`,
+  0.2 (0.25 since spec 1.4's retune), a quota rather than a floor (about 45
+  draws of the ten in 3,000 units of the escalation's last round, where they
+  were about 121; the note on the first eval release, below).
+- **Stricter checks, and what they skip.** An allow list or `family_weights`
+  that names a family or technique of a layer the kind leaves off raises
+  (the `rewrite` layer needs `layers.allow`); a `config_dir`
+  `augmentations.json` whose default kind has an unknown key is warned about,
+  one with a missing key or a wrong shape raises, naming the file; the spec,
+  its data rows and the template pools are checked at import, with messages
+  that name the file. An input id given twice is planned once, with a
+  WARNING (two entry types for one id raise); a kind whose pool is empty is
+  skipped with a WARNING, as a kind with no matching entry type is; and the
+  stage plans and loads a separate `check` model only when a kind's pool
+  holds a technique that is checked (the eval type's attacks hold none).
+- **A new layer, off by default.** The `rewrite` layer holds 16 model-written
+  techniques (persuasion, tense rewrites, model distractors; attacks only).
+  No packaged section allows it, so no pool, plan or draw changes unless a
+  kind writes `"layers": {"allow": ["rewrite"]}` (its note below).
 - **More model calls, and new files.** A typo rewrite and a cognitive or
   persona scenario are now checked by a model, which costs calls (the typo
   and scenario notes), for the pending units of a kept plan too, and the
-  request obfuscation adds translations to a fresh attack plan (its notes).
-  Each kind
+  request obfuscation adds translations to a fresh attack plan (its notes);
+  an invented persona asks for its persona first, and `to_payload_split_semantic`,
+  `to_word_art` and the two wording techniques call the generation model too
+  (their notes). Each kind
   writes a `<kind>.variants.csv` after a run, and its plan file records the
   `spec_version` its pool was drawn at.
 
 **Release note: the request obfuscation on.** The packaged adversarial kind
 now sets `allow_request_obfuscation` true. A budget round deals, at the
 spec's `request_obfuscation` rate (0.5), a light encoding or a translation
-applied after the request technique, to the finished request; it takes one
-of the unit's `max_obfuscations` slots and its complexity, so a unit holds
-no more obfuscations than before. Measured with
-`tests/jailbreak/simulate.py` over 3,000 units of the default kind in three
-groups (seed 42, spec 1.2): 50.0% of the units take one; of these, a third
-each (33.4% a light `to_sensitive_words_encode_*`, 33.3% a light `encode`
-technique, 33.3% a translation, which is 16.6% of the units), since the
-step's families are dealt among themselves, counted apart from the
-obfuscation layer's (the next note). The obfuscations per unit go from 1.79
-to 1.71 (the step holds a slot rather than adding one, and the complexity it
-spends or the rules it brings sometimes leave the unit's other slot empty),
-the units holding a
-translation from 22.6% to 33.9%, the light encodings per unit from 0.28 to
-0.48, and the model-calling techniques per unit, translation aside, from
-1.02 to 1.01 (the step takes slots from the other obfuscation families
-alike, each from 0.17 to 0.12 picks per unit). The extra model cost is
-mostly the translations the step adds: each runs on the translation model,
-a machine-translation pass per piece with its checks, back-translations and
-the generation model's judge, now over the request's wording as well as the
-prompt, for about 17% of the rows; each light sensitive-word encoding makes
-its one marking call to the generation model, as it did as an obfuscation.
-The rate is a lever: `"layer_rates": {"request_obfuscation": 0.25}` in the
-adversarial kind halves it, and `"allow_request_obfuscation": false` turns it
-off. The kind's rounds gain the key, so an adversarial plan kept from
-before, whose section left the key out, raises on resume, naming `rounds`:
-run the adversarial kind once with `resume=False` (the natural kind's plan is
-not affected). The eval type sets it false and draws by count, which never
-reads it: its pool and its draws do not change.
+applied after the request technique, to the finished request, to the units
+that drew a request technique; it takes one of the unit's `max_obfuscations`
+slots and its complexity, so a unit holds no more obfuscations than before.
+Measured with `tests/jailbreak/simulate.py` over 3,000 units of the default
+kind in three groups, with the step on and with it off
+(`"allow_request_obfuscation": false`), at seed 42 and, in brackets, the range
+over seeds 42 to 46: 50.0% of the units take one (1,500 of 3,000; 1,499 at
+two seeds), and no unit takes one without a request. Of these, a third each
+(about 16.6% of the units each, 498 to 501): a translation, a light `encode`
+technique and a light `to_sensitive_words_encode_*`, since the step's
+families are dealt among themselves, counted apart from the obfuscation
+layer's (the next note). The obfuscations per unit are 1.47 (1.47 to 1.48)
+with the step and 1.57 (1.56 to 1.58) without: it holds a slot rather than
+adding one, and a translation drawn this way keeps a suffix, a wrapper and a
+container out of the unit's other obfuscations (the first eval release note, below).
+The units holding a translation go from 11.9% (11.8% to 12.0%) to 23.9%,
+the light `encode` techniques per unit from 0.12 (0.12 to
+0.12) to 0.24, and the model-calling techniques per unit, translation aside,
+from 1.01 (1.01 to 1.02) to 0.93: the step takes slots from the
+other obfuscation families. The extra model cost is mostly the translations the
+step adds: each runs on the translation model, a machine-translation pass
+per piece with its checks, back-translations and the generation model's
+judge, now over the request's wording as well as the prompt, for about 17%
+of the rows; each light sensitive-word encoding makes its one marking call to
+the generation model, as it did as an obfuscation. The rate is a lever:
+`"layer_rates": {"request_obfuscation": 0.25}` in the adversarial kind halves
+it, and `"allow_request_obfuscation": false` turns it off. The kind's rounds
+gain the key, so an adversarial plan kept from before, whose section left the
+key out, raises on resume, naming `rounds`: run the adversarial kind once with
+`resume=False` (the natural kind's plan is not affected). The eval type sets
+it false and draws by count, which never reads it: its pool and its draws do
+not change.
 
-**Release note: the request obfuscation counted apart.** The planner now
-counts the request obfuscation's families apart from the obfuscation
-layer's. It counted them together before: the request obfuscation's picks
+**Release note: the request obfuscation counted apart.** The planner counts
+the request obfuscation's families apart from the obfuscation layer's. Until
+commit `ec8bb42` it counted them together: the request obfuscation's picks
 made `encode` and `sensitive_words` the families dealt most, and since the
 dealer takes the family dealt least, the layer drew them only when no other
-family fitted, 3 times in 3,000 units of the default attacks (seed 42,
-three groups). 14 techniques were never drawn: `to_base64`, `to_base85`,
-`to_hex`, `to_binary`, `to_morse`, `to_braille`, `to_ascii_ordinal`, `to_unicode_escape`,
-`to_sensitive_words_split`, `to_synonym_substitution`,
+family fitted, and 14 techniques of the default attacks were never drawn in
+3,000 units (seed 42, three groups): `to_base64`, `to_base85`, `to_hex`,
+`to_binary`, `to_morse`, `to_braille`, `to_ascii_ordinal`,
+`to_unicode_escape`, `to_sensitive_words_split`, `to_synonym_substitution`,
 `to_sensitive_words_variables` and the base64, ascii and unicode
-`to_sensitive_words_encode_*`; `to_base32` was drawn once. Now every
-technique of the pool is drawn, and a test holds it over 2,000 and 3,000
-units under both budgets. Fresh default attack plans draw differently: the
-request obfuscation no longer starves the layer's `encode` and
-`sensitive_words`, so the layer deals them as often as its other families;
-the request obfuscation deals a translation a third of the time (it was
-4%), and `family_weights` apply to its families as to the layer's. The
-units holding a translation go from 26.4% to 33.9%, and the plan's
-translation calls, from the spec's, from 1,584–9,504 to 2,034–12,204 per
-3,000 units (all model calls from 7,086–21,858 to 7,407–24,781). This lands
-with the re-plan the request obfuscation already asks (the note above): a
-kept plan replays unchanged. A kind with `allow_request_obfuscation` false
-and the `eval` type, which draws by count, draw as before.
+`to_sensitive_words_encode_*`. Since that commit every technique of the pool
+is drawn, and a test holds it over one plan of 4,000 units under each budget.
+The request obfuscation deals a translation a third of the time (4% of its
+picks at the parent of `ec8bb42`), the units holding a translation going from
+26.4% to 34.2% (792 to 1,026 of 3,000, measured at the two commits), and
+`family_weights` apply to its families as to the layer's. This landed with
+the re-plan the request obfuscation already asks (the note above): a kept
+plan replays unchanged. A kind with `allow_request_obfuscation` false and the
+`eval` type, which draws by count, draw as before.
 
 **Release note: kept plans tolerate the library's growth.** A jailbreak
 plan file now records the spec version its pool was drawn at
@@ -745,6 +1227,110 @@ names them, where it used to raise: the plan does not draw the new
 techniques until it is planned again with `resume=False`. A changed seed,
 `rounds`, `family_weights`, `layer_rates`, or a pool your section changed,
 still raises.
+
+**Release note: the rules a plan was drawn by.** A jailbreak plan file now
+also records `rules`, a content id of what the plan's draws read off the
+spec (the layer order, caps and rates, the manipulation list, the
+request-obfuscation lists when a round draws that step, the heavy
+encodings' weight when a budget round's pool holds one, the pool's families
+and each pool technique's tags), since the rules
+can change while the spec version does not (as they did twice within 1.3).
+The one WARNING of a kept plan is now given also when its spec version or
+its rules are not today's (and when its plan file, written before this
+release, records no rules), and it counts the pending units whose recorded
+combination today's rules refuse; those still run as planned (plans of 600
+default-attack units and of 2,400 escalation units drawn by commit `328cb99`,
+spec 1.2, in three groups, hold 91 and 348 such units at seed 42, 134 and 333
+at seed 43). A row's `combination_spec_version` is now the spec version
+its plan was drawn at, not the library's: the rows a resume writes for a
+plan kept from 1.2 say 1.2. The run record's `spec_version` is still the
+library's. Nothing raises that did not, and no draw changes.
+
+**Release note: layers dealt with a jitter per unit.** The planner deals a
+layer over a group while its picks are below `floor(rate x position +
+jitter)`, the jitter now drawn afresh for each unit (seeded by the group,
+the layer and the position) where it was one offset per group and layer. With
+one offset a layer's picks repeated every `1 / rate` units, so two layers of
+one rate fell on the same units, or almost never on the same, for a whole
+group, by the seed. At commit `590babe` (900 units of the default attacks in
+three groups), hacking and the request obfuscation (both 0.5) met on 68% of
+the hacking units at seeds 1 and 2, 100% at seed 42 and 2% at seed 43, and
+`ascii_art`, which refuses both a hacking technique and a translation, was
+drawn 33, 35, 51 and 8 times. Now they meet on 49% to 55% of the hacking
+units (seeds 1, 2 and 42 to 46) and `ascii_art` is drawn 59 to 64 times.
+Every layer keeps its rate and a group still gets `rate x size` picks
+rounded down or up. A fresh budget plan draws differently from the same
+seed; a kept plan replays unchanged; the `eval` type, which draws by count,
+deals no layer and draws as before.
+
+**Release note: the request obfuscation only with a request.** The step
+obfuscates the finished request, but it was decided whether or not the unit
+had drawn a request technique; without one it was applied after the
+outermost wrapper (at commit `8ccb20c`, 435 of the 1,500 units that took it
+in 3,000 units of the default attacks at seed 42 had no request, 161 of them
+with a structural wrapper or a neutral container). It is now decided only
+once a request technique is picked, so no unit takes it without one. It is
+still dealt at its rate over the group's units, so it falls on the units
+that hold a request (0.7 of them by default) more often, and the default
+attacks still give it to half their units (1,500 of 3,000 at seeds 42, 44
+and 45; 1,499 at 43 and 46), the escalation's rounds 3 and 4 to 0.5 and 0.7
+of theirs; a group whose last units hold no request may fall one short. A
+fresh plan with the request obfuscation on draws differently from the same
+seed; a kept plan replays unchanged; a kind with it off and the `eval` type,
+which draws by count, draw as before.
+
+**Release note: fixes to the techniques found in review.** These change the
+text of a fresh plan's units and of the pending units of a kept one; finished
+rows, kept plans, pools and the eval type's draws are unchanged.
+
+- `to_stripped_accents` and its applicability keep a leading combining mark
+  (a text that began with one raised, and one such input stopped the plan of
+  the whole kind). A predicate that raises now stops the plan with a
+  `RuntimeError` naming the technique and the input.
+- The neutral containers fit the prompt to the container. In the comment and
+  YAML containers every line break but a line feed is written as one; in the
+  C and HTML block comments a `*/` or `-->` in the prompt gets a space before
+  its last character; a YAML block scalar drops the leading spaces of the
+  first line and empties the lines of only spaces; a WebVTT or SRT cue keeps
+  only the non-blank lines. Only a prompt holding such a character, or
+  leading spaces, is written differently.
+- The marked-word parse (`sensitive_words`, `tokenbreak`, `word_art`,
+  `wording`): a word named twice counts once, a word of one letter is
+  refused (`malformed word list`) unless it is a Chinese character, a word
+  with a joiner, a non-joiner or a zero-width space is accepted, and curly
+  quotes, guillemets or an ellipsis around the words are stripped.
+- `encode`'s character clusters (the separators, the reversals, the
+  zero-width noise, the token split): a skin-tone modifier stays with its
+  emoji, a flag is one cluster, and a decomposed Hangul syllable stays whole.
+- `payload_split` writes each part as a JSON string, so a quote or a
+  backslash in a part is escaped. A rewrite the check accepts but that has no
+  text, or is the prompt itself, is discarded (`empty rewrite`, `unchanged
+  rewrite`); a model distractor equal to the prompt is asked for again.
+- The many-shot variants of `fsh` and `dap` stop with a named error (the
+  unit's error row) when the benign cache holds no short pair, where they
+  wrote the request alone or raised an `IndexError`.
+- `to_math_styled` writes its style under `math_style=<name>`. It wrote
+  `style=`, the key the continuation techniques' variants are read under, so
+  a row holding both lost all its variants in the variants table; finished
+  rows keep `style=`.
+- A machine translation's checks no longer hold a piece under 20 characters
+  to the length band (a label or a digit keeps its characters) and take a
+  GlotLID `und_*` label as no verdict. The eval type's eight translations
+  run these checks too and discard fewer pieces.
+
+**Release note: larger variant pools.** Eighty-four variants join the
+request pools that held four: the answer formats (`answer_as_*`,
+`answer_in_markdown`, `apology_prevention`, `prefix_injection`), the answer
+languages, asking, the four distractors and the six indirect tasks, which
+now hold 8 each. A technique draws its variant with the unit's seeded rng, so
+the same seed draws another variant than before for these techniques, in a
+fresh plan and in the pending units of a kept one (the plan's combination is
+kept; the text of a unit not yet written is drawn from the larger pool). The
+natural kind's asking, indirect and answer-language variations read
+differently for that reason. The eval type's draws and pool are unchanged:
+the pools its techniques draw from (framing, continuation, structural,
+`to_refusal_then_comply`, temporal) are the ones still at 4, and wait for the
+next eval review ([techniques.md](techniques.md#the-eval-pool)).
 
 **Release note: seven techniques retired (spec 1.1).**
 `to_sensitive_words_star`, `to_sensitive_words_hyphen`,
@@ -759,7 +1345,7 @@ them. A section that names one in `techniques.allow` draws it, with a
 
 **Release note: the natural pool.** The natural kind now draws only what
 the spec's `kinds` mark natural (46 techniques by default when this came in,
-71 since spec 1.2, below; `structural`, `continuation`, `temporal`, the high
+71 since spec 1.2, 72 since spec 1.3 and 96 since spec 1.4, below; `structural`, `continuation`, `temporal`, the high
 and insane typos and the dialogue and story answer formats left it). A
 natural-kind plan made before raises on resume, since its pool changed: run
 the natural kind with `resume=False`. A training build leaves out the benign
@@ -767,6 +1353,155 @@ and dual-use benign variations such a plan made with a technique the natural
 kind no longer draws, with one WARNING that counts them. A `config_dir` copy
 of `augmentations.json` whose natural `families.allow` names one of these
 families raises ([overlay rules](#overlay-rules)).
+
+**Release note: the techniques spec 1.3 adds.** Twenty-four pure template
+techniques, attack-only but the urgent ask, whose text the maintainers wrote
+([techniques.md](techniques.md#what-the-families-do)):
+
+- *Persona templates* (`persona_template`, hacking, 11): a fixed frame for a
+  well-known jailbreak persona around the prompt, with one of six mechanics
+  drawn into it (`to_dan_persona_template`, ...).
+- *Fake turns* (`fake_turns`, manipulation, 3): an invented system turn,
+  assistant turn or earlier exchange with the prompt (`to_fake_system_turn`,
+  `to_fake_assistant_turn`, `to_fake_history`). They take no benign data.
+- *Three answer formats*: `to_dual_answer`, `to_tagged_prefix`,
+  `to_answer_in_encoding`.
+- *One member for each thin request family* (two for impersonation and
+  temporal): `to_impersonate_authority`, `to_impersonate_developer`,
+  `to_use_future_tense`, `to_use_historical_era`,
+  `to_distractor_prefix_task`, `to_distractor_suffix_task`,
+  `to_ask_with_urgency`.
+
+A fresh plan of the adversarial kind draws them: the default attack pool goes
+from 178 techniques in 24 families to 202 in 26, and since each adds members
+or a family to deal, some units of a fresh plan draw other techniques than
+they did with the same seed. A plan kept from spec 1.2 resumes with the
+growth WARNING, which names the twenty-four (and the two payload splits,
+the word art and the three personas, below), and does not draw them until
+it is planned again with `resume=False`. New rules bind a fresh plan:
+`persona_template` refuses `fsh`, `dap`, `ascii_art` and `impersonation`;
+`fake_turns` refuses `continuation`, `indirect`, `framing`, `persona`,
+`cognitive`, `persona_template`, `structural` and `neutral_container` (the
+reason for the last two, that an invented turn is a conversation, not a
+document to wrap, no longer holds since the first eval release moved the
+manipulation layer last; they are kept as they were, its fifth change
+below), and takes the manipulation layer's block of `translation`,
+`ascii_art` and the heavy encodings; `to_refusal_then_comply`,
+`to_prefix_injection`, `to_dual_answer` and `to_tagged_prefix` refuse
+`persona_template`; and `to_answer_in_encoding` refuses `encode`. A kept plan
+replays its recorded combinations, so a rule changes none of them.
+
+The natural kind gains one technique, `to_ask_with_urgency`: `asking` is a
+natural family, and an urgent ask is a natural variation, so it takes its
+family's kinds and the natural pool is 72
+techniques (95 with `"translation": true`). `answer_format` is a natural
+family too, but its three new members say `"kinds": ["adversarial"]`. A fresh
+natural plan may draw the urgent ask; a natural plan kept from before
+resumes with the growth WARNING above, which names it, and does not draw it
+until it is planned again with `resume=False`. The training build's rule
+that leaves out the benign variations made with a technique the natural kind
+does not draw does not touch it. The `eval` type does not change either: its pool stays at
+36 and its draws are those it made before. It allows none of the new
+families and, of `answer_format`, names `to_refusal_then_comply` alone; of
+`temporal`, which it allowed whole, it now names `to_use_past_tense` alone
+under `techniques.allow`, so neither new member, nor a later one, reaches
+it (its pool, rounds, plan file and draws are those of before). The rule that keeps
+`to_refusal_then_comply` from `persona_template` does not move its eval
+draws, since the eval type draws no persona template (until eval pool v2,
+the first note, which admitted `persona_template`, `fake_turns` and the
+thin request families but `temporal` whole, so the eval pool holds five of
+the seven request members above, not the two temporal ones). A copy of
+`eval.json`
+in a `config_dir`, read whole in place of the packaged one, still allows
+`temporal` whole: its eval attacks draw the two temporal members, and an
+eval run names them in a WARNING (the upgrade summary above).
+
+**Release note: decode hints.** Twenty-one of the 27 encodings
+(`to_rot13`, `to_hex`, `to_caesar_cipher` and so on; not the five of the eval
+pool, `to_leetspeak_basic` or the sensitive-word encodings) now write, at the
+spec's `decode_hint_rate` (0.5, a top-level key of `combination_spec.json`),
+one of four hints around the encoded text that says how to decode it
+([techniques.md](techniques.md#what-the-families-do)). So the adversarial
+kind's encoded texts come with a hint about half the time, and a row's
+`technique_info` gains `hint=<name>`; the kind's variants table counts the
+hints. The draw is made when the unit runs, from the technique's own
+seeded generator, not in the plan (one `rng.random()` when the encoding
+changed the text; a registry encoder called directly with no `rng` is
+therefore random now, where the plain encoder is not): a plan kept from before replays its
+techniques and combinations as they were, and its pending units draw hints,
+so a run resumed across this change holds encoded texts with and without
+one. No combination, pool or round changes, and the `eval` and natural
+kinds draw no hinted encoding. (The second eval release then gave the five
+heavy encodings of the eval pool hints too, 26 hinted encodings then, 27 since
+spec 1.4's letter spacing: about
+half the eval rows that draw `to_base64`, `to_unicode_escape`,
+`to_ascii_ordinal`, `to_morse` or `to_braille` come with a hint, and their
+`technique_info` gains `hint=<name>`.)
+
+**Release note: the payload split.** Two techniques of a new obfuscation
+family, `payload_split` (spec 1.3, order 65, complexity 2, attack only):
+`to_payload_split` cuts the text into two to four parts at word boundaries,
+and `to_payload_split_semantic` has the generation model cut it where its
+meaning allows (one to three calls, no check model: the parts are kept only
+when they give the text back, compared without whitespace). Each names the
+parts A, B, C ... and writes one of eight variants that asks the reader to join
+them ([techniques.md](techniques.md#what-the-families-do)). A fresh plan of
+the adversarial kind draws them, in about one unit in fourteen (216 to 221 of
+3,000 units of the default kind in three groups, seeds 42 to 46): the default
+attack pool goes from 202 techniques in 26 families to 204 in 27. The family
+refuses `ascii_art`, `encode`, `fake_turns` and `word_art` and, like
+`translation`, is kept from `fsh` and `dap`, so some units of a fresh plan
+draw other techniques than they did with the same seed. A plan kept from
+before resumes with the growth WARNING, which names the two, and does not
+draw them until it is planned again with `resume=False`. The `eval` and
+natural kinds draw neither: both pools are as they were.
+
+**Release note: the word art.** One technique of a new obfuscation family,
+`word_art` (spec 1.3, order 55, complexity 3, attack only): `to_word_art`
+has the generation model mark the text's harmful words (one call, the
+word-list parse and rejections of `sensitive_words` and `tokenbreak`), draws
+the first in an ASCII-art font chosen as `to_ascii_art` chooses its fonts,
+puts `[MASK]` in its place in the text, and writes one of eight variants that
+asks the reader to read the art and put the word back
+([techniques.md](techniques.md#what-the-families-do)). A fresh plan of the
+adversarial kind draws it, in about one unit in fourteen (216 to 219 of 3,000
+units, same plans): the default attack
+pool goes from 204 techniques in 27 families to 205 in 28. The family refuses
+`ascii_art`, `payload_split`, `encode`, `sensitive_words`, `tokenbreak`,
+`structural`, `neutral_container` and `fake_turns` and, like `translation`
+and `payload_split`, is kept from `fsh` and `dap`, so some units of a fresh
+plan draw other techniques than they did with the same seed. The two new
+families share the units that have three points of the budget left, which the
+ten heavy encodings need too, so the heavy encodings became the rarest draws of
+the default kind; since the first eval release they are dealt in a slot of their
+own (its note, the sixth change), and each is drawn 3 to 6 times in 3,000
+units in three groups (seeds 42 to 46), one unit in about 670. A plan kept from before resumes with the
+growth WARNING, which names it, and does not draw it until it is planned
+again with `resume=False`. The `eval` and natural kinds do not draw it.
+
+**Release note: the invented persona's own step.** `to_invented_persona`
+no longer makes the calls of `cognitive`'s `to_persona_roleplay`: it first
+asks the generation model for a persona for the text (the
+`persona_invention` prompt), read strictly as a `Name:` line then a
+`Description:` and asked again up to three replies, and then makes the
+scenario, its check and the construction of a named persona with that name
+and description. It costs one to three calls more (4 to 12, against 3 to 9),
+for the pending units of a kept plan too, and a text whose replies never take
+the form is discarded (`DISCARDED; reason=malformed persona`). Its info is
+still `category=invented_persona`, and no plan, pool or draw changes.
+
+**Release note: three persona archetypes.** The `persona` family gains
+`to_mercenary_persona`, `to_underground_hacker_persona` and
+`to_anarchist_philosopher_persona` (spec 1.3, complexity 2, attack only),
+generated from their entries of `hacking/personas.json` as the other named
+personas are: the same scenario, scenario check and construction (3 to 9
+model calls), the info `category=<key>_persona`. A fresh plan of the
+adversarial kind draws them: the default attack pool goes from 205
+techniques in 28 families to 208 in 28, and since the family is wider some
+units of a fresh plan draw other techniques than they did with the same
+seed. A plan kept from before resumes with the growth WARNING, which names
+them, and does not draw them until it is planned again with `resume=False`.
+The `eval` and natural kinds do not draw them.
 
 **Release note: the techniques spec 1.2 adds.** Forty-eight techniques in
 six groups, below. A fresh plan draws them; since each adds members to deal,
@@ -776,7 +1511,9 @@ does not draw them until it is planned again with `resume=False`. The `eval`
 type draws none of them (it denies the encodings and the many-shot variants
 in `techniques.deny` and allows none of the families), so its pool stays at
 36 and its draws do not change
-([techniques.md](techniques.md#what-the-families-do)).
+([techniques.md](techniques.md#what-the-families-do)); eval pool v2 (the
+first note) later admitted the neutral containers and eight of the answer
+languages.
 
 - *Fifteen new encodings.* The `encode` family gains fifteen pure techniques
   (reversal of the characters, each word or the word order; look-alike
@@ -793,8 +1530,8 @@ in `techniques.deny` and allows none of the families), so its pool stays at
   pool draws all twelve; the natural pool gains the eight of low and medium
   density, the packaged natural kind allowing the family. `noise` applies
   after `casual_writing` and before `sensitive_words` and never sits beside
-  `typos` or `casual_writing`; the Latin-letter ones are kept from a
-  translation into another script and the emoji ones from `ascii_art`.
+  `typos`, `casual_writing` or a translation; the emoji ones are kept from
+  `ascii_art`.
 - *The neutral containers.* A new obfuscation family, `neutral_container`,
   adds six pure techniques that place the text in an everyday document: a
   code comment, a YAML document, a CSV row, an email, a transcript line or a
@@ -809,8 +1546,8 @@ in `techniques.deny` and allows none of the families), so its pool stays at
 - *Six answer languages.* `answer_language` gains Hmong, Guarani, Chinese,
   Hindi, Yoruba and Amharic (rows of `configs/jailbreak/languages.json`): six
   pure techniques, `to_ask_answer_in_<slug>`, in the default attack pool and
-  the natural pool. They have no translation yet: each needs its length ratio
-  and GlotLID labels measured with the translation model first. The answer
+  the natural pool. Four of them became translations in spec 1.3 (the note
+  on the four translation languages), and Yoruba in spec 1.4. The answer
   languages now follow the language table's order, which puts Swahili before
   Thai, so a fresh plan that drew one of the two draws the other (a kept plan
   replays by name) ([techniques.md](techniques.md#the-language-table)).
@@ -871,7 +1608,9 @@ where it rejected the reply as a malformed word list, and tokenbreak's
 split and separator cut a word between the characters a reader sees,
 never between a letter and its marks; an ASCII word is cut as before.
 Whether the marking model finds the right words in these languages is not
-measured ([techniques.md](techniques.md#what-the-families-do)).
+measured ([techniques.md](techniques.md#what-the-families-do)); a later
+measurement found it mostly does not, and a fresh plan no longer pairs the
+two (the note on word marking after a translation, below).
 
 **Release note: the script rule.** A fresh plan no longer pairs ROT13,
 ROT18, ROT47 or leetspeak (whole-text or word-level) with a translation
@@ -879,7 +1618,10 @@ into another script than Latin, where the encoding changed nothing; so
 some draws differ from those an earlier version made with the same seed.
 A kept plan replays as it was made. The eval pool holds none of these
 encodings, so its draws do not change
-([techniques.md](techniques.md#compatibility-rules)).
+([techniques.md](techniques.md#compatibility-rules)). The first eval release has
+since replaced the rule: a translation refuses every `encode` technique,
+whatever its script, so the rule refused nothing more and is gone (the note
+on the first eval release, below).
 
 **Release note: the ASCII-art cap.** `to_ascii_art` keeps a drawing of at
 most 5,000 characters wherever it is drawn, the eval type's pool included,
@@ -892,7 +1634,8 @@ of the 12 fonts that have a typical text's glyphs, 11 fit at 50 characters,
 and none from about 830. A text of about 830 characters or more is rejected
 where it used to be drawn, and so are most inputs an encoding lengthened
 first (unicode escapes from about 140 characters, ASCII ordinals from about
-230, morse from about 250). A kept plan resumed across the change, an eval
+230, morse from about 250); a fresh plan no longer pairs ASCII art with a
+heavy full-text encoding, since the first eval release (its note, below). A kept plan resumed across the change, an eval
 plan included, mixes drawings made with and without the cap, since a
 replayed plan gives the same text only within one version of the library;
 run the adversarial kind with `resume=False` for one rendering.
@@ -925,22 +1668,432 @@ raises or warns for it); finished rows keep their unchecked scenarios. The
 `eval` type draws neither family: its pool and draws do not change.
 
 **Release note: the rewrite layer.** The spec has a fifth layer, `rewrite`,
-first in the apply order. It holds no technique yet and is off: its spec
-rate is 0 and both packaged kinds deny it (`"layers": {"deny":
-["rewrite"]}`). Nothing changes for an existing plan whose section gives no
-`layers.deny` of its own, the dataset types' included: its pool, rounds,
-plan file and manifest are as before, and so are its draws. A section that
-gives its own `layers.deny` replaces the packaged list, so one that leaves
-`rewrite` out now allows the layer: nothing is drawn from it while it is
-empty, and its adversarial rounds say nothing of it (`include_rewrite` is
-written only while a rewrite technique is registered), so a plan kept from
-it resumes. A `config_dir` copy of `augmentations.json` made before says
-`"deny": []` in both kinds, so the same holds for it. Once the layer holds a
-technique, a kind that allows it gains `include_rewrite: true` in its
-adversarial rounds, and a plan kept from before raises on resume naming
-`rounds`: add `"rewrite"` to its `layers.deny` to keep the plan, or plan
-again with `resume=False`. The flat `include_<layer>` keywords keep the layer
-denied.
+first in the apply order. It holds 16 techniques (spec 1.3: persuasion,
+tense rewrites and model distractors, attacks only) and is off by default:
+its spec rate is 0, and the spec lists it in `layers_off_by_default`, so
+every kind leaves it out unless its `layers.allow` names it, whatever its
+`layers.deny` says. Opt in with `"layers": {"allow": ["rewrite"]}` in the
+kind (and, for budget rounds, a `layer_rates.rewrite` above 0). An allow
+list or `family_weights` that names a rewrite family or technique without it
+raises, saying so. A section's
+own `layers.deny` no longer allows the layer, as it did while the packaged
+kinds denied it in `augmentations.json`: `{"deny": ["hacking"]}` keeps it
+off, and so does a `config_dir` copy of `augmentations.json`, whether it
+says `"deny": []` (made before the layer) or `"deny": ["rewrite"]` (made
+before the spec listed it). Nothing changes for an existing plan, the
+dataset types' included: no packaged section allows the layer, so its pool,
+rounds, plan file and manifest are as before, and so are its draws. A kind
+whose `layers.allow` names it gains the 16 techniques and `include_rewrite:
+true` in its adversarial rounds (written only when the kind's pool holds a
+rewrite technique, so a kind whose lists name no rewrite family, the eval
+type's among them, keeps its rounds), so a plan kept from a section that
+allowed the layer before its pool held one raises on resume naming
+`rounds`: take `rewrite` out of its `layers.allow` to keep the plan, or plan
+again with `resume=False`. The flat `include_<layer>` keywords keep the
+layer denied. The run warns when the two disagree: a kind that draws the
+layer but has a budget round at rate 0 for it (no `layer_rates.rewrite`, or
+a round whose own `layer_rates` leave it out), and a `layer_rates.rewrite`
+above 0 while the layer is off. `"rounds": "escalation"` carries the kind's
+`layer_rates.rewrite` into its two budget rounds, whose own rates replace
+the kind's: they drew no rewrite before.
+
+**Release note: the rewrite techniques.** Spec 1.3 gives the `rewrite` layer
+its first sixteen techniques, all model-written and attack-only:
+`persuasion` (12, `to_persuade_<key>`: a model rewrites the whole prompt as an
+appeal of one of twelve persuasion techniques), `tense_rewrite`
+(`to_rewrite_in_past_tense` and `to_rewrite_in_future_tense`: it rewrites it
+in that tense) and `model_distractors` (`to_model_distractor_prefix` and
+`_suffix`: it writes a few sentences placed before or after the prompt, which
+is not rewritten) ([techniques.md](techniques.md#what-the-families-do)). The
+first two are checked: a model (the `check` model, else the `gen` model) reads
+each rewrite against the prompt (`jailbreak/preserve_check`), a rejected one
+is made again with the verdict, and one rejected twice is discarded, so each
+application costs 2 to 4 calls; a distractor costs 1 to 3 (a reply with no
+text is asked for again), and no check reads it. They add no model role.
+
+The layer is off, so a run that does not allow it changes nowhere: the
+default attack pool is still 285 techniques in 34 families, the natural pool
+the 96 (every rewrite technique says `["adversarial"]`), and the `eval`
+type's pool and draws are unchanged (36 techniques; its allow lists name no rewrite
+family, so allowing the layer there adds nothing to its pool or its rounds
+until the families are allowed too). A kind that allows the layer draws them: the packaged
+adversarial kind's pool is then 301 techniques in 37 families, its rounds say
+`include_rewrite: true` (an adversarial plan kept from a section that allowed
+the layer before its pool held a technique raises on resume naming `rounds`), a
+budget round deals the layer at `layer_rates.rewrite` (the spec's 0, with a
+WARNING: set it, for example 0.5, which gives half the units of a group one
+rewrite technique, the three families dealt evenly and each applied first;
+the escalation's budget rounds take it too) and a count round,
+the escalation's first two among them, draws from the pool whatever the rate.
+New rules bind a fresh plan, both ways: `persuasion` refuses `impersonation`
+and `ascii_art`, `tense_rewrite` refuses `temporal`, and `model_distractors`
+refuse `ascii_art`, `distractor_prefix` and `distractor_suffix`; a kept plan
+replays its recorded combinations, so a rule changes none of them.
+
+**Release note: four more translation languages.** Spec 1.3 switches the
+translation of four answer languages on: `to_hmong`, `to_chinese`, `to_hindi`
+and `to_amharic` (their answer languages, `to_ask_answer_in_<slug>`, are as
+they were), measured on a GPU pod on 2026-10-22 with the machine-translation
+path (TranslateGemma 27B, GlotLID, the back-translation judge). Guarani and
+Yoruba stay answer languages only: TranslateGemma loops on a fifth of
+Guarani's sentences, and the judge rejects 41% of Yoruba's calls. The default
+attack pool goes from 208 techniques in 28 families to 212 in 28, and the
+natural pool with `"translation": true` from 91 to 95 (72 without, as
+before); the `eval` type names its eight translations, so its pool and draws
+are unchanged (36 techniques in 10 families). Since the family is wider some
+units of a fresh plan draw other techniques than they did with the same seed.
+A plan kept from before resumes with the growth WARNING, which names the
+four, and does not draw them until it is planned again with `resume=False`.
+Amharic and Hmong are on watch, as Scots Gaelic is (the judge rejects 20% of
+Hmong's calls, and Amharic's chrF++ on FLORES-200 is 9 points below
+NLLB-200's); Hmong is sent to the translation model by its name, not a code
+([techniques.md](techniques.md#the-language-table)).
+
+**Release note: no word-marking step after a translation.** A fresh plan no
+longer pairs a translation with `sensitive_words`, `tokenbreak` or
+`word_art`, the three families that have the generation model mark the
+prompt's harmful words (`extract_harmful`): the spec's `translation` entry
+keeps them apart, both ways, as it keeps `ascii_art` apart. A GPU pod
+measurement of 2026-10-22 found that the marking call, which marks at least
+one word on 62 of 100 harmful English inputs, marks one on only 3 (Khmer) to
+36 (Hindi) of their translations (Chinese 34, Thai 26, Hmong 17, Amharic 5):
+a heavy encoding after such a translation was discarded (`no sensitive
+word`) and a light one changed nothing, so the unit's calls were wasted.
+The measurement covers English and nine languages (Bengali, Thai, Nepali,
+Khmer, Hmong, Chinese, Hindi, Yoruba and Amharic) on 100 inputs each, so a
+share is good to about 9 points and a second pass moved some by up to ten
+inputs; the direction held in every language. No European language,
+Japanese, Russian or Arabic was measured: for those the rule is a design
+choice beyond the measurement, until the marking call is measured on them.
+Measured at commit `12b1699` and its parent `996c8ea` (3,000 units of the
+default attack kind in three groups, seed 42), 319 units (10.6%) drew both
+before the rule and none draws both since; the units holding a translation
+went from 1,037 to 801 and the obfuscations per unit from 1.72 to 1.63. A plan
+kept from before replays its recorded combinations, so a rule changes none
+of them. The eval type draws none of the three families (its pool held only
+its encodings, framing, fsh, dap, structural, ascii_art, continuation,
+temporal, answer format and eight translations then, and eval pool v2
+admitted none of the three), and the natural kind none of
+them either: their pools and draws are unchanged. A translation chosen as the
+request obfuscation shares the rule with the obfuscations drawn after it.
+
+The same entry now keeps a translation apart from `typos`, `casual_writing`,
+`noise` and `payload_split` too (a design choice of 2026-10-22, not a
+measured failure): a translated prompt is already hard to read, for the model
+that writes or marks text and for the model that answers, and one more
+word-level or character-level change on top is too complex. A fresh plan no
+longer pairs a translation with these steps either, so some draws differ from
+those an earlier version made with the same seed. Measured at commit
+`87bdf6e` and its parent `91c508b` (the same plan of 3,000 units), 204 units
+drew a translation and one of the four before and none since; the units
+holding a translation went from 787 to 798 and the obfuscations per unit from
+1.63 to 1.64. At the current commit no unit holds a translation beside any of
+the eight families (0 of 3,000 units at seeds 42 to 46), 23.9% hold a
+translation (23.9% at each seed) and the obfuscations per unit are 1.47 (1.47 to
+1.48). A plan kept from before replays its recorded combinations, so a kept
+plan may still pair them. `structural`, `suffixes` and `neutral_container`
+stay allowed beside a translation: the eval type draws `structural` with its
+translations, and its pool (36 techniques) and draws are unchanged by these
+four families, since it holds no technique of them (`encode`, which it holds,
+is refused beside a translation since the first eval release, below). The
+natural pool (72) is unchanged as well; the natural kind draws one technique
+per input, and takes the rules only with `exact_techniques` of 2 or more and
+`"translation": true`.
+
+**Release note: the wording family.** Two techniques of a new obfuscation
+family, `wording` (spec 1.3, order 45, between `sensitive_words` and
+`tokenbreak`, complexity 2, attack only, the `encoding` dimension): each
+has the generation model mark the text's harmful words (the call, strict
+word-list parse and rejections of `sensitive_words`, `tokenbreak` and
+`word_art`), then one call more for each distinct word, capped at 128 tokens
+and asked again once on a reply that will not do, so a text costs 1 to 21
+calls (`[1, 21]` in the spec's `calls`) ([techniques.md](techniques.md#what-the-families-do)).
+`to_pseudonym_substitution` swaps in a code name of one or two words
+(`jailbreak/pseudonym`), case-matched, and adds a key of `<alias> = <word>`
+lines; `to_word_game` puts a placeholder `[W1]`, `[W2]`, ... for the word and
+lists a puzzle that resolves to it (`jailbreak/word_game`), asking the reader
+to solve them first. Each writes one of eight variants of its pool in
+`obfuscation/wording_templates.json` (`variant=<name>;detected_words=<words>`);
+a text whose replies never take the form is discarded (`malformed pseudonym`,
+`malformed puzzle`). `to_synonym_substitution` stays in `sensitive_words`. The
+family refuses `sensitive_words`, `tokenbreak`, `word_art`, `translation` and
+`ascii_art`, and, like `word_art`, is kept from `fsh` and `dap`, so some units
+of a fresh plan draw other techniques than they did with the same seed. A
+fresh attack plan draws it in about one unit in fourteen (217 of 3,000 units
+of the default kind in three groups at seed 42; 216 to 220 over seeds 42 to
+46): the default attack pool goes
+from 212 techniques in 28 families to 214 in 29. A plan kept
+from before resumes with the growth WARNING, which names the two, and does not
+draw them until it is planned again with `resume=False`. The `eval` type
+allows no `wording` technique and the natural kind none, so their pools
+(36 and 72) and the eval draws are as they were; the family's dimension is
+`encoding`, which no generation axis varies, so the `training` type needs no
+denial. Prompts of your own (`prompt_dir`) overlay the two new ones as any
+other.
+
+**Release note: the first eval release.** The eval type's pool is the same 36
+techniques (`tests/fixtures/eval_pool.json`), but which pairs of them one
+combination may hold has changed, and so has the text of 40 of the pairs it
+keeps (the fifth change, below), so eval files made before this release are
+not comparable with those made after. No technique is added or retired, so
+the spec's version stays 1.3, as when rules changed within 1.3 before: these
+are changes to rules and to the order the layers apply in, which the plan
+file's `rules` id records. The jailbreaks run record carries that id too
+(`rules`, by kind), and a row's `technique` column lists its techniques in
+the order they applied (a manipulation technique before the obfuscations and
+the request until this release, after them since): those two tell the files
+apart. The first change is that a translation refuses
+every `encode` technique, light or heavy, into any script (the `translation`
+entry of the spec): both rewrite the whole text, so one is enough, and a
+cipher before a translation would hand the translator a cipher. The pool
+loses 40 of its 335 pairs, each of its eight translations (Bengali,
+Javanese, Khmer, Nepali, Scots Gaelic, Swahili, Thai, Zulu) beside each of
+its five encodings (`to_ascii_ordinal`, `to_base64`, `to_braille`,
+`to_morse`, `to_unicode_escape`), and 295 remain after this change alone
+(`tests/fixtures/eval_pairs.json`). Round 1 of the eval type draws one
+technique per input and does not move. In round 2 (two techniques) a plan of
+3,000 inputs at the eval's seed, 43, held such a pair in 304 units before in
+three groups (357 in one); a plan of 300 inputs in three groups deals 283 of
+its 300 round-2 units another pair, since the group counts follow the lost
+pairs. The default attack kind
+loses the pairing too: on 3,000 units in three groups, 247 to 266 units
+(seeds 42 to 46) drew a translation and an encoding before, and none does
+since; the units holding a translation go from 25.3% to 24.6% at seed 42.
+The script rule (its note, above) is gone with this change: it kept a
+Latin-only technique from a translation into another script, and every such
+technique is an `encode` or `noise` technique that a translation now refuses
+outright; the `needs_latin` tag stays, and a test asserts the invariant.
+
+The second change is that ASCII art refuses the ten heavy full-text
+encodings (`to_base64`, `to_unicode_escape`, `to_ascii_ordinal`, `to_morse`,
+`to_hex`, `to_binary`, `to_html_entities`, `to_base32`, `to_base85`; braille
+had the rule already): a code for every character lengthens the text, so its
+drawing often ran past the cap (the ASCII-art cap note, above), and both
+disguise the whole text, so one is enough. The three heavy
+`to_sensitive_words_encode_*` encode only the words a model marks, so ASCII
+art still joins them, and the light encodings, unless their output has a
+character no font draws (the look-alike and fullwidth forms, for instance).
+In the eval pool four more pairs go (ASCII art beside
+`to_base64`, `to_unicode_escape`, `to_ascii_ordinal` and `to_morse`), and 291
+of its 630 pairs remain. At seed 43, 485 of the 3,000 round-2 units of a
+plan held such a pair after the first change (193 before it, the first change
+sending the encodings to the other partners they could still take); none
+does now; a plan of 300 inputs deals 279 of its 300 round-2 units another
+pair than after the first change alone.
+
+The third change is for training only: `sensitive_words` and `tokenbreak`
+refuse each other (both entries of the spec), as `wording` and `word_art`
+refuse them and each other. Each has the model mark the text's harmful words,
+so a second marking call would read a text the first changed. Neither is in
+the eval pool, which a test asserts, so the eval type's pairs and draws do not
+move with it. In 3,000 units of the default attack kind in three groups, 50
+to 72 units (seeds 42 to 46) drew both before the rule, and none does since;
+39 pairs of active techniques are refused that were not (48 counting the
+three retired separators).
+
+The fourth change is for training only too: a translation drawn as the
+request obfuscation (phase 5, the packaged attacks only) refuses a suffix, a
+structural wrapper and a neutral container. It applies after the request, to
+the finished request, so it would translate the suffix, the keys of a JSON, XML or
+Markdown wrapper or the lines of a container (a new key of the spec,
+`request_obfuscation_refuses`, which the plan file's `rules` id records). A
+translation drawn as an ordinary obfuscation runs before those steps and
+still joins them. In 3,000 units of the default attack kind in three groups,
+498 to 501 units (seeds 42 to 46) take a translation as the request
+obfuscation; before the rule 68 to 79 of them held a suffix, 130 to 151 a
+structural wrapper and 115 to 128 a neutral container, and none does now;
+the obfuscations per unit are 1.47 (1.47 to 1.48) with the step on, against
+1.58 (1.57 to 1.59) with it off and 1.57 before this rule. So a translation
+drawn as the request obfuscation is the unit's only obfuscation: the
+translation family already refused ten of the other thirteen obfuscation
+families (`ascii_art`, `encode`, `sensitive_words`, `tokenbreak`, `word_art`,
+`wording`, `typos`, `casual_writing`, `noise` and `payload_split`), this table
+refuses the last three, and the slots `max_obfuscations` leaves go unused. Of
+3,000 units of the default attack kind (seed 42, three groups), 499 take a
+translation as the request obfuscation and 333 of them held another
+obfuscation before the rule; in round 4 of the escalation
+(`max_obfuscations` 3) 700 do, 647 of them holding two others before and 53
+one, and none holds any now. The eval type
+draws no phase-5 step, so its pairs and draws, and the budget
+draws the digest pins (phase 5 off in both), do not move. The WARNING of
+a kept plan, which counts the pending units whose combination today's rules
+refuse, counts those this rule refuses too: it takes the obfuscation right
+after the request as the request obfuscation, where the order of every
+plan, before this release and after, puts it. A plan of 3,000 units of the
+default attack kind drawn before this release (seed 42, three groups)
+counts 539, 202 of them by this rule alone.
+
+Together the four rule changes close most pairings the ten heavy full-text
+encodings (complexity 3, which fits only a unit whose earlier picks leave 3
+points) were dealt with, so dealt as `encode`'s members they were drawn
+rarely: 8 to 16 draws of the ten in 3,000 units of the default attack kind
+in three groups (seeds 42 to 46), against 31 to 42 before the release, and in
+4,000 units at seed 42 five of them were never drawn under the unit budget
+and two under the group budget. The sixth change gives them a slot of their
+own. The other figures this page quotes from the simulation (the group-budget
+table, the request obfuscation's and the translation's shares) are measured
+on the rules of this release, the sixth change included; those of the five
+changes' notes compare each change with the commit before it.
+
+The fifth change is the order: the manipulation layer (`fsh`, `dap`,
+`fake_turns`) now applies last, after the obfuscations, the request and the
+request obfuscation, and puts the finished question among its examples or
+after its invented turn. The spec's `layer_order` is `rewrite`, `hacking`,
+`obfuscation`, `requests`, `manipulation`, and the sampler places the
+request obfuscation right after the request. Before, the steps after the
+layer read and changed the whole text: a typo rewrite or a marking call read
+3 to 32 benign pairs, a suffix landed after the last answer, a request
+framed the whole list, and an encoding multiplied the tokens of every pair.
+Now they change the question alone, and the examples stay as written. A
+selected `fsh` or `dap` variant shows its model the clean input (the unit's
+input, passed as `source_prompt`), not the encoded or wrapped question, and
+inserts the finished one; after a rewrite technique (a kind that allows the
+rewrite layer) that is the input before the rewrite, which a kept plan's
+variant did not see. The same techniques are drawn, in another order:
+no pair is added or taken out. In the eval pool, the 40 pairs of the eight
+`fsh` and `dap` techniques with `to_json`, `to_xml`, `to_markdown`,
+`to_refusal_then_comply` and `to_use_past_tense` write another text (the
+wrapper or the request goes around the question alone), and the other 251
+pairs and the 36 single techniques write what they wrote; a plan of 3,000
+inputs at seed 43 holds 858 such units among its 3,000 round-2 ones, and the
+plan of 300 inputs the digest pins 86 of its 300. The rules stay: the
+manipulation block (`manipulation_blocked_obfuscation`) is kept as it was
+(lifting it would admit 104 eval pairs, each `fsh` or `dap` technique beside
+a translation or a heavy encoding, a change of the eval coverage of its own),
+and so are the many-shot variants' refusal of `typos`, whose reason (a
+rewrite of the whole many-shot text) is gone. Three more refusals were
+written for the old order, and their reasons are gone too: `fake_turns` with
+`structural` and `neutral_container` (an invented turn was a conversation,
+not a document to wrap; the wrapper now goes around the question alone and
+the turn stays outside it), `ascii_art` with `fsh` and `dap` (the output size
+of a font that drew their examples too) and `payload_split` with
+`fake_turns` (an invented turn was a conversation already). They are kept as
+they were, and lifting them is a decision of its own. `fake_turns` beside the
+nine wrappers would add 27 pairs of the default attack kind and none of the
+eval pool; `ascii_art` with `fsh` and `dap`, and `payload_split` with
+`fake_turns`, are refused by the manipulation block as well, so a lift takes
+both rules, and no pair of the pool's 291 holds `ascii_art` with `fsh` or
+`dap` (lifting both rules would admit 8). On the default attack kind
+(3,000 units in three groups at seed 42, filler English inputs, the model
+steps stubbed, tokens estimated at about four characters a token), the 988
+units with a manipulation technique go from a 99th percentile of 4,059
+tokens and a longest row of 10,234 to 1,653 and 2,174 on 400-character
+inputs, and from 4,583 and 11,557 to 2,370 and 3,497 on 1,200-character
+ones (seeds 42 to 46: 4,583 to 5,953 and 9,953 to 11,619 before, 2,327 to
+2,423 and 3,410 to 3,541 after); the typo rewrites that would pass the
+generation model's 2,000-token reply cap go from 2 to 8 units (seeds 42 to
+46) to none on 1,200-character inputs, and from 17 to none on
+2,400-character ones (seed 42). A row can still pass 6,000 tokens: one of a
+very long input under a lengthening encoding, with no manipulation
+technique, and, under a stricter estimate (three characters a token and every
+non-ASCII character a token of its own), a manipulation row of a
+2,400-character input: 6 of the 988 at seed 42, 6,054 to 6,179 tokens, all
+with `to_math_styled` on the question.
+
+ASCII art never meets the manipulation layer, so the order moves none of its
+rejections; the other rules of the release do. On 400-character inputs the
+five plans of seeds 42 to 46 reject 57 of its draws before the release and 4
+after: the second change keeps it from the heavy full-text encodings, which
+lengthen the text before the font (88 of its 1,251 draws held one), and its
+draws per plan go from 248-254 to 213-218. On 1,200- and 2,400-character
+inputs every draw is rejected as too long, before and after: 1,074 draws in
+the five plans at each length, about 7% of the default attack kind's units
+(1,251 before).
+
+The request techniques (an answer format, a distractor, an impersonation, a
+temporal frame, `asking`) and the request obfuscation are part of the
+question the manipulation layer inserts, so they now sit inside it. With
+`fsh` the finished question is the last entry and only the cue for the
+answer follows it. With the many-shot `dap` variants (33 entries) it lands
+anywhere from the 2nd to the 32nd, 0.53 of the way on average (300 draws),
+with 562 to 5,010 characters of pairs after it. The labels stay right either
+way; whether such an attack is stronger or weaker is not measurable
+offline.
+
+The sixth change is for training only: a budget round deals the ten heavy
+full-text encodings in a slot of their own beside `encode`, at the spec's
+new `heavy_encoding_weight`, 0.2 (0.25 since spec 1.4's retune, in the
+spec 1.4 notes), times `encode`'s weight
+(`HEAVY_ENCODINGS` in `jailbreak/sampling.py`, a name the dealer counts them
+under). Dealt as `encode`'s members, a heavy one fitted only a unit with 3
+points left, and the light members kept the family's count high, so it was
+seldom `encode`'s turn on such a unit (the paragraph above). With the slot,
+3,000 units of the default attack kind draw them 44 to 50 times (seeds 42 to
+46, in one, three or ten groups; 45 at seed 42 in three groups, 3 to 6 times
+each), about a fifth of a family's draws, and every group of 100 units draws
+at least one of them and ASCII art, at seeds 1 to 3, 7, 42 to 46 and 123 in
+one, three or ten groups (before, 29 of those 30 plans had a group without a
+heavy encoding). At seed 42 in three groups, `encode`'s draws per unit go from
+0.242 to 0.255, ASCII art from 219 draws to 215, the units holding a
+translation from 24.0% to 23.9%, and the obfuscations per unit stay at 1.47;
+the mean complexity per unit goes from 5.628 to 5.637 (the mean over seeds 42
+to 50, three groups). Every technique of the default attacks is drawn in
+4,000 units (the test no longer leaves the ten out).
+
+The slot is a quota, not a floor. It deals the ten at the same share of
+`encode` in every budget round, whatever the round's budget, so a round that
+dealt them more as `encode`'s members now gets fewer: that is the size it was
+set for, about 40 draws in 3,000 units. In the escalation (3,000 units a
+round in three groups, the mean of seeds 42 to 46) round 3 (`max_complexity`
+6) goes from 6 draws of the ten to 42, and round 4 (`max_complexity` 9,
+three obfuscations) from about 121 to about 45; rounds 1 and 2 are count
+rounds and do not move. The last round of the escalation therefore draws
+about as many of them as the default attacks do (44 to 50), where its budget
+alone would have made it the round that draws the most, and a kind that wants
+more of them in its late rounds cannot say so: the weight is one number of
+the spec, which a `config_dir` never overlays.
+
+The weight was set, at spec 1.3 (spec 1.4 retuned it to 0.25, in its notes
+above), by measurement over seeds 42 to 46 in three groups: 0.3
+draws them 64 to 69 times, 0.5 100 to 108, and a weight of 1, a family's
+share, about 200 (`encode` then at 0.30 draws a unit); 0.18 gives 39 to 41.
+The total depends on how the units are grouped, since each group's dealer
+starts the slot at 0 and so deals it a share of its own: at 0.2 it is 44 or
+45 in one group, 45 in three and 46 to 50 in ten (seeds 42 to 50), and 52 to
+56 in 46 uneven groups of 30 to 100 units; at 0.15 it is 33, 33, 39 and 46 in
+those four layouts, and at 0.3 65, 65, 67 and 70. What the slot fixes is the
+total, not a count for each encoding: the least drawn of the ten is drawn 3
+or 4 times in one and in three groups, 0 to 3 times in ten groups (seeds 42
+to 50) and 1 to 3 times in the uneven layout. A count round (the eval type's
+two rounds, the natural kind, the first two escalation rounds) deals them as
+`encode`'s members, as before, so the eval type's draws do not move (its
+digest holds, and they are the same with the spec's key left out, which a
+test asserts); a direct `sample_combination` call without a dealer does not
+change either. `family_weights` cannot name the slot, which is not a family
+(`"encode:heavy"` raises as any name the kind does not draw): weight
+`encode`, which the slot follows. The new key moves some figures the notes
+above measured before it: with the request obfuscation off, the obfuscations
+per unit are 1.57 (1.56 to 1.58); on the fifth change's 1,200-character
+inputs at seed 42 the manipulation units' 99th percentile is 2,942 tokens and
+their longest row 3,541 (2,405 to 2,489 and 3,464 to 3,512 at seeds 43 to 46),
+on 400-character ones 1,770 and 2,218, and no typo rewrite passes the reply
+cap.
+
+A plan kept from before replays its recorded combinations in their recorded
+order, so it still holds the pairs now refused and applies its manipulation
+technique second: its pending units write the old text. Its plan file's
+`rules` id, which holds the layer order (and, in a budget plan whose pool
+holds a heavy full-text encoding, the heavy encodings' weight), differs
+from today's, so a
+resume logs one WARNING that the rules a combination is drawn by changed,
+counts the pending units whose combination today's rules refuse, and says
+that each combination applies in the order the plan records. To take the
+new rules, run the jailbreak stage with `resume=False` (the stage starts
+over); until then the rows of a kept eval plan are not those of a fresh one.
+The rules are the spec's, which a `config_dir` never overlays, so a run on a
+`config_dir` copy of the eval type takes them too, its pool as wide as its
+copy of `eval.json` makes it (the bullet on a stale copy, above).
+
+The `rules` id now records only what a plan's draws read: the request
+obfuscation's two lists only when a round allows that step (a budget round
+with `allow_request_obfuscation`), the heavy encodings' weight only when a
+round is a budget round and the pool holds one, and no longer the
+`needs_latin` and `script` tags, which no rule reads. A count-only plan (the
+eval type's, the natural kind's) keeps its id when those change. A plan file
+written before the id was narrowed (by an earlier build of this release)
+holds an id over more keys, so its first resume gives the one WARNING; a
+plan drawn by these rules has none of its pending units refused, and can be
+resumed as it is.
 
 ## The model registry
 
@@ -1065,7 +2218,7 @@ from the package otherwise:
 |---|---|
 | `<config_dir>/dataset_types/eval.json`, `training.json` | the [dataset type](#dataset-types) file of that name. A file of another name there is no new type: it is not read, and the run warns about it as ignored |
 | `<config_dir>/taxonomy/<name>.json` | a taxonomy of that name (`taxonomy`, `benign_taxonomy`); a new name there is a taxonomy of your own. `taxonomy_dir`, when given, wins and is read alone |
-| `<config_dir>/jailbreak/augmentations.json` | the default [augmentation section](#the-augmentation-section), both kinds and `natural_only_families` |
+| `<config_dir>/jailbreak/augmentations.json` | the default [augmentation section](#the-augmentation-section), both kinds and `natural_only_families`, checked when read: an unknown key (of the file, a kind, or its `layers`, `families` or `techniques`) is left out with a WARNING naming the file; a kind that is not an object or lacks a key, a missing `natural_only_families`, or `exact_techniques` in the adversarial kind (which would read the attacks as the natural kind) stops the recipe at load, naming the file |
 | `<config_dir>/generation_axes.json` | the [generation axes](#the-generation-axes) table, whole: its labels, hints, weights and `not_with`. Its axes are checked against the folder's `dimensions.json` when it has one |
 | `<config_dir>/dimensions.json` | the [dimensions](#dimensions-and-the-runs-check) table, whole. It must hold every tag the families carry; the run's check reads its `same_as` and `undecided` |
 
@@ -1111,8 +2264,25 @@ refuses to overwrite a file the folder holds, naming them, unless asked to.
 the library adds to the natural kind's `families.allow` in
 `jailbreak/augmentations.json` is not drawn through a copy made before it;
 the run says so at INFO, naming the families (`configs: the natural kind of
-jailbreak/augmentations.json in ... does not allow ...`). Add the names to
-the copy's natural `families.allow`, delete a copy you did not change, or
+jailbreak/augmentations.json in ... does not allow ...`). A technique the
+library adds to a family `dataset_types/eval.json` allows, and denies there
+to keep the eval pool pinned, is drawn through a copy made before it; an eval run
+says so in a WARNING, naming the techniques (`configs: the eval attacks of
+... draw ... technique(s) the library's eval type does not ...`). The other
+way round, a copy of `dataset_types/eval.json` or `training.json` that
+differs from the packaged file and draws no technique of a family the
+packaged type draws is named in a WARNING, per kind (`configs:
+dataset_types/eval.json in ... differs from the library's, and through it
+the eval run draws no technique of these families ...`). A copy of
+`eval.json` from the first eval release (`643c0ed`) keeps the first eval
+pool and adds `to_letter_spacing`, 37 techniques in 10 families, where the
+packaged type draws 126 in 22, so its eval files are not those of eval
+pool v2 (the [release note](#release-notes)); the WARNING names the twelve
+families it lacks. A family you left out on purpose is named too, and
+nothing is wrong then. Add the
+names to the copy's natural `families.allow` (or its adversarial
+`techniques.deny`, or, for v2, copy the packaged adversarial lists into it),
+delete a copy you did not change, or
 write the folder again from the package with
 `scaffold_setup(target_dir, overwrite=True)` (or
 `python scripts/scaffold_setup.py TARGET --overwrite`). That rewrites every
@@ -1182,15 +2352,15 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 | `input` | `generation/from_constitution/long`, `generation/from_constitution/short`, `quality_check` |
 | `output` | `generation/harmful`, `generation/helpful`, `quality_check/harmful`, `quality_check/helpful`: one generation prompt and one checker per [answer mode](stages/outputs.md#answer-modes) |
 | `paraphrase` | `generation`, `generation/<model>` (a paraphraser's own, when it has one; the directory is the registry name), `check` |
-| `jailbreak` | `scenario_generation`, `persona_scenario_generation`, `jailbreak_construction`, `category_selection`, `benign_generation`, `extract_harmful`, `synonym_substitution`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
+| `jailbreak` | `scenario_generation`, `persona_invention`, `persona_scenario_generation`, `persona_construction`, `jailbreak_construction`, `payload_split_semantic`, `category_selection`, `benign_generation`, `benign_check`, `extract_harmful`, `synonym_substitution`, `pseudonym`, `word_game`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `persuasion_rewrite`, `tense_rewrite`, `model_distractor`, `preserve_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back`, `code_switch`, `code_switch_check`, `romanize`, `romanize_check` (the language-mix techniques' rewrite and meaning check: worked examples as few-shot turns, one language named per turn, the check's verdict first) |
 | `conversation` | `judge`, `success_judge`, `pair_attacker` |
 | `format_instructions` | `numbered`, `structured_qa` |
 
-The tree also holds `input/category_check` and `jailbreak/benign_check`,
-which no code loads.
+The tree also holds `input/category_check`, which no code loads.
 
-Text the stages add at run time, the rejection feedback and the outputs'
-length floor's reason, lives in
+Text the stages add at run time, the rejection feedback, the outputs'
+length floor's reason and the reason a benign pair asked for again is not
+one pair, lives in
 `content_moderation/feedback.py`, not in a prompt file.
 
 ### Scaffolding an overlay
@@ -1209,12 +2379,15 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | File | Holds | Read by |
 |---|---|---|
 | `configs/llm/gpu_pricing.json` | Provider, then GPU name as `nvidia-smi` reports it, then hourly USD per GPU; `*` is a provider's fallback | the cost roll-up |
-| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`, `check` and `calls`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `generators` (the families whose techniques come one per row of a data file, expanded into `techniques` as the spec loads), `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, optional `max_tokens`, `cross_incompatible_with`, `kinds`, `check`, `calls`) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
-| `configs/jailbreak/languages.json` | One row per language: `name`, `slug`, `complexity`, `script`, and whether it has a `translation` and an `answer_language` technique | `jailbreak/technique.py` (the spec's generators), `obfuscation/translation.py`, `requests/answer_language.py` |
+| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layers_off_by_default` (the layers a kind leaves out unless its `layers.allow` names them, checked against `layer_order` as the spec loads), `decode_hint_rate` (the share of hinted encodings that write a decode hint, 0.5), `heavy_encoding_weight` (the weight, times `encode`'s, of the slot a budget round deals the ten heavy full-text encodings in, 0.25, above 0 and at most 1; left out, they are dealt as `encode`'s members), `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`, `check` and `calls`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `request_obfuscation_refuses` (per family a request obfuscation is drawn from, the families it then keeps out of the combination: a translation keeps `suffixes`, `structural` and `neutral_container`; as the spec loads, each key must be a family a request obfuscation is drawn from, `translation` or `encode` (the light encodings `request_obfuscation_allowed_families` calls `encode_light`), and each name an obfuscation-layer family, since the step is drawn after every other layer's pick), `generators` (the families whose techniques come one per row of a data file, expanded into `techniques` as the spec loads), `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, `needs_latin`, optional `max_tokens`, `cross_incompatible_with`, `kinds`, `check`, `calls`, `since`, the spec version that added the technique, and `deprecated`, the one that retired it) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
+| `configs/jailbreak/languages.json` | One row per language: `name`, `slug`, `complexity`, `script`, whether it has a `translation` and an `answer_language` technique, and the spec versions that added them: `since` (the row) and `translation_since` (its translation, when later) | `jailbreak/technique.py` (the spec's generators), `obfuscation/translation.py`, `requests/answer_language.py` |
+| `configs/jailbreak/obfuscation/suffix_strings.json` | One row per adversarial suffix published in the literature: `slug`, `suffix`, `source`, `optimized_against`, `since`, and optionally `notes`, `complexity`, `deprecated`; each row is an attack-only technique `to_adversarial_suffix_<slug>` of the `suffixes` family | `jailbreak/technique.py` (the spec's generators), `obfuscation/suffixes.py`, which refuses at import a row without one of the five |
 | `configs/jailbreak/augmentations.json` | The two default kinds and `natural_only_families` | `jailbreak/augmentation.py` |
-| `configs/jailbreak/<layer>/*_templates.json` | The variant pools of the pure techniques: per directive, named variants (a `template`, or continuation's `prefix` and `suffix`) with an optional `weight` ([extending.md](extending.md#add-variants-to-a-template-pool)) | `jailbreak/directives.py: read_pools`, checked at import by `pool.py` |
+| `configs/jailbreak/<layer>/*_templates.json` | The variant pools of the pure techniques: per directive, named variants (a `template`, or continuation's `prefix` and `suffix`) with an optional `weight` ([extending.md](extending.md#add-variants-to-a-template-pool)); `hacking/persona_templates.json` holds a frame per persona (with its `display_name`) and the `mechanics` drawn into them, `manipulation/fake_turns_templates.json` the fake turns | `jailbreak/directives.py: read_pools`, checked at import by `pool.py` (the persona frames by `hacking/persona_templates.py`) |
 | `configs/jailbreak/multi_turn/crescendo_followups.json` | Follow-ups of the crescendo attack | `multiturn_attacks/attacks.py` |
 | `configs/jailbreak/hacking/cognitive_techniques.json`, `personas.json` | The definitions of the cognitive techniques and of the named personas | `jailbreak/hacking/cognitive.py`, `personas.py` |
+| `configs/jailbreak/obfuscation/decode_hints.json` | The decode hints of the encodings: a pool of four per technique, drawn at the spec's `decode_hint_rate` | `jailbreak/obfuscation/encoding.py`, checked at import by `pool.py` |
+| `configs/jailbreak/rewrite/persuasion_techniques.json` | The twelve persuasion techniques the `rewrite` layer's `persuasion` family rewrites a prompt as: a display name, a definition and an example each | `jailbreak/rewrite/persuasion.py` |
 | `configs/dataset_types/training.json`, `eval.json` | Each dataset type's default `stages`, `params` and `augmentations` | `recipe.py: load_dataset_type` |
 | `configs/generation_axes.json` | The [generation axes](#the-generation-axes) of the inputs and outputs stages | `content_moderation/axes.py: resolve` |
 | `configs/dimensions.json` | The [dimensions](#dimensions-and-the-runs-check) of the families and the axes | `dimensions.py`; `recipe.py: check_dimensions` |

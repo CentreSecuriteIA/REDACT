@@ -1,5 +1,5 @@
 {
-  "_comment": "What dataset_type eval means: the clear ends of the constitution (harmful and benign) and a hard, clear corner of the attacks, on the harmful inputs only. Every input is explicit (inputs.axes.directness), since an implicit or euphemistic request is borderline by construction; the other axes keep their packaged weights. A recipe's stages replace these, its augmentations overlay these kind by kind, and its params file overlays these params key by key per stage.",
+  "_comment": "What dataset_type eval means: the clear ends of the constitution (harmful and benign) and a hard, clear corner of the attacks, on the harmful inputs only. Every input is explicit (inputs.axes.directness), since an implicit or euphemistic request is borderline by construction; the other axes keep their packaged weights. The attack lists are eval pool v2 (eval release 3: 126 techniques in 22 families, tests/fixtures/eval_pool.json; docs/configuration.md says what was admitted and why). A recipe's stages replace these, its augmentations overlay these kind by kind, and its params file overlays these params key by key per stage.",
   "stages": ["constitution", "inputs", "outputs", "paraphrase", "jailbreaks", "build"],
   "params": {
     "constitution": {"entry_types": ["harmful", "benign"],
@@ -15,13 +15,21 @@
       "translation": true,
       "families": {
         "allow": ["encode", "fsh", "dap", "framing", "structural", "ascii_art",
-                  "continuation", "temporal"],
+                  "continuation",
+                  "persona_template", "indirect", "distractor_prefix",
+                  "distractor_suffix", "impersonation", "asking",
+                  "guardrail_address", "neutral_container", "transliteration",
+                  "fake_turns", "suffixes"],
         "deny": ["sensitive_words"]
       },
       "techniques": {
         "allow": ["to_swahili", "to_thai", "to_khmer", "to_nepali",
                   "to_zulu", "to_scots_gaelic", "to_bengali", "to_javanese",
-                  "to_refusal_then_comply"],
+                  "to_refusal_then_comply", "to_use_past_tense",
+                  "to_ask_answer_in_swahili", "to_ask_answer_in_thai",
+                  "to_ask_answer_in_khmer", "to_ask_answer_in_nepali",
+                  "to_ask_answer_in_zulu", "to_ask_answer_in_scots_gaelic",
+                  "to_ask_answer_in_bengali", "to_ask_answer_in_javanese"],
         "deny": ["to_rot13", "to_rot18", "to_rot47", "to_separator",
                  "to_leetspeak_basic", "to_leetspeak_intermediate",
                  "to_leetspeak_advanced",
@@ -32,7 +40,11 @@
                  "to_base85", "to_caesar_cipher", "to_atbash",
                  "to_fullwidth", "to_math_styled",
                  "to_fsh_random_many", "to_fsh_selected_many",
-                 "to_dap_random_many", "to_dap_selected_many"]
+                 "to_dap_random_many", "to_dap_selected_many",
+                 "to_adversarial_suffix_punctuation",
+                 "to_adversarial_suffix_fragments",
+                 "to_adversarial_suffix_unicode",
+                 "to_adversarial_suffix_emoji"]
       },
       "pure_only": false,
       "family_weights": {"translation": 3},

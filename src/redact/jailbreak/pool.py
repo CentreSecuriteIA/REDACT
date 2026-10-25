@@ -21,8 +21,21 @@ from .requests import get_all_request_functions
 from .rewrite import get_all_rewrite_functions
 from .technique import DEFAULT_KINDS, load_spec
 
-#: The family a kind's ``translation`` switch decides.
+#: The family a kind's ``translation`` switch admits (its allow semantics).
 TRANSLATION = "translation"
+
+#: The dialect family: like translation, it runs on the translation model, so
+#: a kind's ``translation`` switch also gates it (off removes it), and it makes
+#: the run plan the translation model (:func:`uses_translation`). Unlike
+#: translation it is an ordinary family for the allow lists (not auto-added).
+DIALECT = "dialect"
+
+#: The families whose code gate checks the written language with GlotLID: a
+#: code-switch reads word windows, a romanization checks the output is not
+#: plain English. Without GlotLID those checks fall back to pass-through, so a
+#: run that draws them warns once (:func:`uses_langid_gate`).
+CODE_SWITCHING = "code_switching"
+ROMANIZATION = "romanization"
 
 
 def all_techniques() -> list[Callable]:
@@ -96,10 +109,11 @@ def technique_pool(resolved: dict) -> list[Callable]:
     ``families.allow`` or named in ``techniques.allow``; less those of a
     family in ``families.deny`` and those named in ``techniques.deny``; with
     ``pure_only``, less every technique that calls a model or needs benign
-    data. The translation family is out when ``translation`` is false,
-    whatever the lists say. When it is true, the family is in, though
-    denied as a family, and with an allow list it is in whole unless
-    ``techniques.allow`` names some of its techniques: then those only.
+    data. The translation and dialect families are out when ``translation``
+    is false, whatever the lists say (both run on the translation model).
+    When it is true, each is in, though denied as a family, and with an allow
+    list it is in whole unless ``techniques.allow`` names some of its own
+    techniques: then those only.
     Then only the techniques whose spec ``kinds`` hold the kind
     (:func:`kind_of`) stay: the natural kind draws only what the spec marks
     natural, and the attacks every technique but those of the families the
@@ -115,14 +129,24 @@ def technique_pool(resolved: dict) -> list[Callable]:
             if getattr(fn, "layer", None) not in denied_layers]
     if families["allow"] is not None or techniques["allow"] is not None:
         allowed = set(families["allow"] or ())
+        # Translation and dialect run on the translation model and are gated by
+        # the switch, not the lists. With the switch on and no specific
+        # translation language named, the whole translation family joins the
+        # allow list, and the dialect family with it unless specific dialects
+        # are named; a kind that names its own languages (the eval type) gets
+        # only those and no dialect.
         if resolved["translation"] and not named & languages():
             allowed.add(TRANSLATION)
+            if not named & dialects():
+                allowed.add(DIALECT)
         pool = [fn for fn in pool if fn.__name__ in named
                 or allowed.intersection(getattr(fn, "families", ()))]
-    # The switch, not the lists, decides the translation family.
+    # The switch, not the lists, decides the translation family; it also gates
+    # the dialect family, which needs the translation model.
     denied = set(families["deny"]) - {TRANSLATION}
     if not resolved["translation"]:
         denied.add(TRANSLATION)
+        denied.add(DIALECT)
     pool = [fn for fn in pool if fn.__name__ not in techniques["deny"]
             and not denied.intersection(getattr(fn, "families", ()))]
     if resolved["pure_only"]:
@@ -167,16 +191,88 @@ def languages() -> set[str]:
             if TRANSLATION in getattr(fn, "families", ())}
 
 
+def dialects() -> set[str]:
+    """The names of the dialect family's techniques. Like the translation
+    family, the dialect family runs on the translation model, so a kind's
+    ``translation`` switch gates it too (:func:`uses_translation`,
+    ``_switch_off_translation``)."""
+    return {fn.__name__ for fn in all_techniques()
+            if DIALECT in getattr(fn, "families", ())}
+
+
 def registry(techniques: list[Callable]) -> dict[str, Callable]:
     """Each of ``techniques`` by its ``__name__``."""
     return {fn.__name__: fn for fn in techniques}
 
 
+#: What a row's ``families`` and ``layers`` cells hold for a technique no
+#: registered one is named: ``?<name>`` and ``?``.
+UNKNOWN = "?"
+
+#: The ``technique`` cell of a row whose combination holds no technique.
+IDENTITY = "identity"
+
+
+def chain_tags(chain: str, techniques: dict[str, Callable]) -> tuple[str, str]:
+    """The ``families`` and ``layers`` cells of a row whose ``technique``
+    cell is ``chain``: the first family and the layer of each of its
+    techniques (names joined by ``+``, in the order they applied), joined by
+    ``+`` in the same order, so the n-th of each cell is the n-th
+    technique's.
+
+    ``techniques`` is the registry the names are read in (:func:`registry`
+    of every technique: a retired one keeps its family). A name it lacks,
+    which a row written by another version of the library may hold, gives
+    ``?<name>`` and ``?`` (:data:`UNKNOWN`), never an error. An empty cell
+    or the identity combination (:data:`IDENTITY`) gives two empty cells.
+    """
+    if not chain or chain == IDENTITY:
+        return "", ""
+    families, layers = [], []
+    for name in chain.split("+"):
+        fn = techniques.get(name)
+        families.append(fn.families[0] if fn is not None else f"{UNKNOWN}{name}")
+        layers.append(fn.layer if fn is not None else UNKNOWN)
+    return "+".join(families), "+".join(layers)
+
+
 def uses_translation(pool: list[Callable]) -> bool:
-    """Whether ``pool`` holds a translation technique, which the translation
-    model serves. Any other technique that calls a model, a rewrite among
-    them, calls the generation model."""
-    return any(TRANSLATION in getattr(fn, "families", ()) for fn in pool)
+    """Whether ``pool`` holds a technique the translation model serves: a
+    translation or a dialect. Any other technique that calls a model, a
+    rewrite among them, calls the generation model."""
+    return any({TRANSLATION, DIALECT} & set(getattr(fn, "families", ()))
+               for fn in pool)
+
+
+#: The spec ``check`` values whose check the stage's check model makes: the
+#: typo check, the scenario check, the rewrite's and the meaning check (code
+#: switching, romanization). Translation checks its own work, and a
+#: marked-word list is parsed, not checked by a model.
+MODEL_CHECKS = ("typos", "scenario", "preserve", "meaning")
+
+
+def uses_langid_gate(pool: list[Callable]) -> bool:
+    """Whether ``pool`` holds a code-switch or romanization technique, whose
+    code gate reads the written language with GlotLID. Without GlotLID those
+    gates pass plain English, so a run that draws them with no detector warns
+    once (as a machine translation does)."""
+    return any({CODE_SWITCHING, ROMANIZATION} & set(getattr(fn, "families", ()))
+               for fn in pool)
+
+
+def uses_check(pool: list[Callable]) -> bool:
+    """Whether ``pool`` holds a technique whose model reply the stage's check
+    model checks (its spec ``check`` is one of :data:`MODEL_CHECKS`)."""
+    return any(getattr(fn, "check", None) in MODEL_CHECKS for fn in pool)
+
+
+def uses_check_model(pool: list[Callable]) -> bool:
+    """Whether the stage's check model has work with ``pool``: a technique
+    whose model reply it checks (:func:`uses_check`), or one that needs the
+    benign data (``requires_benign``), each pair of which it checks when the
+    stage generates them; without either, the stage needs no check model."""
+    return uses_check(pool) or any(getattr(fn, "requires_benign", False)
+                                   for fn in pool)
 
 
 _check_against_spec(all_techniques())

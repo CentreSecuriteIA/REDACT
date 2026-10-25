@@ -496,7 +496,8 @@ def _role_names(models: dict) -> dict:
 
 
 def resolve_role(
-    models: dict, role: str, augmentations: dict | None = None,
+    models: dict, role: str, augmentations: dict | None = None, *,
+    stage: str | None = None,
 ) -> list[str]:
     """The models a recipe role stands for, resolved as its stage resolves it.
 
@@ -504,25 +505,34 @@ def resolve_role(
     out is the ``gen`` model, and ``translation`` is no model when no kind of
     ``augmentations`` (the recipe's section, in any form
     :func:`augmentations_of` reads) draws a translation technique; not asked
-    when ``augmentations`` is None.
+    when ``augmentations`` is None. In the ``jailbreaks`` ``stage``,
+    ``check`` is no model either when no kind draws a technique whose reply
+    a check model checks, nor one that needs the benign data, whose pairs it
+    checks (:func:`~redact.jailbreak.pool.uses_check_model`), so a separate
+    check model is neither planned nor loaded for that stage.
 
     Raises:
         KeyError, ValueError: No model is registered for the role.
     """
     from .content_moderation.paraphrase import paraphrase_pool
-    from .jailbreak.pool import technique_pool, uses_translation
+    from .jailbreak.pool import technique_pool, uses_check_model, uses_translation
     from .llms.model_config import default_model_for_role
+
+    def drawn(uses) -> bool:
+        kinds = augmentations_of({"augmentations": augmentations}).values()
+        return any(uses(technique_pool(kind)) for kind in kinds if kind is not None)
 
     name = models.get(role)
     if role == "paraphraser":
         return paraphrase_pool(name)
     if role == "check":
-        return [name] if name else resolve_role(models, "gen", augmentations)
-    if role == "translation" and augmentations is not None:
-        kinds = augmentations_of({"augmentations": augmentations}).values()
-        if not any(uses_translation(technique_pool(kind))
-                   for kind in kinds if kind is not None):
+        if (stage == "jailbreaks" and augmentations is not None
+                and not drawn(uses_check_model)):
             return []
+        return [name] if name else resolve_role(models, "gen", augmentations)
+    if role == "translation" and augmentations is not None and not drawn(
+            uses_translation):
+        return []
     return [name or default_model_for_role(_REGISTRY_ROLES[role])]
 
 

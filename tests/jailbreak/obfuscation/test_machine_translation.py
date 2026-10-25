@@ -134,6 +134,22 @@ class TestTheChecks:
         _, (_, info) = _run("Good morning.", _Fake())
         assert info == "Swahili"
 
+    @pytest.mark.parametrize(("slug", "label", "name"), [
+        ("chinese", "cmn_Hani", "Chinese"), ("japanese", "jpn_Jpan", "Japanese")])
+    def test_each_language_is_held_to_its_own_median(self, mt, slug, label, name):
+        """A translation at its language's measured median length passes.
+        Chinese and Japanese run to a third and a half of the English, which
+        a median of 1.0 would reject as too short every round."""
+        mt["value"] = label
+        source = "Tell me about the weather in the mountains this week, please."
+        size = round(len(source) * T.MEDIAN_RATIO[slug])
+        fn = getattr(T, f"to_{slug}")
+        _, (text, info) = _drive(
+            fn(source, translate_model=MT, gen_model=GEN),
+            _Fake(forward=lambda text, n: "译" * size))
+        assert (text, info) == ("译" * size, name)
+        assert len(text) / len(source) < T.LENGTH_RATIO_BAND[0]
+
     def test_a_reply_three_times_too_long_is_a_length_outlier(self):
         def long(text, n):
             return text * 3 if n == 1 else f"sw:{text}"
@@ -150,8 +166,45 @@ class TestTheChecks:
         monkeypatch.setattr(langid, "detect", lambda text: None)
         requests, (_, info) = _run("Good morning.", _Fake())
         assert info == "Swahili" and len(requests) == 3      # noqa: PLR2004
-        _, (_, info) = _run("Good morning.", _Fake(forward=lambda text, n: text * 4))
+        _, (_, info) = _run("Good morning, friend.",
+                            _Fake(forward=lambda text, n: text * 4))
         assert "feedback=length_ratio=" in info
+
+    def test_a_short_piece_is_not_held_to_the_length_band(self):
+        """``sw:Q:`` is 2.2 times ``Q:`` over Swahili's median, outside the band
+        of 0.5 to 2.0 for a sentence: a label keeps its characters."""
+        requests, (_, info) = _run("Q:", _Fake())
+        assert [r.model for r in requests] == [MT, MT, GEN] and info == "Swahili"
+
+    def test_a_piece_of_twenty_characters_is_held_to_it(self):
+        text = "x" * T.MIN_BAND_CHARS
+        _, (_, info) = _run(text, _Fake(forward=lambda text, n: text * 4))
+        assert "feedback=length_ratio=" in info
+        requests, (_, info) = _run(text[:-1], _Fake(forward=lambda text, n: text * 4))
+        assert info == "Swahili" and len(requests) == 3      # noqa: PLR2004
+
+    def test_an_undetermined_label_is_no_verdict_on_the_language(self, mt):
+        """GlotLID's ``und_*`` labels say it cannot tell, as without the
+        detector: the length and the judge still decide."""
+        mt["value"] = "und_Bali"
+        requests, (_, info) = _run("Good morning, friend.", _Fake())
+        assert [r.model for r in requests] == [MT, MT, GEN] and info == "Swahili"
+
+    def test_an_undetermined_label_still_meets_the_length_band_and_the_judge(self, mt):
+        mt["value"] = "und_Xsux"
+        _, (_, info) = _run("Good morning, friend.",
+                            _Fake(forward=lambda text, n: text * 4))
+        assert "piece=1/1; feedback=length_ratio=" in info
+        mt["value"] = "und_Latn"
+        requests, (_, info) = _run("Good morning, friend.", _Fake(verdicts=["No"]))
+        assert info.endswith("piece=all; feedback=judge=No")
+        assert [r.model for r in requests].count(GEN) == 4      # noqa: PLR2004
+
+    @pytest.mark.parametrize("label", ["ind_Latn", "undd_Latn", "eng_Latn"])
+    def test_a_label_that_only_starts_like_it_is_a_wrong_language(self, mt, label):
+        mt["value"] = label
+        _, (_, info) = _run("Good morning, friend.", _Fake())
+        assert info.endswith(f"feedback=language={label}")
 
     def test_a_copied_text_is_left_to_the_chain_as_a_noop(self):
         _, (text, info) = _run("OK", _Fake(forward=lambda text, n: text))

@@ -25,7 +25,9 @@ _BUDGET_OFF = {key: value for key, value in _BUDGET.items()
 def test_both_kinds_are_the_default_when_the_section_is_none():
     for kind in KINDS:
         assert resolve(None, kind) == resolve({}, kind) == resolve(defaults(), kind)
-    assert resolve(None, "natural") == defaults()["natural"]
+    # The file's natural kind, with the layer the spec has off by default denied.
+    assert resolve(None, "natural") == {
+        **defaults()["natural"], "layers": {"deny": ["rewrite"]}}
 
 
 def test_a_kind_given_as_none_is_off():
@@ -183,8 +185,15 @@ def test_the_packaged_defaults():
      "augmentations.adversarial has unknown key(s) ['max_complexty']; write only"),
     ({"natural": {"rounds": "escalation"}}, "natural",
      "augmentations.natural has unknown key(s) ['rounds']"),
-    ({"natural": {"layers": {"allow": ["hacking"]}}}, "natural",
-     "augmentations.natural.layers has unknown key(s) ['allow']; write only ['deny']"),
+    ({"natural": {"layers": {"only": ["hacking"]}}}, "natural",
+     "augmentations.natural.layers has unknown key(s) ['only']; write only "
+     "['allow', 'deny']"),
+    ({"natural": {"layers": {"allow": "rewrite"}}}, "natural",
+     "augmentations.natural.layers.allow must be a list of the layers to turn on, "
+     "[] for none, got 'rewrite'."),
+    ({"natural": {"layers": {"allow": ["rewrit"]}}}, "natural",
+     "augmentations.natural.layers.allow names 'rewrit', which is not a layer of "
+     "combination_spec.json; write one of"),
     ({"natural": {"layers": {"deny": ["hackin"]}}}, "natural",
      "augmentations.natural.layers.deny names 'hackin', which is not a layer of "
      "combination_spec.json; write one of"),
@@ -504,8 +513,12 @@ def test_the_switch_turns_translation_on(kind):
     pool = technique_pool(resolve({kind: {"translation": True}}, kind))
     languages = [fn for fn in all_techniques() if "translation" in fn.families]
     assert languages and all(fn in pool for fn in languages)
-    # The kind's other filters still apply.
-    assert set(pool) == set(technique_pool(resolve(None, kind))) | set(languages)
+    # The switch also admits the dialect family, which runs on the translation
+    # model too; both packaged kinds draw it. The kind's other filters still
+    # apply.
+    served = [fn for fn in all_techniques()
+              if {"translation", "dialect"} & set(fn.families)]
+    assert set(pool) == set(technique_pool(resolve(None, kind))) | set(served)
 
 
 def test_on_the_switch_wins_over_a_family_deny_and_a_technique_deny_still_applies():
@@ -528,6 +541,14 @@ _DROPPED = "redact.jailbreak.augmentation"
      "['to_thai', 'family_weights.translation']"),
     ({"adversarial": {"translation": False, "family_weights": {"translation": 2}}},
      "['family_weights.translation']"),
+    # The dialect family is gated by the same switch (K3).
+    ({"adversarial": {"translation": False, "families": {"allow": ["encode"]},
+                      "techniques": {"allow": ["to_dialect_mexican_spanish",
+                                               "to_base64"]}}},
+     "['to_dialect_mexican_spanish']"),
+    ({"adversarial": {"translation": False,
+                      "family_weights": {"dialect": 3}}},
+     "['family_weights.dialect']"),
 ])
 def test_translation_an_allow_list_names_with_the_switch_off_is_dropped_with_a_warning(
         given, named, caplog):
@@ -535,10 +556,11 @@ def test_translation_an_allow_list_names_with_the_switch_off_is_dropped_with_a_w
     with caplog.at_level("WARNING", logger=_DROPPED):
         resolved = resolve(given, kind)
     assert [r.getMessage() for r in caplog.records] == [
-        f"augmentations.{kind}.translation is false, so the translation it names "
-        f"is left out: {named}."]
+        f"augmentations.{kind}.translation is false, so the translation or "
+        f"dialect it names is left out: {named}."]
     assert not _translates({kind: resolved}, kind)
     assert "translation" not in resolved["family_weights"]
+    assert "dialect" not in resolved["family_weights"]
     assert "translation" not in (resolved["families"]["allow"] or ())
     # Resolved again, it names none, and says nothing.
     caplog.clear()
@@ -560,9 +582,51 @@ def test_allowing_only_translation_with_the_switch_off_raises():
                                  "families": {"allow": ["translation"]}}},
                 "adversarial")
     assert str(raised.value) == (
-        "augmentations.adversarial allows only translation (['translation']) and "
-        "augmentations.adversarial.translation is false; set \"translation\": "
-        "true, or allow something else.")
+        "augmentations.adversarial allows only translation or dialect "
+        "(['translation']) and augmentations.adversarial.translation is false; "
+        "set \"translation\": true, or allow something else.")
+
+
+def test_allowing_only_dialect_with_the_switch_off_raises():
+    # K3: the dialect family is gated like translation, so an allow list of
+    # only dialect with the switch off raises, not an empty pool.
+    with pytest.raises(ValueError) as raised:
+        resolve({"adversarial": {"translation": False,
+                                 "families": {"allow": ["dialect"]}}},
+                "adversarial")
+    assert str(raised.value) == (
+        "augmentations.adversarial allows only translation or dialect "
+        "(['dialect']) and augmentations.adversarial.translation is false; "
+        "set \"translation\": true, or allow something else.")
+
+
+def test_a_layer_the_kind_denies_drops_what_its_allow_lists_name_of_it(caplog):
+    """The eval type's lists name framing and persona_template, hacking
+    families: a run that denies the layer over the type leaves them out,
+    says so, and keeps the rest of the eval pool."""
+    from redact.recipe import load_dataset_type
+
+    base = load_dataset_type("eval")["augmentations"]
+    with caplog.at_level("WARNING", logger=_DROPPED):
+        kind = resolve({"adversarial": {"layers": {"deny": ["hacking"]}}},
+                       "adversarial", base=base)
+    (record,) = caplog.records
+    assert ("the allow lists name framing (hacking), persona_template (hacking)"
+            in record.getMessage())
+    pool = technique_pool(kind)
+    assert not [fn for fn in pool if fn.layer == "hacking"]
+    # The 126 less framing's five and the 23 persona templates.
+    assert len(pool) == 98      # noqa: PLR2004
+
+
+def test_a_family_weight_of_a_layer_the_kind_denies_raises():
+    with pytest.raises(ValueError) as raised:
+        resolve({"adversarial": {"layers": {"deny": ["hacking"]},
+                                 "family_weights": {"framing": 2}}}, "adversarial")
+    assert str(raised.value) == (
+        "augmentations.adversarial.family_weights names 'framing', of the hacking "
+        "layer, which augmentations.adversarial.layers.deny names; take it out of "
+        "family_weights, or the layer out of layers.deny.")
 
 
 def test_switching_translation_off_over_the_eval_type_is_one_key(caplog):
@@ -574,15 +638,20 @@ def test_switching_translation_off_over_the_eval_type_is_one_key(caplog):
                        base=base)
     assert len(caplog.records) == 1
     assert kind["family_weights"] == {}
-    assert kind["techniques"]["allow"] == ["to_refusal_then_comply"]
+    assert kind["techniques"]["allow"] == [
+        "to_refusal_then_comply", "to_use_past_tense",
+        *(f"to_ask_answer_in_{slug}" for slug in (
+            "swahili", "thai", "khmer", "nepali", "zulu", "scots_gaelic",
+            "bengali", "javanese"))]
     pool = technique_pool(kind)
     from redact.jailbreak.pool import languages
     from tests.jailbreak.test_pool import EVAL_POOL
 
-    # The pinned eval pool less its nine languages.
+    # The pinned eval pool less its eight translations; the answer languages,
+    # which ask for the answer in a language, stay.
     assert sorted(fn.__name__ for fn in pool) == [
         name for name in EVAL_POOL if name not in languages()]
-    assert len(pool) == 28      # noqa: PLR2004
+    assert len(pool) == 118      # noqa: PLR2004
     assert not _translates({"adversarial": kind}, "adversarial")
 
 

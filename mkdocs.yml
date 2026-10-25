@@ -83,6 +83,7 @@ nav:
   - Running a pipeline: running.md
   - Configuration: configuration.md
   - Jailbreak techniques: techniques.md
+  - Technique catalog: catalog.md
   - Extending: extending.md
   - Stages:
       - Constitution: stages/constitution.md
@@ -90,6 +91,7 @@ nav:
       - Outputs: stages/outputs.md
       - Paraphrase: stages/paraphrase.md
       - Jailbreaks: stages/jailbreaks.md
+      - Combination search: stages/combination-search.md
       - Conversations: stages/conversations.md
       - Build: stages/build.md
   - Internals:

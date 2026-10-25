@@ -1,5 +1,5 @@
 """Translation techniques: the prompt translated to one of the languages of
-``configs/jailbreak/languages.json`` (19 today).
+``configs/jailbreak/languages.json`` (24 today).
 
 A chat translation model (the translation role's by default) translates and
 checks, retrying with the check's feedback. A machine-translation model gets
@@ -28,20 +28,26 @@ MACHINE_TRANSLATION_ROLE = "machine_translation"
 #: ``configs/jailbreak/languages.json`` whose ``translation`` is true, in its
 #: order, each with its ``name``, ``slug`` (``to_<slug>``), ``complexity``
 #: and ``script`` (the ISO 15924 code of its script, the suffix of its
-#: GlotLID labels; the rules keep a translation into a script other than
-#: :data:`~redact.jailbreak.technique.LATIN` from a ``needs_latin``
-#: technique). The tables below are keyed by the slug.
+#: GlotLID labels; the family rules keep a translation into a script other
+#: than :data:`~redact.jailbreak.technique.LATIN` from every ``needs_latin``
+#: technique, which a test asserts). The tables below are keyed by the slug.
 LANGUAGES = [row for row in data_rows("languages.json") if row["translation"]]
 
-#: The ISO 639-1 code a machine-translation model is sent for each language.
-#: Its template takes an unknown code as the language's name, so every
-#: language needs one.
+#: The code a machine-translation model is sent for each language: its
+#: ISO 639-1 code. Its template takes an unknown code as the language's name,
+#: so every language needs one. Hmong has none, and the model takes it only by
+#: that name (``hmn`` gave Hawaiian for 39% of the sentences, ``mww`` Marathi
+#: for 68%). Yoruba is sent by name too: it measured better than ``yo``
+#: (chrF++ +0.94, GlotLID reading 98.6% of the translations as Yoruba
+#: against 95.6%).
 LANGUAGE_CODES = {
     "french": "fr", "japanese": "ja", "russian": "ru", "spanish": "es",
     "german": "de", "arabic": "ar", "turkish": "tr", "czech": "cs",
     "vietnamese": "vi", "greek": "el", "croatian": "hr", "swahili": "sw",
     "thai": "th", "khmer": "km", "nepali": "ne", "zulu": "zu",
     "scots_gaelic": "gd", "bengali": "bn", "javanese": "jv",
+    "hmong": "Hmong", "chinese": "zh", "hindi": "hi", "yoruba": "Yoruba",
+    "amharic": "am",
 }
 
 #: The GlotLID labels a translation into each language may carry: its own,
@@ -67,19 +73,27 @@ ACCEPTED_LABELS = {
     "scots_gaelic": {"gla_Latn"},
     "bengali": {"ben_Beng"},
     "javanese": {"jav_Latn"},  # never ind_Latn: Indonesian is a real failure
+    "hmong": {"mww_Latn"},
+    "chinese": {"cmn_Hani", "wuu_Hani"},  # GlotLID never says zho_*
+    "hindi": {"hin_Deva", "anp_Deva"},
+    "yoruba": {"yor_Latn"},  # no other label reached 2% of its sentences
+    "amharic": {"amh_Ethi"},
 }
 
 #: A translation's length over its input's, in characters, at the median,
 #: measured: TranslateGemma 27B translating the FLORES-200 devtest (1,012
-#: sentences) from English, on 2026-10-19. The seven figures kept from an
-#: earlier pod test (Swahili to Javanese, Scots Gaelic aside) agree with that
-#: run within 0.02.
+#: sentences) from English, on 2026-10-19 (the first nineteen languages) and
+#: 2026-10-22 (Chinese, Hindi, Amharic, Hmong and Yoruba). The seven figures kept from
+#: an earlier pod test (Swahili to Javanese, Scots Gaelic aside) agree with the
+#: first run within 0.02.
 MEDIAN_RATIO = {
     "french": 1.27, "japanese": 0.47, "russian": 1.18, "spanish": 1.22,
     "german": 1.24, "arabic": 0.96, "turkish": 1.13, "czech": 1.05,
     "vietnamese": 1.16, "greek": 1.28, "croatian": 1.07, "swahili": 1.16,
     "thai": 1.02, "khmer": 1.09, "nepali": 1.04, "zulu": 1.17,
     "scots_gaelic": 1.31, "bengali": 1.07, "javanese": 1.12,
+    "hmong": 1.31, "chinese": 0.34, "hindi": 1.08, "yoruba": 1.10,
+    "amharic": 0.76,
 }
 
 
@@ -127,6 +141,15 @@ MAX_PIECE_CHARS = 1200
 
 #: A translation's length ratio, over its language's median, must lie within.
 LENGTH_RATIO_BAND = (0.5, 2.0)
+
+#: A piece shorter than this, in characters, is not held to the band: the
+#: medians are those of sentences, and a label, a digit or a code span keeps
+#: its characters in any language (``Q:`` is 2.9 times as long in Chinese).
+MIN_BAND_CHARS = 20
+
+#: The start of the GlotLID labels that say the language is undetermined
+#: (``und_Bali``): no verdict, as without the detector.
+UNDETERMINED = "und_"
 
 #: The judge's reply cap: a verdict and a sentence.
 JUDGE_MAX_TOKENS = 128
@@ -199,23 +222,31 @@ def is_machine_translation(model: str) -> bool:
     return config is not None and MACHINE_TRANSLATION_ROLE in config.roles
 
 
-def check_translation(translation: str, source: str, slug: str) -> str | None:
-    """Why a machine translation of ``source`` into the language ``slug``
-    is rejected, or ``None``.
+def check_translation(translation: str, source: str, *,
+                      labels: set[str], median_ratio: float) -> str | None:
+    """Why a machine translation of ``source`` is rejected, or ``None``.
 
-    Empty; a GlotLID label not among the language's accepted ones (skipped
-    without the detector); a length ratio, over the language's median,
-    outside :data:`LENGTH_RATIO_BAND`, which a reply cut at its cap is. A
-    copy of ``source`` passes: the chain records it as a no-op.
+    Empty; a GlotLID label not among ``labels`` (skipped without the detector,
+    and for an undetermined label, :data:`UNDETERMINED`); a length ratio, over
+    ``median_ratio``, outside :data:`LENGTH_RATIO_BAND`, which a reply cut at
+    its cap is (skipped for a ``source`` under :data:`MIN_BAND_CHARS`
+    characters). A copy of ``source`` passes: the chain records it as a no-op.
+
+    ``labels`` and ``median_ratio`` are the target language's (or dialect's),
+    passed by the caller so the translation family and the dialect family
+    share this check.
     """
     if not translation.strip():
         return "empty"
     if translation == source:
         return None
     label = langid.detect(translation)
-    if label is not None and label not in ACCEPTED_LABELS[slug]:
+    if (label is not None and not label.startswith(UNDETERMINED)
+            and label not in labels):
         return f"language={label}"
-    ratio = len(translation) / len(source) / MEDIAN_RATIO[slug]
+    if len(source) < MIN_BAND_CHARS:
+        return None
+    ratio = len(translation) / len(source) / median_ratio
     low, high = LENGTH_RATIO_BAND
     if not low <= ratio <= high:
         return f"length_ratio={ratio:.2f}"
@@ -269,26 +300,27 @@ def _judge_messages(original: str, back_translation: str, language: str,
 
 
 def _machine_translate_gen(
-    prompt: str, language: dict, *, translator: str, judge: str, num_retries: int,
-    prompt_dir,
+    prompt: str, *, name: str, code: str, labels: set[str], median_ratio: float,
+    translator: str, judge: str, num_retries: int, prompt_dir, extra_check=None,
 ) -> TechniqueGen:
     """Translate ``prompt`` piece by piece on ``translator``, one request at a
-    time, into ``language`` (a row of :data:`LANGUAGES`).
+    time, into the language (or dialect) named ``name``, sent the target
+    ``code``.
 
     A round translates the pieces still pending and checks each
-    (:func:`check_translation`); a piece that fails is resampled alone in the
-    next round. When every piece passes, each is translated back and
-    ``judge`` reads the original against the joined back-translation; a
+    (:func:`check_translation` against ``labels`` and ``median_ratio``, then
+    ``extra_check(translation, source)`` when given: a dialect's extra test,
+    such as the Traditional-character share); a piece that fails is resampled
+    alone in the next round. When every piece passes, each is translated back
+    and ``judge`` reads the original against the joined back-translation; a
     rejection resamples every piece in the next round. A resample is the same
     request again: the model's temperature varies it. After ``num_retries``
     rounds the info names the piece that failed (``piece=all`` for the judge)
     and why.
     """
-    name, slug = language["name"], language["slug"]
     pieces, gaps = split_text(prompt)
     if not pieces:
         return prompt, name
-    code = LANGUAGE_CODES[slug]
     translations = list(pieces)
     pending = list(range(len(pieces)))
     reason = ""
@@ -298,7 +330,10 @@ def _machine_translate_gen(
             translations[i] = yield LLMRequest(
                 translator, _mt_messages(pieces[i], SOURCE_CODE, code, prompt_dir),
                 max_tokens=reply_cap(pieces[i]))
-            why = check_translation(translations[i], pieces[i], slug)
+            why = check_translation(translations[i], pieces[i],
+                                    labels=labels, median_ratio=median_ratio)
+            if why is None and extra_check is not None:
+                why = extra_check(translations[i], pieces[i])
             if why is not None:
                 failed.append((i, why))
         if failed:
@@ -360,6 +395,32 @@ def _build_check_messages(
     return build_messages(config, original=original, translation=translation, language=language)
 
 
+def _chat_translate_gen(
+    prompt: str, name: str, *, translator: str, checker: str, num_retries: int,
+    prompt_dir,
+) -> TechniqueGen:
+    """Translate ``prompt`` into the language (or dialect) ``name`` on a chat
+    ``translator``, checking each round with ``checker`` and feeding the
+    verdict back, up to ``num_retries`` rounds. Returns ``(translation, name)``
+    or ``(last, "DISCARDED; language=<name>; ...")`` on exhaustion. Shared by
+    the translation family and the dialect family."""
+    feedback = ""
+    last = prompt
+    for _ in range(num_retries):
+        translation = yield LLMRequest(
+            translator,
+            _build_translate_messages(prompt, name, feedback, prompt_dir),
+        )
+        verdict = yield LLMRequest(
+            checker, _build_check_messages(prompt, translation, name, prompt_dir)
+        )
+        if is_accepted(verdict):
+            return translation, name
+        feedback = verdict
+        last = translation
+    return last, f"{DISCARDED}; language={name}; feedback={feedback}"
+
+
 def _translate_gen(
     prompt: str,
     language: dict,
@@ -393,29 +454,19 @@ def _translate_gen(
     # runtime register_model(..., role="translation") takes effect
     # immediately, same as every other role default in the library.
     translator = translate_model or _resolve_translate_model()
+    name, slug = language["name"], language["slug"]
     if is_machine_translation(translator):
         judge = (translate_check_model or gen_model
                  or default_model_for_role("uncensored_gen"))
         return (yield from _machine_translate_gen(
-            prompt, language, translator=translator, judge=judge,
+            prompt, name=name, code=LANGUAGE_CODES[slug],
+            labels=ACCEPTED_LABELS[slug], median_ratio=MEDIAN_RATIO[slug],
+            translator=translator, judge=judge,
             num_retries=num_retries, prompt_dir=prompt_dir))
-    name = language["name"]
-    chk_model = translate_check_model or translator
-    feedback = ""
-    last = prompt
-    for _ in range(num_retries):
-        translation = yield LLMRequest(
-            translator,
-            _build_translate_messages(prompt, name, feedback, prompt_dir),
-        )
-        verdict = yield LLMRequest(
-            chk_model, _build_check_messages(prompt, translation, name, prompt_dir)
-        )
-        if is_accepted(verdict):
-            return translation, name
-        feedback = verdict
-        last = translation
-    return last, f"{DISCARDED}; language={name}; feedback={feedback}"
+    return (yield from _chat_translate_gen(
+        prompt, name, translator=translator,
+        checker=translate_check_model or translator,
+        num_retries=num_retries, prompt_dir=prompt_dir))
 
 
 def _make_language_fn(language: dict) -> Callable:

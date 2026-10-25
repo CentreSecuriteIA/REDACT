@@ -24,18 +24,31 @@ from redact.dataset import (
     resume_state,
     row_ids,
 )
-from redact.dataset.planfile import changed_plan, plan_path, read_plan, variants_path
+from redact.dataset.planfile import (
+    changed_plan,
+    plan_path,
+    read_plan,
+    scenarios_path,
+    variants_path,
+)
 from redact.llm_pipeline import drive_units, pool_size
 from redact.llms.client import ModelClient
 
 from . import pool as pool_module
 from .manipulation import get_or_generate_benign_data
-from .plan import coverage_path, plan_inputs, plan_run
+from .plan import coverage_path, plan_inputs, plan_run, rules_id
+from .rules import after_request_obfuscation, compatible
+from .scenarios import rows_of as scenario_rows
+from .scenarios import write_scenarios
 from .technique import FIRST_VERSION, load_spec, version_key
 from .units import error_row_of, is_pending, pending_units, row_of
 from .variants import write_variants
 
 logger = logging.getLogger(__name__)
+
+#: Where a row carries its unit's scenario rows to the save, which takes
+#: them out before the row is written.
+_SCENES = "_scenarios"
 
 
 def run_augmentation(
@@ -62,6 +75,7 @@ def run_augmentation(
     read_back: bool = True,
     label: str = "jailbreak",
     accept_noop: bool = True,
+    scenarios: bool = False,
 ) -> pd.DataFrame:
     """Augment the inputs with ``pool``'s techniques, appended to ``out_path``.
 
@@ -82,14 +96,26 @@ def run_augmentation(
     gives them (one round of the sampler's defaults when None);
     ``family_weights`` and ``layer_rates``
     go to the dealing of :func:`plan_run`. ``check`` checks what a
-    technique's model writes (the typo check), ``client`` when None;
+    technique's model writes (the typo check) and each benign pair the
+    stage generates, ``client`` when None;
     translation keeps its own checkers. ``label`` is the progress label, the
     internals-capture root, and part of the techniques' random seed and of an
     error row's id. With ``accept_noop`` False, a row whose text
     is its input's is not accepted.
 
+    With ``scenarios``, the scene each cognitive or persona technique built
+    its prompt on goes to ``<stem>.scenarios.csv`` beside the manifest
+    (:mod:`redact.jailbreak.scenarios`): ``input_id``, ``iteration``,
+    ``sample_id`` (its row's), ``technique``, ``scenario``, appended in the
+    save of the unit's row, after it and before its ack. When the units are
+    done the table keeps only the rows whose output row ``out_path`` holds
+    (:func:`~redact.jailbreak.scenarios.write_scenarios`), whether this run
+    recorded scenes or not; a fresh run (``resume=False``) removes it.
+
     Each input's id is its ``sample_id`` when it has one, else the content id
-    of its prompt.
+    of its prompt. Of rows that share an id, the last is kept, with a
+    WARNING (:func:`_one_row_per_id`); rows that share one under different
+    entry types raise a ``ValueError`` before anything is written.
 
     Resume: completion is a sidecar ``*.state.jsonl`` ledger keyed
     ``(input_id, iteration)``; ``resume=True`` reuses the plan and skips its
@@ -103,12 +129,19 @@ def run_augmentation(
     by what the library added or retired after the plan's spec version
     (:func:`_library_change`) is no change of this run's: the plan is kept,
     with a WARNING that names those techniques, so a kept plan resumes in a
-    library that grew.
+    library that grew. The same one WARNING is given when the plan's spec
+    version or the rules it was drawn by (its plan file's ``rules``,
+    :func:`~redact.jailbreak.plan.rules_id`; unknown in a plan file written
+    before it recorded them) are not today's, and counts the pending units
+    whose combination today's rules refuse; they run as planned. A row
+    records the spec version its plan was drawn at
+    (``combination_spec_version``), not the library's; a plan without a
+    plan file records none, and its rows the library's.
 
     Returns:
         The rows of ``out_path``, or an empty frame when ``read_back`` is False.
     """
-    inputs = inputs.assign(sample_id=row_ids(inputs, "prompt"))
+    inputs = _one_row_per_id(inputs.assign(sample_id=row_ids(inputs, "prompt")), label)
     out_path = Path(out_path)
     man_path = Path(manifest_path) if manifest_path else Manifest.sidecar(out_path).path
     rounds = [{}] if rounds is None else list(rounds)
@@ -147,23 +180,36 @@ def run_augmentation(
     manifest = Manifest(man_path)
     completed = resume_state(
         ledger, resume=resume, artifact=out_path, manifest=manifest)
+    scenes_path = scenarios_path(man_path)
+    if not resume:
+        scenes_path.unlink(missing_ok=True)
 
     reused = resume and man_path.exists()
+    # The spec version the plan was drawn at, which its rows record: this
+    # library's for a fresh plan, the plan file's for a kept one ("1.0" in a
+    # plan file written before it recorded one), and this library's again
+    # for a kept plan without a plan file, which records nothing.
+    plan_version = spec_version
+    # What the library changed since a kept plan was made, said in one
+    # WARNING once the pass over the plan has counted the pending units
+    # whose combination today's rules refuse.
+    since_plan = None
     if reused:
         if verbose:
             logger.info("Reusing existing manifest: %s", man_path)
         # changed_plan compares every key of the record it is given, so it
-        # gets the record less the pool and the spec version, which
-        # _library_change compares below: a pool that differs only by what
-        # the library added or retired after the plan's spec_version is no
-        # change of this run's, and spec_version only dates the pool (a plan
-        # file written before it was recorded has none).
+        # gets the record less the pool, the spec version and the rules,
+        # which are compared below: a pool that differs only by what the
+        # library added or retired after the plan's spec_version is no
+        # change of this run's, spec_version only dates the pool (a plan
+        # file written before it was recorded has none), and the rules are
+        # the library's, not the run's.
         current = plan_inputs(
             pool, seed=seed, rounds=rounds, family_weights=family_weights,
             layer_rates=layer_rates)
         changed = changed_plan(man_path, {
             key: value for key, value in current.items()
-            if key not in ("pool", "spec_version")})
+            if key not in ("pool", "spec_version", "rules")})
         if changed is None:
             logger.warning(
                 "%s: the plan %s has no %s beside it, so whether this run's "
@@ -173,6 +219,7 @@ def run_augmentation(
                 plan_path(man_path).name)
         else:
             made_with = read_plan(man_path)
+            plan_version = made_with.get("spec_version", FIRST_VERSION)
             library = _library_change(made_with, pool, registry)
             if library is None:
                 changed.append("pool")
@@ -186,16 +233,10 @@ def run_augmentation(
                     "stage starts over), or with the section and seed the plan "
                     "was made with.")
             added, retired = library
-            if added or retired:
-                logger.warning(
-                    "%s: since the plan %s was made (spec version %s, now %s), "
-                    "the library added %s and retired %s. A resume keeps the "
-                    "plan as it was made: it does not draw the added "
-                    "techniques, and still runs the retired ones it names. Run "
-                    "with resume=False to plan again (the stage starts over).",
-                    label, man_path.name,
-                    made_with.get("spec_version", FIRST_VERSION), spec_version,
-                    added, retired)
+            rules = _rules_change(made_with, registry)
+            if added or retired or rules or plan_version != spec_version:
+                since_plan = {"added": added, "retired": retired, "rules": rules,
+                              "refused": 0}
     else:
         coverage_path(man_path).unlink(missing_ok=True)
         plan_path(man_path).unlink(missing_ok=True)
@@ -207,16 +248,17 @@ def run_augmentation(
             layer_rates=layer_rates, verbose=verbose,
         )
 
-    # Where each input is in the frame, by its id; of two inputs with one id
-    # the later one. A unit's prompt and its row's input columns are read there
-    # when needed, so no copy of every input is held.
+    # Where each input is in the frame, by its id (one row per id, by now).
+    # A unit's prompt and its row's input columns are read there when
+    # needed, so no copy of every input is held.
     position = dict(zip(inputs["sample_id"], range(len(inputs))))
     prompts = inputs["prompt"]
 
     # One pass over the plan, for the numbers in the log lines, for whether
     # a pending unit's techniques need benign data (read off the plan, not the
-    # pool, since a plan made with another pool still replays), and for the
-    # inputs a reused plan does not hold.
+    # pool, since a plan made with another pool still replays), for the
+    # inputs a reused plan does not hold, and for the pending units whose
+    # combination today's rules refuse.
     planned = total = written = 0
     needs_benign = False
     unplanned = set(position) if reused else set()
@@ -230,6 +272,11 @@ def run_augmentation(
                 needs_benign = needs_benign or any(
                     getattr(registry.get(name), "requires_benign", False)
                     for name in plan_row["combination"])
+                if since_plan is not None:
+                    since_plan["refused"] += _refused(plan_row["combination"], registry)
+    if since_plan is not None:
+        _warn_since_plan(label, man_path.name, plan_version, spec_version,
+                         pending=total, **since_plan)
     if unplanned:
         logger.warning(
             "%s: %d of the %d inputs are not in the plan %s, which a resume "
@@ -239,7 +286,7 @@ def run_augmentation(
     benign_data = None
     if needs_benign:
         benign_data = get_or_generate_benign_data(
-            client=client if auto_generate_benign else None,
+            client=client if auto_generate_benign else None, check=check,
             cache_path=benign_path, verbose=verbose,
             taxonomy=benign_taxonomy, taxonomy_dir=taxonomy_dir,
             prompt_dir=prompt_dir, batch_size=batch_size)
@@ -250,7 +297,12 @@ def run_augmentation(
 
     def _append(rows: list[dict]) -> dict[Path, int]:
         nonlocal written
+        # The scenes after their rows: a save stopped between the two runs
+        # its units again, and the table is kept to the output at the end.
+        scenes = [scene for row in rows for scene in row.pop(_SCENES, ())]
         sizes = append_rows(out_path, rows)
+        if scenes:
+            append_rows(scenes_path, scenes)
         written += len(rows)
         if verbose:
             n_acc = sum(1 for x in rows if x.get("accepted"))
@@ -262,17 +314,20 @@ def run_augmentation(
 
     def _row(unit: dict, make: Callable) -> None:
         input_row = inputs.iloc[position[unit["id"]]].to_dict()
-        buf.add([make(unit, input_row)], {"input_id": str(unit["id"]),
-                                          "iteration": int(unit["iteration"])})
+        row = make(unit, input_row)
+        if unit.get("scenarios"):
+            row[_SCENES] = scenario_rows(unit, row["sample_id"])
+        buf.add([row], {"input_id": str(unit["id"]),
+                        "iteration": int(unit["iteration"])})
 
     def _on_done(i, value):
         _row(live.pop(i),
-             lambda u, r: row_of(u, value, r, spec_version, gen_model=client.model,
+             lambda u, r: row_of(u, value, r, plan_version, gen_model=client.model,
                                  accept_noop=accept_noop))
 
     def _on_error(i, exc):
         _row(live.pop(i),
-             lambda u, r: error_row_of(u, exc, r, spec_version, gen_model=client.model,
+             lambda u, r: error_row_of(u, exc, r, plan_version, gen_model=client.model,
                                        label=label))
 
     def _units():
@@ -284,7 +339,7 @@ def run_augmentation(
                 gen_model=client.model, translate_model=translation_model,
                 check_model=check.model,
                 benign_data=benign_data, prompt_dir=prompt_dir,
-                capture=capture, label=label,
+                capture=capture, label=label, scenarios=scenarios,
             )
 
     # A unit whose chain raises gets an error row and is acked. The buffer
@@ -302,6 +357,7 @@ def run_augmentation(
     # Read from the file, rows of earlier runs included: the natural kind
     # runs with read_back False.
     variants = write_variants(out_path, man_path, pool, registry)
+    scenes = write_scenarios(out_path, scenes_path)
     rows = read_rows(out_path) if read_back else pd.DataFrame()
 
     if verbose:
@@ -315,10 +371,42 @@ def run_augmentation(
             logger.info("Accepted: %d | Rejected: %d",
                         n_accepted, len(rows) - n_accepted)
             logger.info("No-ops: %d", n_noop)
-        logger.info("Manifest: %s | Saved to: %s | Variants: %s",
-                    man_path, out_path, variants)
+        logger.info("Manifest: %s | Saved to: %s | Variants: %s%s",
+                    man_path, out_path, variants,
+                    f" | Scenarios: {scenes}" if scenes else "")
 
     return rows
+
+
+def _one_row_per_id(inputs: pd.DataFrame, label: str) -> pd.DataFrame:
+    """``inputs`` with one row per ``sample_id``. Rows that share one (one
+    text without an id of its own, or an id given twice) would be planned
+    as two units under one ledger key, the row of each written with the
+    last one's columns; the last is kept, with a WARNING.
+
+    Raises:
+        ValueError: Rows that share an id have different entry types, so
+            one of the two labels would be wrong.
+    """
+    repeated = inputs["sample_id"].duplicated(keep=False)
+    if not repeated.any():
+        return inputs
+    if "entry_type" in inputs.columns:
+        types = inputs.loc[repeated].groupby("sample_id")["entry_type"].nunique(
+            dropna=False)
+        mixed = sorted(types[types > 1].index)
+        if mixed:
+            raise ValueError(
+                f"{label}: {len(mixed)} input id(s) are each held by rows of "
+                f"different entry types ({mixed[:3]}), the same text or the same "
+                "id under two labels; keep one row of each in the inputs, or "
+                "give the rows ids of their own.")
+    kept = inputs.drop_duplicates("sample_id", keep="last")
+    logger.warning(
+        "%s: %d input rows share their id with another (the same text, or an "
+        "id given twice); the plan keeps the last row of each id and leaves "
+        "out %d.", label, int(repeated.sum()), len(inputs) - len(kept))
+    return kept
 
 
 def _library_change(
@@ -350,3 +438,72 @@ def _library_change(
                     for name in retired)):
         return added, retired
     return None
+
+
+def _rules_change(made_with: dict, registry: dict[str, Callable]) -> str | None:
+    """How the rules the plan whose plan file holds ``made_with`` was drawn
+    by compare with today's, for the techniques of its pool and its rounds
+    (:func:`~redact.jailbreak.plan.rules_id`): ``None`` when they are the
+    same, ``"changed"`` when they differ, and ``"unknown"`` when the plan
+    file, written before it recorded them, has no ``rules``."""
+    if "rules" not in made_with:
+        return "unknown"
+    planned = [registry[name] for name in made_with.get("pool", ()) if name in registry]
+    same = rules_id(planned, rounds=made_with["rounds"]) == made_with["rules"]
+    return None if same else "changed"
+
+
+def _refused(names: list[str], registry: dict[str, Callable]) -> bool:
+    """Whether today's rules refuse the combination ``names``, in the order
+    its plan records: one of its techniques may not join those before it
+    (:func:`compatible`; the rules bind both ways, so the order does not
+    matter), or its request obfuscation keeps out one of the others
+    (:func:`after_request_obfuscation`). The request obfuscation is the
+    obfuscation right after the request, in every plan's order: the other
+    obfuscations apply before the request, and only a manipulation
+    technique after the request obfuscation (before the first eval release the
+    manipulation layer applied before the obfuscations, and the request
+    obfuscation was last). A name no technique has is left to the replay,
+    which raises on it."""
+    if any(name not in registry for name in names):
+        return False
+    fns = [registry[name] for name in names]
+    if any(not compatible(fns[:i], [fn]) for i, fn in enumerate(fns)):
+        return True
+    layers = [getattr(fn, "layer", None) for fn in fns]
+    for i in range(1, len(fns)):
+        if layers[i - 1] == "requests" and layers[i] == "obfuscation":
+            rest = fns[:i] + fns[i + 1:]
+            return len(after_request_obfuscation(fns[i], rest)) < len(rest)
+    return False
+
+
+def _warn_since_plan(
+    label: str, plan_name: str, made_at: str, now: str, *,
+    added: list[str], retired: list[str], rules: str | None, refused: int,
+    pending: int,
+) -> None:
+    """The one WARNING of a kept plan the library changed since: the spec
+    versions it was made at and is resumed at, what the library added and
+    retired, whether its rules changed or are not recorded (``rules``, as
+    :func:`_rules_change` gives it), and the ``refused`` of its ``pending``
+    units whose combination today's rules refuse. When the rules changed or
+    are not recorded it also says that each combination applies in the
+    order the plan records, which may not be today's."""
+    logger.warning(
+        "%s: since the plan %s was made (spec version %s, now %s), the library "
+        "added %s and retired %s%s; %d of its %d pending units hold a "
+        "combination today's rules refuse. A resume keeps the plan as it was "
+        "made: it does not draw the added techniques, still runs the retired "
+        "ones and the refused combinations it names%s, and its rows record spec "
+        "version %s. Run with resume=False to plan again%s (the stage starts "
+        "over).", label, plan_name, made_at, now, added, retired,
+        ", and changed the rules a combination is drawn by" if rules == "changed"
+        else ", and the plan file does not record the rules it was drawn by"
+        if rules == "unknown" else "",
+        refused, pending,
+        ", applies each combination in the order it records (one drawn before "
+        "the first eval release applies its manipulation technique second, not "
+        "last)"
+        if rules else "",
+        made_at, " by today's rules and order" if rules else "")

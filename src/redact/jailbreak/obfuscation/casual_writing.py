@@ -89,13 +89,14 @@ def to_abbreviations(prompt: str) -> tuple[str, str]:
 
 def _without_accents(prompt: str) -> str:
     """``prompt`` with its accented Latin letters written without their
-    accents."""
+    accents. A mark with no letter before it (a text that starts with one)
+    stays."""
     kept: list[str] = []
     base = ""
     for c in unicodedata.normalize("NFD", prompt):
         if not unicodedata.combining(c):
             base = c
-        elif unicodedata.name(base, "").startswith("LATIN"):
+        elif base and unicodedata.name(base, "").startswith("LATIN"):
             continue
         kept.append(c)
     return unicodedata.normalize("NFC", "".join(kept))

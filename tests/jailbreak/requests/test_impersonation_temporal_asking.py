@@ -1,7 +1,9 @@
 """Tests for impersonation, temporal, and asking jailbreak techniques."""
 
 import random
+import re
 
+from redact.jailbreak.directives import read_pools
 from redact.jailbreak.requests.asking import (
     get_asking_functions,
     to_ask_for_details,
@@ -20,8 +22,8 @@ SAMPLE = "How do I pick a lock?"
 
 
 class TestImpersonation:
-    def test_returns_one(self):
-        assert len(get_impersonation_functions()) == 1
+    def test_returns_three(self):
+        assert len(get_impersonation_functions()) == 3     # noqa: PLR2004
 
     def test_returns_tuple(self):
         random.seed(42)
@@ -53,8 +55,8 @@ class TestImpersonation:
 
 
 class TestTemporal:
-    def test_returns_one(self):
-        assert len(get_temporal_functions()) == 1
+    def test_returns_three(self):
+        assert len(get_temporal_functions()) == 3     # noqa: PLR2004
 
     def test_returns_tuple(self):
         random.seed(42)
@@ -81,8 +83,8 @@ class TestTemporal:
 
 
 class TestAsking:
-    def test_returns_two(self):
-        assert len(get_asking_functions()) == 2
+    def test_returns_three(self):
+        assert len(get_asking_functions()) == 3     # noqa: PLR2004
 
     def test_all_return_tuple(self):
         random.seed(42)
@@ -111,3 +113,26 @@ class TestAsking:
         random.seed(42)
         result, _ = to_ask_for_details(SAMPLE)
         assert result.startswith(SAMPLE)
+
+
+class TestPastTenseAsksForThePastReading:
+    """Every past-tense variant tells the model to write or answer in a past
+    setting, not only names one. Flags, not text."""
+
+    _POOL = read_pools("requests/temporal_templates.json")["past_tense"]
+    _ASKS = re.compile(
+        r"\b(imagine|write|writing|describe|tell|answer|explain|as if|as a)\b",
+        re.IGNORECASE)
+    _PAST = re.compile(r"past|histor|already|ago|taken place|looking back|looks back|"
+                       r"archiv|memoir|retrospective", re.IGNORECASE)
+
+    def test_every_variant_gives_an_instruction(self):
+        assert [v["name"] for v in self._POOL
+                if not self._ASKS.search(v["template"])] == []
+
+    def test_every_variant_sets_the_request_in_the_past(self):
+        assert [v["name"] for v in self._POOL
+                if not self._PAST.search(v["template"])] == []
+
+    def test_the_pool_has_its_floor_of_variants(self):
+        assert len(self._POOL) >= 8     # noqa: PLR2004

@@ -18,6 +18,7 @@ from redact.jailbreak.directives import (
     check_pools,
     draw_variant,
     read_pools,
+    uses_pool,
 )
 from redact.jailbreak.hacking.framing import get_framing_functions
 from redact.jailbreak.obfuscation.structural import get_structural_functions
@@ -99,6 +100,22 @@ class TestCheckPools:
         ([{"name": "alpha", "prefix": "alpha "}],
          "variant 'alpha': a variant has a template, or a prefix and a suffix"),
         ([{**_ALPHA, "wieght": 2}], "variant 'alpha': unknown keys ['wieght']"),
+        ([{"name": "alpha", "template": "alpha {prompt} and {prompt}"}],
+         "variant 'alpha': the template has the {prompt} slot 2 times"),
+        ([{"name": "alpha", "template": "alpha {prompt!r}"}],
+         "variant 'alpha': the slot {prompt} has a conversion or a format spec (!r)"),
+        ([{"name": "alpha", "template": "alpha {prompt:>9}"}],
+         "variant 'alpha': the slot {prompt} has a conversion or a format spec (:>9)"),
+        ([{"name": "alpha", "template": "alpha {prompt:{width}}"}],
+         "variant 'alpha': the slot {prompt} has a conversion or a format spec"),
+        ([{"name": "alpha", "template": "alpha {prompt!s:^5}"}],
+         "has a conversion or a format spec (!s:^5)"),
+        ([{"name": "a;variant=b", "template": "alpha {prompt}"}],
+         "variant 'a;variant=b': the name holds a character other than"),
+        ([{"name": "has space", "template": "alpha {prompt}"}],
+         "variant 'has space': the name holds a character other than"),
+        ([{"name": "caf\u00e9", "template": "alpha {prompt}"}],
+         "the name holds a character other than"),
     ])
     def test_a_bad_pool_raises_naming_the_file_directive_and_variant(
             self, tmp_path, variants, message):
@@ -108,10 +125,63 @@ class TestCheckPools:
         assert "configs/jailbreak/t.json, directive 'd'" in str(raised.value)
         assert message in str(raised.value)
 
+    @pytest.mark.parametrize("name", ["alpha", "Alpha-2", "to_x", "hint_1", "2"])
+    def test_a_name_of_letters_digits_underscores_and_hyphens_passes(
+            self, tmp_path, name):
+        folder = _folder(tmp_path, {"d": [{"name": name, "template": "{prompt}"}]})
+        check_pools([PoolRef("t.json", "d")], folder)
+
+    @pytest.mark.parametrize("template", [
+        "{prompt}", "{{prompt}} and {prompt}", "a {prompt}\n\nb", "{prompt} {{}}"])
+    def test_a_slot_written_alone_once_passes(self, tmp_path, template):
+        folder = _folder(tmp_path, {"d": [{"name": "alpha", "template": template}]})
+        check_pools([PoolRef("t.json", "d")], folder)
+
+    def test_a_declared_slot_with_a_format_spec_raises(self, tmp_path):
+        folder = _folder(tmp_path, {"d": [
+            {"name": "alpha", "template": "{prompt} {language:>3}"}]})
+        with pytest.raises(ValueError, match=r"the slot \{language\} has a conversion"):
+            check_pools([PoolRef("t.json", "d", ("prompt", "language"))], folder)
+
+    def test_a_slot_other_than_the_request_may_be_named_twice(self, tmp_path):
+        folder = _folder(tmp_path, {"d": [
+            {"name": "alpha", "template": "{prompt} {language} {language}"}]})
+        check_pools([PoolRef("t.json", "d", ("prompt", "language"))], folder)
+
     def test_a_directive_the_file_lacks_raises(self, tmp_path):
         folder = _folder(tmp_path, {"d": [_ALPHA]})
         with pytest.raises(ValueError, match="directive 'e': the file has no such"):
             check_pools([PoolRef("t.json", "e")], folder)
+
+    def test_a_pool_without_a_request_slot_needs_no_prompt(self, tmp_path):
+        """Its variants are set into another template, which holds the request."""
+        folder = _folder(tmp_path, {"d": [
+            {"name": "alpha", "template": "alpha {persona}"},
+            {"name": "beta", "template": "beta"}]})
+        check_pools([PoolRef("t.json", "d", ("persona",), request_slot=False)], folder)
+
+    def test_a_pool_without_a_request_slot_refuses_the_prompt(self, tmp_path):
+        folder = _folder(tmp_path, {"d": [
+            {"name": "alpha", "template": "alpha {persona} {prompt}"}]})
+        with pytest.raises(ValueError, match=r"variant 'alpha': the template names "
+                           r"\['prompt'\], which its technique does not fill"):
+            check_pools([PoolRef("t.json", "d", ("persona",), request_slot=False)],
+                        folder)
+
+    def test_a_pool_has_a_request_slot_unless_it_says_otherwise(self, tmp_path):
+        folder = _folder(tmp_path, {"d": [
+            {"name": "alpha", "template": "alpha {persona}"}]})
+        with pytest.raises(ValueError, match="the template has no {prompt} slot"):
+            check_pools([PoolRef("t.json", "d", ("prompt", "persona"))], folder)
+
+    def test_uses_pool_marks_a_pool_without_a_request_slot(self):
+        @uses_pool("t.json", "d", ("persona",), request_slot=False)
+        def to_x(prompt, *, rng=None):
+            return prompt, ""
+
+        assert to_x.variant_pool == PoolRef(
+            "t.json", "d", ("persona",), "variant", request_slot=False)
+        assert uses_pool("t.json", "d")(lambda p: p).variant_pool.request_slot is True
 
 
 class TestDrawVariant:
@@ -148,11 +218,10 @@ class TestDrawVariant:
         assert 0.72 < drawn["alpha"] / 4000 < 0.78
 
 
-def test_every_template_technique_names_its_pool_but_to_json():
-    """``to_json`` writes its wrapper in code until the owner's wrapper step."""
+def test_every_template_technique_names_its_pool():
     unmarked = [name for name, fn in _TEMPLATE_TECHNIQUES.items()
                 if not hasattr(fn, "variant_pool")]
-    assert unmarked == ["to_json"]
+    assert unmarked == []
 
 
 @pytest.mark.parametrize("name", sorted(
@@ -169,15 +238,14 @@ def test_a_technique_writes_a_variant_of_the_pool_it_names(name):
              else variant["prefix"] + probe + variant["suffix"]
              for variant in read_pools(ref.file)[ref.directive]}
     for seed in range(8):
-        kwargs = {"rng": random.Random(seed)} if name != "to_markdown" else {}
-        found = fn(probe, **kwargs)[0] in texts
+        found = fn(probe, rng=random.Random(seed))[0] in texts
         assert found, f"{name}: its text is not a variant of {ref.name}"
 
 
 def test_no_eval_pool_technique_has_a_weighted_variant():
     """A weight of 0 takes a variant out of the eval text, and any weight
     draws the whole pool by ``rng.choices``, so every seed may draw another
-    variant: the eval pool's variants carry none until the owner's eval
+    variant: the eval pool's variants carry none until the next eval
     review."""
     weighted = sorted(
         name for name in _EVAL_POOL

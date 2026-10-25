@@ -6,6 +6,8 @@ yielded request to a MockBackend — the same way ``chain.apply_combination``
 runs a single sample.
 """
 
+import pytest
+
 from redact.jailbreak.obfuscation.translation import (
     LANGUAGES,
     get_translation_functions,
@@ -19,9 +21,20 @@ from redact.jailbreak.obfuscation.translation import (
 from redact.llm_pipeline import drive_sync
 from tests.conftest import MockBackend
 
-
 #: A translator that is not registered: a chat model.
 CHAT = "local-translator"
+
+
+def _check(translation: str, source: str, slug: str = "chinese"):
+    """``check_translation`` with ``slug``'s accepted labels and median."""
+    from redact.jailbreak.obfuscation.translation import (
+        ACCEPTED_LABELS,
+        MEDIAN_RATIO,
+        check_translation,
+    )
+
+    return check_translation(translation, source, labels=ACCEPTED_LABELS[slug],
+                             median_ratio=MEDIAN_RATIO[slug])
 
 
 def _run(fn, prompt, backend):
@@ -37,8 +50,8 @@ def _names() -> list[str]:
 
 
 class TestLanguages:
-    def test_nineteen_languages(self):
-        assert len(LANGUAGES) == 19
+    def test_twenty_four_languages(self):
+        assert len(LANGUAGES) == 24     # noqa: PLR2004
         assert "Zulu" in _names()
         assert "Swahili" in _names()
 
@@ -47,22 +60,24 @@ class TestLanguages:
         assert "Maori" not in _names()
 
     def test_they_are_the_rows_of_the_language_table_marked_translation(self):
-        """Not Maori, nor the six answer languages of spec 1.2, whose
-        translation waits for a measured length ratio and GlotLID labels."""
+        """Not Maori, nor Guarani, the answer language of spec 1.2 whose
+        translation measured too poorly (TranslateGemma loops on a fifth of
+        its sentences); Yoruba, measured with it, is a translation since
+        spec 1.4."""
         from redact.jailbreak.technique import data_rows
 
         rows = data_rows("languages.json")
         assert [row for row in rows if row["translation"]] == LANGUAGES
         assert [row["name"] for row in rows if not row["translation"]] == [
-            "Maori", "Hmong", "Guarani", "Chinese", "Hindi", "Yoruba", "Amharic"]
+            "Maori", "Guarani"]
         assert [fn.__name__ for fn in get_translation_functions()] == [
             f"to_{language['slug']}" for language in LANGUAGES]
 
 
 class TestTranslationFunctions:
-    def test_all_nineteen_returned(self):
+    def test_all_twenty_four_returned(self):
         funcs = get_translation_functions()
-        assert len(funcs) == 19
+        assert len(funcs) == 24     # noqa: PLR2004
 
     def test_to_zulu(self):
         backend = MockBackend(["translated zulu", "Yes"])
@@ -181,20 +196,82 @@ class TestMachineTranslationTables:
                     } == {language["script"]}
         assert sorted(language["name"] for language in LANGUAGES
                       if language["script"] != "Latn") == [
-            "Arabic", "Bengali", "Greek", "Japanese", "Khmer", "Nepali", "Russian",
-            "Thai"]
+            "Amharic", "Arabic", "Bengali", "Chinese", "Greek", "Hindi", "Japanese",
+            "Khmer", "Nepali", "Russian", "Thai"]
 
     def test_a_language_s_technique_carries_its_script(self):
         assert (to_thai.script, to_swahili.script) == ("Thai", "Latn")
 
-    def test_codes_are_iso_639_1(self):
+    def test_codes_are_iso_639_1_but_hmong_s_and_yoruba_s_which_are_names(self):
         from redact.jailbreak.obfuscation.translation import LANGUAGE_CODES
 
         assert LANGUAGE_CODES["scots_gaelic"] == "gd"
         assert LANGUAGE_CODES["khmer"] == "km"
+        assert LANGUAGE_CODES["chinese"] == "zh"
+        assert LANGUAGE_CODES["hmong"] == "Hmong"
+        assert LANGUAGE_CODES["yoruba"] == "Yoruba"
         assert all(len(code) == 2 and code.islower()  # noqa: PLR2004
-                   for code in LANGUAGE_CODES.values())
+                   for slug, code in LANGUAGE_CODES.items()
+                   if slug not in ("hmong", "yoruba"))
         assert len(set(LANGUAGE_CODES.values())) == len(LANGUAGES)
+
+    def test_a_hmong_translation_is_asked_for_by_its_name(self):
+        """TranslateGemma takes Hmong only as a name: ``hmn`` and ``mww``,
+        sent as codes, gave Hawaiian and Marathi."""
+        from redact.jailbreak.obfuscation.translation import to_hmong
+
+        request = to_hmong("hello", gen_model="gen").send(None)
+        assert request.messages[0]["content"] == (
+            "<<<source>>>en<<<target>>>Hmong<<<text>>>hello")
+
+    def test_chinese_labels_are_glotlids_never_the_iso_639_3_macrolanguage(self):
+        from redact.jailbreak.obfuscation.translation import ACCEPTED_LABELS
+
+        assert ACCEPTED_LABELS["chinese"] == {"cmn_Hani", "wuu_Hani"}
+        assert ACCEPTED_LABELS["hindi"] == {"hin_Deva", "anp_Deva"}
+        assert ACCEPTED_LABELS["amharic"] == {"amh_Ethi"}
+        assert ACCEPTED_LABELS["hmong"] == {"mww_Latn"}
+
+    def test_the_four_new_languages_dated_spec_1_3_keep_their_answer_languages_1_2(
+            self):
+        """A row's ``translation_since`` dates its translation technique, so a
+        plan kept from spec 1.2 resumes with the growth WARNING."""
+        from redact.jailbreak.pool import all_techniques, registry
+
+        by_name = registry(all_techniques())
+        for slug in ("hmong", "chinese", "hindi", "amharic"):
+            assert by_name[f"to_{slug}"].since == "1.3"
+            assert by_name[f"to_ask_answer_in_{slug}"].since == "1.2"
+        assert "to_guarani" not in by_name
+
+    def test_yoruba_is_a_translation_since_spec_1_4_and_an_answer_language_since_1_2(
+            self):
+        """Measured on 2026-10-22 with the four of spec 1.3: sent by name,
+        GlotLID's ``yor_Latn`` alone, median 1.10 of its input; on watch, the
+        judge rejecting 40.7% of its calls (92.6% of its units accepted)."""
+        from redact.jailbreak.obfuscation.translation import (
+            ACCEPTED_LABELS,
+            MEDIAN_RATIO,
+            to_yoruba,
+        )
+        from redact.jailbreak.pool import all_techniques, registry
+
+        by_name = registry(all_techniques())
+        assert by_name["to_yoruba"] is to_yoruba
+        assert (to_yoruba.since, to_yoruba.families, to_yoruba.complexity) == (
+            "1.4", ["translation"], 2)
+        assert (to_yoruba.kinds, to_yoruba.check, to_yoruba.script) == (
+            ["adversarial", "natural"], "translate", "Latn")
+        assert by_name["to_ask_answer_in_yoruba"].since == "1.2"
+        assert ACCEPTED_LABELS["yoruba"] == {"yor_Latn"}
+        assert MEDIAN_RATIO["yoruba"] == 1.10      # noqa: PLR2004
+
+    def test_a_yoruba_translation_is_asked_for_by_its_name(self):
+        from redact.jailbreak.obfuscation.translation import to_yoruba
+
+        request = to_yoruba("hello", gen_model="gen").send(None)
+        assert request.messages[0]["content"] == (
+            "<<<source>>>en<<<target>>>Yoruba<<<text>>>hello")
 
     def test_javanese_never_accepts_indonesian(self):
         """The pod's two real wrong-language outputs were Javanese answered
@@ -240,15 +317,69 @@ class TestMachineTranslationTables:
             "vietnamese": 1.16, "greek": 1.28, "croatian": 1.07, "swahili": 1.16,
             "thai": 1.02, "khmer": 1.09, "nepali": 1.04, "zulu": 1.17,
             "scots_gaelic": 1.31, "bengali": 1.07, "javanese": 1.12,
+            "hmong": 1.31, "chinese": 0.34, "hindi": 1.08, "yoruba": 1.10,
+            "amharic": 0.76,
         }
         assert LENGTH_RATIO_BAND == (0.5, 2.0)
 
-    def test_a_japanese_translation_at_its_median_passes(self, monkeypatch):
+    def test_a_chinese_translation_at_its_median_passes(self, monkeypatch):
+        """Chinese is the shortest by far, 0.34 of its input: the median of
+        another language would reject every good translation."""
         from redact.jailbreak.obfuscation import langid
-        from redact.jailbreak.obfuscation.translation import check_translation
+
+        monkeypatch.setattr(langid, "detect", lambda text: "cmn_Hani")
+        assert _check("译" * 34, "x" * 100) is None
+        assert _check("译" * 100, "x" * 100) == "length_ratio=2.94"
+
+    @pytest.mark.parametrize(("translation", "source"), [
+        ("问：", "Q:"), ("步骤 1：", "Step 1:"), ("译" * 60, "x" * 19), ("译", "1"),
+    ])
+    def test_a_piece_under_twenty_characters_is_not_held_to_the_length_band(
+            self, monkeypatch, translation, source):
+        """``Q:`` is 2.9 times as long in Chinese, a label or a digit keeps its
+        characters, and the medians are those of sentences."""
+        from redact.jailbreak.obfuscation import langid
+
+        monkeypatch.setattr(langid, "detect", lambda text: "cmn_Hani")
+        assert _check(translation, source) is None
+
+    def test_a_piece_of_twenty_characters_is_held_to_it(self, monkeypatch):
+        from redact.jailbreak.obfuscation import langid
+
+        monkeypatch.setattr(langid, "detect", lambda text: "cmn_Hani")
+        assert _check("译" * 60, "x" * 20) == "length_ratio=8.82"
+
+    def test_a_short_piece_is_still_checked_for_its_language_and_for_empty(
+            self, monkeypatch):
+        from redact.jailbreak.obfuscation import langid
 
         monkeypatch.setattr(langid, "detect", lambda text: "jpn_Jpan")
-        assert check_translation("訳" * 47, "x" * 100, "japanese") is None
+        assert _check("问：", "Q:") == "language=jpn_Jpan"
+        assert _check(" ", "Q:") == "empty"
+
+    @pytest.mark.parametrize("label", ["und_Bali", "und_Xsux", "und_Latn"])
+    def test_an_undetermined_glotlid_label_is_no_verdict_on_the_language(
+            self, monkeypatch, label):
+        """Two of the three Chinese discards of the measured run were this."""
+        from redact.jailbreak.obfuscation import langid
+
+        monkeypatch.setattr(langid, "detect", lambda text: label)
+        assert _check("译" * 34, "x" * 100) is None
+        assert _check("译" * 100, "x" * 100) == "length_ratio=2.94"
+
+    def test_a_label_that_only_starts_like_an_undetermined_one_is_a_language(
+            self, monkeypatch):
+        from redact.jailbreak.obfuscation import langid
+
+        for label in ("ind_Latn", "undd_Hani", "eng_Latn"):
+            monkeypatch.setattr(langid, "detect", lambda text, label=label: label)
+            assert _check("译" * 34, "x" * 100) == f"language={label}"
+
+    def test_a_japanese_translation_at_its_median_passes(self, monkeypatch):
+        from redact.jailbreak.obfuscation import langid
+
+        monkeypatch.setattr(langid, "detect", lambda text: "jpn_Jpan")
+        assert _check("訳" * 47, "x" * 100, "japanese") is None
 
     def test_the_reply_cap_is_about_three_times_the_inputs_tokens(self):
         from redact.jailbreak.obfuscation.translation import reply_cap

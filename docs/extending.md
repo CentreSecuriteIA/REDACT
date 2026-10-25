@@ -8,6 +8,12 @@ the change. Run the tests with:
 PYTHONPATH=src python -m pytest tests -q
 ```
 
+One known order dependence predates the jailbreak work: running
+`tests/test_runconfig.py` before `tests/llms/test_estimate.py` in one process
+(as `pytest tests/test_runconfig.py tests/llms/test_estimate.py` does) fails
+ten of the estimate tests, on `refactor` too. Each file passes alone, and the
+full suite in its default order passes.
+
 ## Add a model
 
 **For good**, add an entry to `src/redact/configs/llm/models.json`. Every
@@ -203,7 +209,10 @@ contract.
      `dual_use_benign` whatever the text (`requests/benign_role.py`). The plan
      filters the pool per input before the draw; the predicate sees the
      input, not what earlier steps of a combination wrote, and a kept plan
-     replays without asking it. A technique of a default pool that gains
+     replays without asking it. A predicate must not raise for any text (a
+     text that starts with a combining mark, an empty one): one that does
+     stops the plan with a `RuntimeError` naming the technique and the
+     input. A technique of a default pool that gains
      one changes what a fresh plan draws: say so in a release note.
 2. **Register it**: return it from its module's getter
    (`get_encoding_functions`, `get_framing_functions`, ...), which its
@@ -216,11 +225,14 @@ contract.
    `configs/jailbreak/combination_spec.json`: `families` (the first sets the
    layer and the order), `complexity` (0 to 3), `requires_llm`,
    `requires_benign`, `encode_weight` for an `encode` technique,
-   `needs_latin: true` for one that changes only Latin text (it is then
-   kept from a translation into another script; `TestLatinOnly` in
-   `tests/jailbreak/obfuscation/test_encoding.py` checks it on six other
-   scripts, and fails when an encoding that leaves them unchanged is not
-   tagged, `to_braille` aside while the eval pool is held),
+   `needs_latin: true` for one that changes only Latin text (no rule reads
+   it: a test asserts that the family rules refuse every tagged technique
+   beside every translation into another script, so one outside `encode`
+   and `noise` needs a rule against `translation` in the spec;
+   `TestLatinOnly` in `tests/jailbreak/obfuscation/test_encoding.py` checks
+   it on six other scripts, and fails when an encoding that leaves them
+   unchanged is not tagged, `to_braille` aside while the eval pool is
+   pinned),
    `max_tokens` to cap its calls' replies, `cross_incompatible_with` for
    families this technique, not its whole family, may not join,
    `kinds` when it should differ from its first family's (below),
@@ -239,19 +251,25 @@ contract.
    `dimension` (an augmentation tag of `configs/dimensions.json`, where a new
    one is an entry with its side and definition; import fails otherwise),
    `cross_incompatible_with` and, for one variations may draw, `kinds`,
-   plus a `description`, which nothing reads.
+   plus a `description`, which nothing reads. Import fails on a family key
+   outside these (and `check`, `calls`), a `layer` not in `layer_order`,
+   and a technique entry with an unknown key, a family the spec does not
+   have, or a `complexity` that is not a whole number from 0 to 3.
    - **A technique that calls a model** says how its reply is checked and
      what one application costs. `check` names the check: `typos` (the
      typo check), `scenario` (the scenario check), `word_list` (the strict
-     parse of a marked-word list) or `translate` (translation's own check
-     and retry); `calls` is the model calls one application makes,
+     parse of a marked-word list), `translate` (translation's own check
+     and retry) or `preserve` (the check that a rewrite is the prompt's own
+     request); `calls` is the model calls one application makes,
      generation and checks, a whole number or `[low, high]`. A family's
-     apply to each of its techniques whose entry gives none, as `kinds` do.
+     `check` and `calls` apply to each of its techniques whose entry gives
+     none, as `kinds` do.
      Both only declare: the technique runs its check itself (the typo
      check through `llm_pipeline.checked` in `obfuscation/typos.py`, on the
      `check_model` it is given; the scenario check in `hacking/cognitive.py`;
-     the strict parse in `obfuscation/tokenbreak.py`; translation's rounds), and
-     import fails on a `check` outside those four or `calls` that are not
+     the strict parse in `obfuscation/tokenbreak.py`; translation's rounds; the
+     preserve check in `rewrite/preserve.py`), and
+     import fails on a `check` outside those five or `calls` that are not
      whole numbers of at least 1. A technique of the eval pool that has a
      model write the prompt must carry a `check`
      (`tests/jailbreak/test_pool.py`; the `to_{fsh,dap}_selected_*`, which
@@ -268,7 +286,7 @@ contract.
    benign input it rewrites stays benign and reads as a person would write
    it. A family whose techniques are mostly natural carries both kinds,
    and its attack-only techniques say `["adversarial"]` (the high and insane
-   typos, the four high-density noise techniques, five answer formats); an
+   typos, the four high-density noise techniques, eight answer formats); an
    attack family with one natural
    technique keeps no `kinds` and that technique says both
    (`to_leetspeak_basic`). So a new technique in an attack family is an
@@ -287,21 +305,30 @@ contract.
    names it raises. One the attacks should draw only when a section asks
    carries both kinds and goes in `natural_only_families`
    (`casual_writing`).
-   - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 71
+   - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 96
      names the natural kind draws by default, and
-     `tests/jailbreak/test_pool.py` fails until the owner decides: give the
+     `tests/jailbreak/test_pool.py` fails until you decide: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.
-     The same file checks the attack pool's 178 techniques in 24 families.
+     The same file checks the attack pool's 285 techniques in 34 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
-     `continuation`, `temporal`), so a technique added to one of them joins
+     `continuation` and, since eval pool v2, `persona_template`,
+     `indirect`, `distractor_prefix`, `distractor_suffix`,
+     `impersonation`, `asking`, `guardrail_address`, `neutral_container`,
+     `transliteration`, `fake_turns`, `suffixes`), so a technique added to
+     one of them (a new persona frame, a published suffix row) joins
      the eval attacks unless `eval.json` denies it under
-     `techniques.deny`. `tests/fixtures/eval_pool.json` pins the 36 names the
-     eval type draws, and `tests/jailbreak/test_pool.py` fails until the
-     owner decides: deny the technique in `eval.json`, or add its name to the
-     fixture. A user's copy of `eval.json` in a `config_dir` is not updated:
+     `techniques.deny`; of `temporal`, `answer_format` and
+     `answer_language` it names single techniques under
+     `techniques.allow`, so a new member of those does not join.
+     `tests/fixtures/eval_pool.json` pins the 126 names the
+     eval type draws, and `tests/jailbreak/test_pool.py` fails until you
+     decide: deny the technique in `eval.json` (the eval pool is pinned, so
+     this is the usual answer), or add its name to the fixture in an eval
+     review. A user's copy of `eval.json` in a `config_dir` is not updated:
      a deny added to the packaged file does not reach it, so a technique new
-     to a family the copy allows joins that user's eval pool.
+     to a family the copy allows joins that user's eval pool, and an eval
+     run names it in a WARNING (`extra_eval_techniques`).
 5. **Test it.** Add tests beside the module's, under
    `tests/jailbreak/<layer>/`. `tests/jailbreak/test_registry.py` compares
    the registry with `tests/fixtures/technique_registry.json` (names, tags,
@@ -309,30 +336,53 @@ contract.
    seeds draw), so it fails on any new
    technique. Once the change is meant, regenerate the fixture from the
    repository root with `PYTHONPATH=src python -m tests.jailbreak.test_registry`.
-   A technique whose text comes from a template file (framing, structural,
-   the neutral containers, the request families, small talk and the benign
-   roles) is also pinned by what it writes:
-   `tests/jailbreak/test_template_draws.py` runs each on two neutral probes
-   for six seeds and compares a SHA-256 digest per technique and seed (of
-   the texts, the infos and the rng's state after them, no text) with
+   `tests/jailbreak/test_family_pairs.py` pins, in
+   `tests/fixtures/family_pairs.json`, how many of the technique pairs of
+   each two families the rules refuse; a rule added, dropped or narrowed, or
+   a technique refused where its family's others are not, changes a line:
+   regenerate with `PYTHONPATH=src python -m tests.jailbreak.test_family_pairs`.
+   `tests/jailbreak/test_eval_pairs.py` pins, in
+   `tests/fixtures/eval_pairs.json`, which pairs of the eval pool's 126
+   techniques the rules admit (each family's techniques, then per family
+   pair all, none or the shorter list of pairs admitted or refused, then the
+   pairs of the first pool's 36 one per line): a rule that moves the eval
+   type's draws shows as a diff of that file, regenerated with
+   `PYTHONPATH=src python -m tests.jailbreak.test_eval_pairs` in an eval
+   review.
+   A technique that draws a variant from a pool (it has a `variant_pool`),
+   and every other technique of the eval pool but the translations (a fsh
+   or dap one draws on the test's own benign pairs), is also pinned by what
+   it writes:
+   `tests/jailbreak/test_template_draws.py` runs each registered one on two
+   neutral probes for six seeds (one that calls a model is answered from a
+   script of the test's own, which a new one needs too) and compares a
+   SHA-256 digest per technique and seed (of the texts, the infos and the
+   rng's state after them, no text) with
    `tests/fixtures/template_draws.json`. A new template technique, or a
    pool given new variants, regenerates it with
    `PYTHONPATH=src python -m tests.jailbreak.test_template_draws`; the
-   digests of an eval-pool technique change only with the owner's eval
-   review.
+   digests of an eval-pool technique change only in an eval review (a
+   deliberate change of the pinned eval pool), and the regeneration refuses to
+   write one without `--eval-review`.
 6. **Docs**: make the layer and family tables of
    [techniques.md](techniques.md) again from the spec with
    `PYTHONPATH=src python -m tests.jailbreak.test_docs_counts`, and update
    the totals the sentences of `CLAUDE.md`, `README.md` and that page's
    introduction quote; `tests/jailbreak/test_docs_counts.py` fails until
-   both agree with the spec.
+   both agree with the spec. Then write [the catalog](catalog.md) again,
+   `docs/catalog.md` and `docs/catalog.json`, with
+   `PYTHONPATH=src python -m redact.jailbreak.catalog` (or
+   `scripts/catalog.py`): `tests/jailbreak/test_catalog.py` fails until it
+   is the code's. A change to a rule, a pool, a template file or a prompt
+   moves it too.
 
 To retire a technique, never remove it: a kept plan replays its techniques
 by name, and `tests/jailbreak/test_registry.py::test_registry_only_grows`
 fails when a name the registry fixture pins is no longer registered. Give
 its spec entry `deprecated`, the spec's `version` moved up for it. It stays
 registered and replays, but leaves every pool unless a kind's
-`techniques.allow` names it, which gives a `DeprecationWarning`. Take it out
+`techniques.allow` names it, which logs a WARNING (and gives a
+`DeprecationWarning`). Take it out
 of the counts in the docs, and out of `tests/fixtures/natural_pool.json` or
 `eval_pool.json` when it was in one.
 
@@ -344,7 +394,8 @@ must be true), `name` (the technique name, `{slug}` the row's `slug`) and
 the keys every technique's entry takes (`complexity`, `kinds`,
 `requires_llm`, ...). Loading the spec (`technique.read_spec`) adds one
 entry per row, the row's `complexity`, `since` and `deprecated` over the
-generator's; the family's module builds the functions from the same file
+generator's (and its `<family>_since`, `translation_since`, as that family's
+`since`); the family's module builds the functions from the same file
 (`technique.data_rows`). A file with no rows registers the family with no
 technique. The spec, its data files and the template files are read from
 the package only: a copy of them in a recipe's `config_dir` is ignored, with
@@ -357,24 +408,34 @@ The `translation` and `answer_language` techniques are generated from
 `configs/jailbreak/languages.json`, one row per language:
 
 1. **Add a row**, for example
-   `{"name": "Welsh", "slug": "welsh", "complexity": 2, "script": "Latn", "translation": false, "answer_language": true, "since": "1.3"}`:
+   `{"name": "Welsh", "slug": "welsh", "complexity": 2, "script": "Latn", "translation": false, "answer_language": true, "since": "1.5"}`:
    `name` as prompts and infos write it, `slug` the end of its technique
    names (`to_welsh`, `to_ask_answer_in_welsh`), `complexity` by resource
    tier (0 high, 1 mid, 2 low), `script` the ISO 15924 code it is written
    in, and which families it joins. A row's place in the file is its
    technique's place in its family, which the draws follow: append it, since
    moving a row changes which language a seed draws.
-2. **Date it**: move the spec's `version` up and give the row that `since`,
-   so a jailbreak plan kept from before resumes with a WARNING.
-3. **For a translation**, add the language's ISO 639-1 code, its accepted
+2. **Date it**: move the spec's `version` up (to `"1.5"`, the example's
+   `since`, when the spec is at 1.4) and give the row that `since`, so a
+   jailbreak plan kept from before resumes with a WARNING. A language
+   already in the table that gains a family (an answer language measured as a
+   translation) keeps its `since` and gets `translation_since` for the new
+   technique, which the spec's `version` then dates.
+3. **For a translation**, add the language's ISO 639-1 code (or its name, when
+   the translation model takes it only by name, as Hmong, or measured
+   better by name, as Yoruba), its accepted
    GlotLID labels and its median length ratio, measured with the
    translation model on a parallel corpus, to `LANGUAGE_CODES`,
    `ACCEPTED_LABELS` and `MEDIAN_RATIO` in `obfuscation/translation.py`,
    keyed by the slug. Import fails without them, naming the slug. Check that
-   the translation model covers the language first. The six rows spec 1.2
-   added (Hmong, Guarani, Chinese, Hindi, Yoruba, Amharic) are answer
-   languages only, `translation` false, until that measurement is made on a
-   GPU: each translation is then its row's `true` and those three entries.
+   the translation model covers the language first. Of the six rows spec 1.2
+   added (Hmong, Guarani, Chinese, Hindi, Yoruba, Amharic), the measurement
+   was made on a GPU pod on 2026-10-22 and four became translations in spec
+   1.3: their rows say `"translation": true, "translation_since": "1.3"` and
+   they have those three entries. Yoruba followed in spec 1.4
+   (`"translation_since": "1.4"`), on watch: the judge rejects 41% of its
+   calls, so its technique discards about one text in thirteen. Guarani (it
+   loops on a fifth of its sentences) stays an answer language only.
 4. **Then as for any technique**: regenerate the registry fixture and, for
    an answer language (a template technique), the template draws; decide the
    natural pool (an answer language joins it: add its name to
@@ -382,34 +443,64 @@ The `translation` and `answer_language` techniques are generated from
    The eval type's translation allow list names its languages, so a new
    translation is not drawn there.
 
+### Add a published adversarial suffix
+
+The `suffixes` family's published suffixes are generated from
+`configs/jailbreak/obfuscation/suffix_strings.json` (the spec's `suffixes`
+generator), one row per string, after the family's four noise suffixes,
+which stay in code:
+
+1. **Add a row**: `slug` (lower-case letters, digits and underscores, the end
+   of its technique's name `to_adversarial_suffix_<slug>`, none of the noise
+   suffixes' `punctuation`, `fragments`, `unicode`, `emoji`), `suffix` (the
+   string as published), `source` (the paper, its arXiv id or the repository
+   it is from), `optimized_against` (the model or models), and
+   `since`, the spec version that adds it; `notes`, `complexity` (default 1)
+   and `deprecated` are optional. `obfuscation/suffixes.py` refuses a row
+   without one of the five at import, naming it. Append the row: its place is
+   its technique's place in the family.
+2. **Date it** as a language: move the spec's `version` up and give the row
+   that `since`.
+3. **Then as for any technique**: regenerate the registry fixture and update
+   the counts in the docs. The technique is attack only (the generator's
+   `kinds`; a row's own `kinds` are not read), so the natural pool does not
+   move, and the eval type's allow list names no suffix.
+
 ### Add a rewrite technique
 
 The `rewrite` layer comes first: its technique rewrites the whole prompt
 before every other layer applies, one at most a combination
-(`layer_max_picks`). It holds no technique yet and is off: the spec's
-`layer_rates.rewrite` is 0 and both packaged kinds deny it
-(`"layers": {"deny": ["rewrite"]}` in `configs/jailbreak/augmentations.json`).
+(`layer_max_picks`). It holds 16 techniques (`persuasion`, `tense_rewrite`,
+`model_distractors`) and is off: the spec's `layer_rates.rewrite` is 0 and
+the spec lists it in `layers_off_by_default`, so a kind leaves it out unless
+its `layers.allow` names it, whatever its `layers.deny` says.
 
 1. **Write and register it** as any technique (above), in a module under
    `jailbreak/rewrite/` whose getter `get_all_rewrite_functions` in
    `rewrite/__init__.py` returns. One that has a model write the text loads
    its prompt from `prompts/jailbreak/<name>/`, checks the reply (through
-   `llm_pipeline.checked`) and says so in its spec `check` and `calls`.
+   `llm_pipeline.checked`) and says so in its spec `check` and `calls`. A
+   technique that rewrites the whole prompt calls
+   `rewrite/preserve.py: preserved_rewrite_gen`, which `persuasion` and
+   `tense_rewrite` share (`check` `preserve`, `jailbreak/preserve_check`); one
+   more persuasion technique is an entry of `persuasion_techniques.json` and
+   its spec entry, `to_persuade_<key>`.
 2. **Give it a family** in the spec with `"layer": "rewrite"`, a
    `dimension` and, for variations, `kinds`; the technique's entry carries
    `since`, the spec's `version` moved up.
-3. **Turn the layer on** for a kind: a `layers.deny` without `rewrite`
-   (`"layers": {"deny": []}`) puts the technique in the kind's pool, and a
+3. **Turn the layer on** for a kind: `"layers": {"allow": ["rewrite"]}`
+   puts the technique in the kind's pool, and a
    count round (`exact_techniques`: the natural kind, the escalation's
    first two rounds) may draw it from there. A budget round draws it only
-   at a rate above 0, `"layer_rates": {"rewrite": 0.2}`; the escalation's
-   last two rounds give rates of their own, which leave `rewrite` at the
-   spec's 0. With the layer allowed and a rewrite technique registered,
+   at a rate above 0, `"layer_rates": {"rewrite": 0.2}` (a budget round at
+   rate 0 for a kind that draws the layer warns); the escalation's last two
+   rounds give rates of their own, over which `rounds_of` carries the
+   kind's `rewrite` rate. With a rewrite technique in the kind's pool,
    `rounds_of` writes `include_rewrite: true` in each of an adversarial
    kind's rounds, so a plan kept from before raises on resume naming
-   `rounds`: plan again with `resume=False`. To draw it in every run, take `rewrite` out of the
-   packaged kinds' `layers.deny` and give the spec's `layer_rates.rewrite`
-   a rate.
+   `rounds`: plan again with `resume=False`. To draw it in every run, take
+   `rewrite` out of the spec's `layers_off_by_default` and give the spec's
+   `layer_rates.rewrite` a rate.
 4. **Then as for any technique**: the registry fixture, the docs counts and
    the natural pool. The eval type's attacks allow named families only, so
    a rewrite family is not drawn there unless `eval.json` names it.
@@ -421,7 +512,9 @@ directive's list in its template file under `configs/jailbreak/`, read by
 `directives.read_pools` whatever the file's shape. Most files are
 `{directive: [{"name", "template"}, ...]}`; continuation's variants are
 `{"name", "prefix", "suffix"}` (the prompt goes between them, unformatted);
-structural's `to_xml` and `to_markdown` have one template each, read as a
+structural's `to_json`, `to_xml` and `to_markdown` are lists like the rest
+(its `policy_ids` is a list its module reads for itself, not a pool); the
+persona frames of `persona_templates.json` are single templates, read as a
 pool of one variant named after the entry. `personas.json` and
 `cognitive_techniques.json` are definitions, not pools.
 
@@ -430,7 +523,15 @@ pool of one variant named after the entry. `personas.json` and
    `<kind>.variants.csv` counts the rows that drew it), and a
    `template` that holds `{prompt}` once and no other slot than those its
    technique fills (`{language}` for the answer languages, `{policy_id}`
-   for `to_xml`); a literal brace is written `{{` or `}}`. A seed draws by
+   for `to_xml`, `{priority}` and `{format}` for `to_json`, whose `{prompt}`
+   is the prompt as the inside of a JSON string); a literal brace is written `{{` or `}}`. A pool whose
+   technique sets the filled variant into another template, which holds the
+   request, has no request slot: its technique names it with
+   `@uses_pool(..., slots=(...), request_slot=False)`, and its templates
+   hold no `{prompt}`. A pool a technique draws from only at a rate (an
+   encoding's decode hints, at the spec's `decode_hint_rate`) says
+   `optional=True`: its info names a variant only when one was drawn, and a
+   row without one still counts the variants it drew otherwise. A seed draws by
    the pool's length and order, so a new variant changes what some seeds
    draw (step 4).
 2. **Weights are optional.** A variant may carry `"weight"`, a number of at
@@ -445,29 +546,39 @@ pool of one variant named after the entry. `personas.json` and
 3. **Import checks it.** `pool.py` checks every pool a technique names
    (`check_pools`) when `redact.jailbreak` is imported, and raises naming
    the file, the directive and the variant: an empty or repeated name, a
-   template without `{prompt}` or with a slot its technique does not fill
-   or an unpaired brace, a prefix without its suffix, an unknown key (a
+   name with a character other than a letter, a digit, `_` or `-` (it goes
+   into a row's info as `key=<name>`), a template without `{prompt}` or with
+   it more than once (in a pool with a request slot), with a slot its
+   technique does not fill, with a conversion or a format spec on a slot
+   (`{prompt!r}`, `{prompt:>9}`), or an unpaired brace, a prefix without its suffix, an unknown key (a
    misspelt `weight`), a weight that is not a number of at least 0, or
    every variant at 0.
 4. **Regenerate the digests**: the pool's techniques write other text for
    some seeds, so `tests/jailbreak/test_template_draws.py` fails until
    `PYTHONPATH=src python -m tests.jailbreak.test_template_draws` is run.
    A pool an eval-pool technique draws changes the eval text: that waits
-   for the owner's eval review.
+   for an eval review.
 5. **Ratchet the floor.** `tests/fixtures/variant_floor.json` records each
    pool's family, its count of variants on and its floor, the fewest it
    should have (`FLOORS` by family in `tests/jailbreak/test_variant_floor.py`:
-   8 for a request or framing directive and a container, 12 for a benign
-   role, 20 for small talk). Regenerate it with
+   8 for a request or framing directive, a container, a fake turn, the
+   payload split's reassembly, the word art's decoding and the wording's key
+   and puzzles, 12 for a benign role, 20 for small talk, 6
+   for the persona templates' mechanics, 4 for an encoding's decode hints; a
+   persona frame is its technique's own text, one per persona, not a pool
+   the technique draws from, and is not counted). Regenerate it with
    `PYTHONPATH=src python -m tests.jailbreak.test_variant_floor` to record
-   the new count. The test fails when a pool has fewer variants than
+   the new count; it refuses to record a pool with fewer variants than the
+   fixture has, or one that is gone, without `--allow-drop`. The test fails when a pool has fewer variants than
    recorded (a variant removed, or at weight 0), when the fixture is not
    current, when a family has no floor, and when a pool is below its floor
    without being on the fixture's `known_short` list, which the regenerator
    keeps as it is. A pool that reaches its floor must leave
-   `known_short`: the test fails until it does, so the list only shrinks.
-   34 of the 46 pools are on it today, in 10 families; `to_json`'s wrapper
-   is not a pool yet.
+   `known_short`: the test fails until it does. The list is kept by hand and
+   nothing but review stops a new below-floor pool from being added to it, so
+   add one only on purpose. The list is empty today: all 95 pools are at
+   their floor or above. A pool also fails when one of its variants repeats
+   another (to the case and the spaces).
 
 A new directive is a new list in the file and a technique that names it
 with `@uses_pool` ([above](#add-a-jailbreak-technique)); its family needs
@@ -485,8 +596,8 @@ A new string fails, printing only `file:line` and its word count: put the
 text in a template file, or, for a message the lint cannot tell from
 output, add its entry. An entry no string matches fails too, so moving a
 text into JSON takes its entry out and the list only shrinks. Text built
-from shorter strings (the suffix fragments, the abbreviation map, the keys
-of `to_json`'s wrapper) is not found.
+from shorter strings (the suffix fragments, the abbreviation map) is not
+found.
 
 ## Add a stage
 

@@ -1,12 +1,12 @@
 {
-  "_comment": "The augmentation section's defaults: what the attacks draw (adversarial, to jailbreaks.csv) and what the variations draw (natural, to variations.csv). A recipe's augmentations overlays them key by key (layers, families and techniques list by list); a kind given as null is off. An empty layer_rates is the spec's rates. The attacks never draw a family of natural_only_families unless their families.allow names it. translation alone decides the translation family, whatever the lists say: false keeps it out, true puts it in. allow_request_obfuscation true deals a light encoding or a translation after the request to the share of the attacks' budget-round units the spec's request_obfuscation rate gives (0.5), in one of their max_obfuscations slots. A kind draws only the techniques whose kinds in combination_spec.json hold it, and its allow lists may name only those: the natural kind draws only what the spec marks natural, and no attack draws a family the spec marks natural alone (smalltalk_prefix, smalltalk_suffix, benign_role). Both kinds deny the rewrite layer, which is off until its techniques land: a kind that gives its own layers.deny replaces the list, so it names rewrite to keep the layer off; to turn the layer on, a kind's layers.deny leaves rewrite out and, for budget rounds, its layer_rates give rewrite a rate above 0. Read by jailbreak/augmentation.py.",
+  "_comment": "The augmentation section's defaults: what the attacks draw (adversarial, to jailbreaks.csv) and what the variations draw (natural, to variations.csv). A recipe's augmentations overlays them key by key (layers, families and techniques list by list); a kind given as null is off. An empty layer_rates is the spec's rates. The attacks never draw a family of natural_only_families unless their families.allow names it. translation alone decides the translation family, whatever the lists say: false keeps it out, true puts it in. allow_request_obfuscation true deals a light encoding or a translation after the request to the share of the attacks' budget-round units the spec's request_obfuscation rate gives (0.5), in one of their max_obfuscations slots. A kind draws only the techniques whose kinds in combination_spec.json hold it, and its allow lists may name only those: the natural kind draws only what the spec marks natural, and no attack draws a family the spec marks natural alone (smalltalk_prefix, smalltalk_suffix, benign_role). A layer combination_spec.json has off by default (its layers_off_by_default: rewrite, whose 16 techniques are attacks only) is denied by every kind whose layers.allow does not name it, whatever its layers.deny says; to turn the rewrite layer on, a kind writes \"layers\": {\"allow\": [\"rewrite\"]} and, for budget rounds, its layer_rates give rewrite a rate above 0. Read by jailbreak/augmentation.py.",
 
   "natural_only_families": ["casual_writing"],
 
   "adversarial": {
     "entry_types": null,
     "translation": true,
-    "layers": {"deny": ["rewrite"]},
+    "layers": {"deny": []},
     "families": {"allow": null, "deny": []},
     "techniques": {"allow": null, "deny": []},
     "pure_only": false,
@@ -22,11 +22,13 @@
   "natural": {
     "entry_types": null,
     "translation": false,
-    "layers": {"deny": ["rewrite"]},
+    "_comment_dialect": "dialect runs on the translation model and is gated by the translation switch like the translation family: with translation true it is auto-added to this pool, so it is not named below; with translation false it is out.",
+    "layers": {"deny": []},
     "families": {
       "allow": ["typos", "casual_writing", "noise", "neutral_container",
                 "answer_language", "answer_format", "asking", "indirect",
-                "smalltalk_prefix", "smalltalk_suffix", "benign_role"],
+                "smalltalk_prefix", "smalltalk_suffix", "benign_role",
+                "transliteration", "code_switching", "romanization"],
       "deny": []
     },
     "techniques": {

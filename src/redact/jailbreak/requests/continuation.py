@@ -2,7 +2,7 @@
 
 ``info`` is ``style=<variant>``: the key the other template techniques write
 as ``variant``. It stays ``style`` while the eval pool, which draws these
-techniques, is held; the variants table reads it as their variant.
+techniques, is pinned; the variants table reads it as their variant.
 """
 
 import random

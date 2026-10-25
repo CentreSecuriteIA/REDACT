@@ -38,7 +38,8 @@ on its own:
 4. **paraphrase**: checked rewordings of the inputs (and, opt-in, the outputs),
    to remove the generating model's fingerprint.
 5. **jailbreaks**: attacks and natural variations of the inputs, drawn from
-   192 techniques in 28 families and dealt evenly across categories.
+   315 techniques in 41 families (the default attacks draw 285 of them, the
+   natural variations 96) and dealt evenly across categories.
 6. **build**: the accepted rows of every stage, merged into
    `complete_dataset.csv` for training, or into three flat files for
    evaluation (`eval_inputs.csv`, `eval_outputs.csv`, `eval_jailbreaks.csv`).
@@ -103,6 +104,8 @@ inputs = generate_inputs(data_dir="./runs/first", constitution_df=constitution, 
   registry field
 - [Jailbreak techniques](docs/techniques.md): every technique by layer and
   family
+- [Technique catalog](docs/catalog.md): every technique's tags, pools,
+  variants and compatible partners, generated from the code
 - [Extending](docs/extending.md): add a model, a prompt, a technique, a stage
   or a taxonomy
 - [Stages](docs/README.md#stages) and [internals](docs/README.md#internals):

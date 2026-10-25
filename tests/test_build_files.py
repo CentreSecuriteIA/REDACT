@@ -30,7 +30,7 @@ carries its answer mode and the length its spec dealt, none is.
 The plan pairs ASCII art with neither the emoji or unicode suffix, the emoji
 sprinkle, braille nor a translation, whose characters no font draws, so
 every attack of the runs is accepted. The natural kind draws only what the
-spec marks natural (71 techniques, the low and medium noise, the neutral
+spec marks natural (72 techniques, the low and medium noise, the neutral
 containers, six more answer languages, small talk and the benign roles
 among them since spec 1.2): one variation of the training run is a no-op the
 natural kind rejects, ``to_doubled_punctuation`` on a text with no full stop
@@ -74,6 +74,15 @@ paraphrases of outputs carry ``response_mode``, ``output_label`` and
 complete dataset holds as further columns. ``eval_outputs.csv`` takes its
 ``label`` from ``response_label``, ``<entry_type>_<output_label>``, and gains
 an ``output_label`` column after it; its other cells are as before.
+
+In the release of spec 1.4 the jailbreak and variation rows gain two
+columns read from their ``technique``: ``families`` and ``layers``, the
+first family and the layer of each technique, ``+``-joined in its order.
+They follow the jailbreak file's columns in the complete dataset and
+``technique`` in ``eval_jailbreaks.csv``, empty on every other row; the
+fixture's other cells are as before. The stub jailbreaks name techniques
+no registered one is (``to_upper``, ``to_reversed``, ``ask_for_a_list``),
+whose cells read ``?<name>`` and ``?``; the variations name registered ones.
 """
 
 import json
@@ -554,9 +563,9 @@ _EVAL_HEADERS = {
         "sample_id", "text", "label", "paraphrased", "input_id", "paraphrase_model",
         "entry_type", "category", "subcategory", "source_taxonomy", "dataset_type"],
     "eval_jailbreaks.csv": [
-        "sample_id", "text", "label", "is_jailbreak", "technique", "complexity",
-        "num_techniques", "iteration", "input_id", "entry_type", "category",
-        "subcategory", "source_taxonomy", "dataset_type"],
+        "sample_id", "text", "label", "is_jailbreak", "technique", "families",
+        "layers", "complexity", "num_techniques", "iteration", "input_id",
+        "entry_type", "category", "subcategory", "source_taxonomy", "dataset_type"],
     "eval_outputs.csv": [
         "sample_id", "text", "label", "output_label", "paraphrased", "input_id",
         "model", "paraphrase_model", "entry_type", "category", "subcategory",
@@ -675,15 +684,16 @@ def test_the_jailbreak_file_holds_the_attacks_then_the_bare_benign_inputs(tmp_pa
     header, *rows = _files(paths.datasets(tmp_path))["eval_jailbreaks.csv"]
     assert header == _EVAL_HEADERS["eval_jailbreaks.csv"]
     assert rows == [
-        ["jb-1", "FIRST INPUT, WITH A COMMA", "harmful", "True", "to_upper", "1", "1",
-         "0", "in-1", "harmful", "Cyber", "phishing", "", "jailbreak"],
-        ["jb-2", "tupni dnoces", "benign", "True", "to_reversed", "3", "1", "0",
-         "in-2", "benign", "Cyber", "", "", "jailbreak"],
+        ["jb-1", "FIRST INPUT, WITH A COMMA", "harmful", "True", "to_upper",
+         "?to_upper", "?", "1", "1", "0", "in-1", "harmful", "Cyber", "phishing", "",
+         "jailbreak"],
+        ["jb-2", "tupni dnoces", "benign", "True", "to_reversed", "?to_reversed", "?",
+         "3", "1", "0", "in-2", "benign", "Cyber", "", "", "jailbreak"],
         ["jb-4", "First input?\nAnswer in a list.", "harmful", "True",
-         "to_upper+ask_for_a_list", "2", "2", "1", "in-1", "harmful", "Cyber",
-         "phishing", "", "jailbreak"],
-        ["in-2", _TEXTS[1], "benign", "False", "", "", "", "", "", "benign", "Cyber",
-         "", "", "content_moderation_input"],
+         "to_upper+ask_for_a_list", "?to_upper+?ask_for_a_list", "?+?", "2", "2",
+         "1", "in-1", "harmful", "Cyber", "phishing", "", "jailbreak"],
+        ["in-2", _TEXTS[1], "benign", "False", "", "", "", "", "", "", "", "benign",
+         "Cyber", "", "", "content_moderation_input"],
     ]
 
 
@@ -1251,3 +1261,90 @@ def test_inputs_not_read_back_are_merged_on_disk_and_into_no_frame(
     assert returned.empty and len(returned.columns) == 0
     merged = pd.read_csv(paths.datasets(tmp_path) / "constitution_inputs_merged.csv")
     assert list(merged["sample"]) == ["one zq0 sample", "another zq0 sample"]
+
+
+# --- the families and layers of a jailbreak row ---------------------------------
+
+#: Registered techniques and what a row naming them holds: a multi-family
+#: technique gives its first family, a retired one (spec 1.1) still its own.
+_TAGGED = {
+    "to_hypothetical_framing+to_sensitive_words_encode_base64+to_refusal_then_comply"
+    "+to_fsh_random_short": ("cognitive+sensitive_words+answer_format+fsh",
+                             "hacking+obfuscation+requests+manipulation"),
+    "to_politician_persona": ("persona", "hacking"),
+    "to_rewrite_in_past_tense+to_rot13": ("tense_rewrite+encode",
+                                          "rewrite+obfuscation"),
+    "to_rot13+to_retired_long_ago": ("encode+?to_retired_long_ago", "obfuscation+?"),
+    "identity": ("", ""),
+}
+
+
+def _tagged_stage_files(data_dir: Path) -> None:
+    """The stage files, the jailbreaks and the variations naming the
+    techniques of :data:`_TAGGED`, one a row."""
+    _write_stage_files(data_dir)
+    chains = list(_TAGGED)
+    for frame, path, prefix in ((_JAILBREAKS, paths.jailbreaks_csv, "jb"),
+                                (_VARIATIONS, paths.variations_csv, "var")):
+        rows = pd.concat([frame.iloc[[0]]] * len(chains), ignore_index=True)
+        rows.assign(sample_id=[f"{prefix}-t{i}" for i in range(len(chains))],
+                    jailbreak=[f"{prefix} text {i}" for i in range(len(chains))],
+                    technique=chains, accepted=True,
+                    entry_type="harmful").to_csv(path(data_dir), index=False)
+
+
+def test_a_training_row_holds_the_family_and_layer_of_each_technique(tmp_path):
+    from redact import build_dataset
+
+    _tagged_stage_files(tmp_path)
+    build_dataset(data_dir=tmp_path, verbose=False)
+    built = read_rows(paths.complete_dataset_csv(tmp_path))
+    attacks = built[built["dataset_type"].isin(["jailbreak", "natural_variation"])]
+    expected = [tags for tags in _TAGGED.values()] * 2
+    assert list(zip(attacks["families"], attacks["layers"])) == expected
+    # Empty on every other row; after the jailbreak file's own columns.
+    others = built[~built.index.isin(attacks.index)]
+    assert set(others["families"]) == set(others["layers"]) == {""}
+    columns = list(built.columns)
+    assert columns.index("families") == columns.index("combination_spec_version") + 1
+    assert columns.index("layers") == columns.index("families") + 1
+
+
+def test_an_eval_attack_holds_the_family_and_layer_of_each_technique(tmp_path):
+    from redact import build_dataset
+
+    _tagged_stage_files(tmp_path)
+    built = build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
+    rows = _eval_files(tmp_path)["eval_jailbreaks.csv"]
+    attacks = rows[rows["is_jailbreak"].astype(str) == "True"]
+    assert list(zip(attacks["families"], attacks["layers"])) == list(_TAGGED.values())
+    negatives = rows[rows["is_jailbreak"].astype(str) == "False"]
+    assert len(negatives) and set(negatives["families"]) == {""}
+    assert set(negatives["layers"]) == {""}
+    assert list(built["jailbreaks"]["families"].fillna("")) == list(rows["families"])
+
+
+@pytest.mark.parametrize("mode", ["training", "eval"])
+def test_the_unregistered_names_are_logged_and_the_build_goes_on(
+        tmp_path, caplog, mode):
+    """A row of another version of the library never stops a build."""
+    import logging
+
+    from redact import build_dataset
+
+    _tagged_stage_files(tmp_path)
+    with caplog.at_level(logging.INFO, logger="redact"):
+        build_dataset(data_dir=tmp_path, mode=mode)
+    rows = 2 if mode == "training" else 1     # an eval build takes no variation
+    assert [r.getMessage() for r in caplog.records
+            if r.getMessage().startswith("Build: ")] == [
+        f"Build: {rows} jailbreak or variation rows name a technique this library "
+        "does not register (to_retired_long_ago), as a row written by another "
+        "version of it may; their families read ?<name> and their layers ?."]
+    caplog.clear()
+    _write_stage_files(tmp_path / "known")
+    pd.DataFrame(_VARIATIONS).to_csv(paths.jailbreaks_csv(tmp_path / "known"),
+                                     index=False)
+    with caplog.at_level(logging.INFO, logger="redact"):
+        build_dataset(data_dir=tmp_path / "known", mode=mode)
+    assert not [r for r in caplog.records if r.getMessage().startswith("Build: ")]

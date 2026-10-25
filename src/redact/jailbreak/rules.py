@@ -7,22 +7,11 @@ two was picked first.
 from collections import Counter
 from collections.abc import Callable
 
-from .technique import LATIN, load_spec
+from .technique import load_spec
 
 
 def _families(fn: Callable) -> set[str]:
     return set(getattr(fn, "families", ()))
-
-
-def _needs_latin(fn: Callable) -> bool:
-    """Whether ``fn`` changes only Latin text (its spec ``needs_latin``)."""
-    return getattr(fn, "needs_latin", False)
-
-
-def _writes_non_latin(fn: Callable) -> bool:
-    """Whether ``fn`` is a translation into a script other than Latin (its
-    ``script``, which ``obfuscation/translation.py`` sets)."""
-    return getattr(fn, "script", LATIN) != LATIN
 
 
 def _own_incompatible(fn: Callable) -> set[str]:
@@ -32,10 +21,13 @@ def _own_incompatible(fn: Callable) -> set[str]:
 
 
 def _unfit_for_manipulation(fn: Callable, blocked: dict) -> bool:
-    """Whether ``fn`` is an obfuscation the spec keeps away from fsh and dap.
+    """Whether ``fn`` is an obfuscation the spec keeps away from the
+    manipulation layer's families (fsh, dap, fake_turns).
 
-    Word-level encoding (``sensitive_words``) is kept: it leaves the Q&A
-    readable.
+    Word-level encoding (``sensitive_words``) is kept. The block was written
+    when the manipulation layer applied before the obfuscations, which then
+    changed the examples too; the layer now applies last, around the
+    finished question, and the block is kept as it was.
     """
     families = _families(fn)
     if families & set(blocked.get("families", [])):
@@ -56,10 +48,8 @@ def compatible(
     incompatible with one of the selection's (in either family's list, or in
     the list of a technique on either side), when it
     and the selection would pair a manipulation with an obfuscation the spec
-    blocks for manipulation, when one of it and the selection changes only
-    Latin text (``needs_latin``) and the other translates into another
-    script, which would leave that step nothing to change, or when its
-    complexity exceeds ``remaining_complexity``.
+    blocks for manipulation, or when its complexity exceeds
+    ``remaining_complexity``.
     """
     spec = load_spec()
     families = spec["families"]
@@ -77,8 +67,6 @@ def compatible(
     has_manipulation = bool(taken & manipulation)
     has_unfit = any(_unfit_for_manipulation(fn, blocked_for_manipulation)
                     for fn in selected)
-    has_latin_only = any(map(_needs_latin, selected))
-    has_non_latin = any(map(_writes_non_latin, selected))
 
     result = []
     for fn in pool:
@@ -93,9 +81,6 @@ def compatible(
         if has_manipulation and _unfit_for_manipulation(fn, blocked_for_manipulation):
             continue
         if has_unfit and fn_families & manipulation:
-            continue
-        if ((has_latin_only and _writes_non_latin(fn))
-                or (has_non_latin and _needs_latin(fn))):
             continue
         if (remaining_complexity is not None
                 and getattr(fn, "complexity", 0) > remaining_complexity):
@@ -120,3 +105,22 @@ def request_obfuscation_candidates(pool: list[Callable]) -> list[Callable]:
         return "translation" in allowed and "translation" in families
 
     return [fn for fn in pool if allowed_for_request(fn)]
+
+
+def after_request_obfuscation(pick: Callable, pool: list[Callable]) -> list[Callable]:
+    """The techniques of ``pool`` that may still join a combination whose
+    request obfuscation is ``pick``.
+
+    The request obfuscation applies right after the request, to the finished
+    request (only a manipulation technique, which never meets a translation,
+    comes after it), so a translation drawn as one translates what the
+    obfuscations before it wrote. The spec's ``request_obfuscation_refuses``
+    names, for its family, the families that would leave it a suffix, a
+    wrapper's keys or a container's lines to translate. A translation drawn
+    as an ordinary obfuscation runs before those steps and meets none of
+    these rules. The sampler draws the request obfuscation before the
+    obfuscations, so this narrows what they draw from.
+    """
+    table = load_spec().get("request_obfuscation_refuses", {})
+    refused = set().union(*(table.get(family, ()) for family in _families(pick)))
+    return [fn for fn in pool if not _families(fn) & refused]

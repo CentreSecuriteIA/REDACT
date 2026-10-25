@@ -1,17 +1,35 @@
 """Encoding techniques: the prompt as a cipher, a character code, a byte codec,
-Morse or Braille, reversed, or in look-alike, fullwidth or math-styled letters.
+Morse or Braille, reversed, in look-alike, fullwidth or math-styled letters,
+or spaced out letter by letter.
 
 ``info`` is empty, except ``sep=<separator>`` from ``to_separator``,
-``shift=<n>`` from ``to_caesar_cipher`` and ``style=<name>`` from
-``to_math_styled`` (traceability metadata, not part of the encoded text).
+``shift=<n>`` from ``to_caesar_cipher`` and ``math_style=<name>`` from
+``to_math_styled`` (traceability metadata, not part of the encoded text; not
+``style=``, the key continuation's variant is read under).
+
+The ``to_<name>`` functions here are the plain encoders. A technique of the
+registry (:func:`get_encoding_functions`) with a pool in
+``obfuscation/decode_hints.json`` is its encoder with a hint: at the spec's
+``decode_hint_rate`` (0.5) it writes one of four hints around the encoded
+text, which says how to decode it, and adds ``hint=<name>`` to the info. The
+five heavy encodings of the eval pool (base64, Unicode escapes, ASCII
+ordinals, Morse and Braille) have hints since the second eval release.
+``to_leetspeak_basic`` (the natural kind's) and the sensitive-word encodings,
+which import the plain encoders, have none: :data:`NEVER_HINTED` names the
+first, and import fails for a pool of hints that names it.
 """
 
 import base64
 import codecs
+import inspect
 import random
 import unicodedata
 import urllib.parse
 from collections.abc import Callable
+
+from redact.jailbreak.technique import decode_hint_rate
+
+from ..directives import draw_variant, read_pools, uses_pool
 
 # ROT47 operates on the printable-ASCII range '!' (33) through '~' (126).
 _ROT47_PRINTABLE_MIN = 33
@@ -20,10 +38,18 @@ _ROT47_PRINTABLE_MAX = 126
 # The last code point a four-digit escape can name.
 _BMP_MAX = 0xFFFF
 
-# Joined to the character before them: the zero-width joiner and the two
-# emoji variation selectors (as is every combining mark).
+# Joined to the character before them: the zero-width joiner, the two
+# emoji variation selectors and the five skin-tone modifiers (as is every
+# combining mark).
 _ZWJ = "\u200d"
-_JOINED = {_ZWJ, "\ufe0e", "\ufe0f"}
+_JOINED = {_ZWJ, "\ufe0e", "\ufe0f", *map(chr, range(0x1F3FB, 0x1F400))}
+
+# The 26 regional indicators, which pair into a flag, and the three kinds of
+# conjoining Hangul jamo, which a decomposed syllable is made of.
+_REGIONAL = range(0x1F1E6, 0x1F200)
+_LEAD = range(0x1100, 0x1160)
+_VOWEL = range(0x1160, 0x11A8)
+_TRAIL = range(0x11A8, 0x1200)
 
 
 def to_base64(prompt: str) -> tuple[str, str]:
@@ -77,15 +103,32 @@ def to_ascii_ordinal(prompt: str) -> tuple[str, str]:
 SEPARATORS = ["-", "_", ".", "|", "/", "*", "~"]
 
 
+def _stays_with(cluster: str, c: str) -> bool:
+    """Whether ``c`` stays with ``cluster``, the characters before it that a
+    reader sees as one: ``c`` is a combining mark, a zero-width joiner, a
+    variation selector or a skin-tone modifier, ``cluster`` ends with a joiner,
+    ``c`` is the second regional indicator of a flag, or ``c`` is the jamo of a
+    decomposed Hangul syllable that goes after the one before it (a lead
+    consonant, a vowel, a trailing consonant, in that order)."""
+    code, last = ord(c), ord(cluster[-1])
+    return (unicodedata.category(c).startswith("M") or c in _JOINED
+            or cluster.endswith(_ZWJ)
+            or (code in _REGIONAL and last in _REGIONAL and len(cluster) == 1)
+            or (code in _LEAD and last in _LEAD)
+            or (code in _VOWEL and (last in _LEAD or last in _VOWEL))
+            or (code in _TRAIL and (last in _VOWEL or last in _TRAIL)))
+
+
 def _clusters(text: str) -> list[str]:
-    """``text`` cut into the characters a reader sees: a combining mark, a
-    zero-width joiner or a variation selector stays with the character before
-    it, and so does the character after a joiner."""
+    """``text`` cut into the characters a reader sees (:func:`_stays_with`):
+    a mark, a joiner, a variation selector or a skin tone stays with the
+    character before it, and so does the character after a joiner; a flag's
+    two letters and a decomposed Hangul syllable's jamo stay together. Not a
+    full grapheme segmenter: the rest of emoji sequences and the Indic
+    conjuncts keep their characters apart."""
     clusters: list[str] = []
     for c in text:
-        joined = (unicodedata.category(c).startswith("M") or c in _JOINED
-                  or (clusters and clusters[-1].endswith(_ZWJ)))
-        if clusters and joined:
+        if clusters and _stays_with(clusters[-1], c):
             clusters[-1] += c
         else:
             clusters.append(c)
@@ -96,6 +139,17 @@ def to_separator(prompt: str, *, rng: random.Random | None = None) -> tuple[str,
     """Insert a random separator character between every character a reader sees."""
     sep = (rng or random).choice(SEPARATORS)
     return sep.join(_clusters(prompt)), f"sep={sep}"
+
+
+def to_letter_spacing(prompt: str) -> tuple[str, str]:
+    """Put a space between every two characters a reader sees, the BELLS
+    guardrail attacks' ``space_between_letters`` (``" ".join(prompt)``): a
+    space between two words becomes three, so the words stay apart, and a
+    line break gets a space on each side. A mark, a joiner or a skin tone
+    stays with its character (:func:`_clusters`), where the reference's join
+    of code points would set it apart; on a text without one the two write
+    the same. Any script is spaced out, not only Latin."""
+    return " ".join(_clusters(prompt)), ""
 
 
 _LEET_MAP_BASIC = {
@@ -159,7 +213,13 @@ _MORSE_MAP = {
 
 
 def to_morse(prompt: str) -> tuple[str, str]:
-    """Convert string to Morse code."""
+    """Convert string to Morse code: each Latin letter, ASCII digit and
+    space (``/``) to its code, the codes joined by spaces.
+
+    A character with no code (one of another script, a digit of its own,
+    most punctuation) stays as it is, spaced like a code: a text of another
+    script comes back spaced out, not encoded. So it is tagged
+    ``needs_latin``, as the Latin-only ciphers are."""
     return " ".join(_MORSE_MAP.get(c.upper(), c) for c in prompt), ""
 
 
@@ -176,7 +236,11 @@ _BRAILLE_MAP = {
 
 
 def to_braille(prompt: str) -> tuple[str, str]:
-    """Convert string to Braille."""
+    """Convert string to Braille: each Latin letter to its cell.
+
+    Every other character (a digit, punctuation, a letter of another script)
+    stays as it is: a text of another script comes back unchanged. So it is
+    tagged ``needs_latin``, as the Latin-only ciphers are."""
     return "".join(_BRAILLE_MAP.get(c.lower(), c) for c in prompt), ""
 
 
@@ -365,37 +429,116 @@ def to_math_styled(
             out.append(chr(lower + ord(c) - 97))
         else:
             out.append(c)
-    return "".join(out), f"style={style}"
+    return "".join(out), f"math_style={style}"
+
+
+_ENCODERS = [
+    to_base64,
+    to_rot13,
+    to_rot18,
+    to_rot47,
+    to_unicode_escape,
+    to_ascii_ordinal,
+    to_separator,
+    to_leetspeak_basic,
+    to_leetspeak_intermediate,
+    to_leetspeak_advanced,
+    to_morse,
+    to_braille,
+    to_reversed_characters,
+    to_reversed_words,
+    to_reversed_word_order,
+    to_lookalike_letters,
+    to_zero_width_noise,
+    to_hex,
+    to_binary,
+    to_url_encoding,
+    to_html_entities,
+    to_base32,
+    to_base85,
+    to_caesar_cipher,
+    to_atbash,
+    to_fullwidth,
+    to_math_styled,
+    to_letter_spacing,
+]
+
+_HINTS_FILE = "obfuscation/decode_hints.json"
+#: The encodings that never carry a hint: the one the natural kind draws,
+#: whose rows are benign variations a decode instruction would turn into an
+#: attack.
+NEVER_HINTED = frozenset({"to_leetspeak_basic"})
+#: The hints of each encoding that has them, by technique name.
+_HINTS: dict[str, list[dict]] = read_pools(_HINTS_FILE)
+#: What a hint fills beside ``{prompt}``, the encoded text: the values its
+#: encoder reports in its info. Only the Caesar cipher's ``shift`` is stated.
+_HINT_SLOTS = {"to_caesar_cipher": ("prompt", "shift")}
+
+
+def _info_values(info: str) -> dict[str, str]:
+    """The ``key=value`` pairs of an encoder's info."""
+    return dict(part.split("=", 1) for part in info.split(";") if "=" in part)
+
+
+def _with_hint(encode: Callable) -> Callable:
+    """The technique ``encode`` is in a run: its encoding, then, at the
+    spec's ``decode_hint_rate``, one of its hints around the encoded text.
+
+    The hint is drawn from ``rng`` after the encoder's own draws, so an
+    outcome without one leaves its text and its info as ``encode`` writes
+    them. The rate is one ``rng.random()`` when the encoding changed the text,
+    drawn before the hint (a noop draws nothing and gets no hint, so it stays
+    a noop): after such a call ``rng`` is one draw ahead of the plain
+    encoder's, at rate 0 too, though the text and the info are the same. Only
+    this technique's ``rng`` is read, so no other technique's draws move.
+    Called without an ``rng``, a hinted encoder draws from the global
+    generator, so a direct call of a registry encoder is random where the plain
+    encoder is not; a stage always gives each technique a seeded one.
+    """
+    name = encode.__name__
+    takes_rng = "rng" in inspect.signature(encode).parameters
+
+    def technique(
+        prompt: str, *, rng: random.Random | None = None,
+    ) -> tuple[str, str]:
+        text, info = encode(prompt, rng=rng) if takes_rng else encode(prompt)
+        rng = rng or random
+        if text == prompt or rng.random() >= decode_hint_rate():
+            return text, info
+        hint = draw_variant(_HINTS[name], rng)
+        filled = hint["template"].format_map({**_info_values(info), "prompt": text})
+        return filled, ";".join(filter(None, [info, f"hint={hint['name']}"]))
+
+    technique.__name__ = technique.__qualname__ = name
+    technique.__doc__ = encode.__doc__
+    return uses_pool(_HINTS_FILE, name, _HINT_SLOTS.get(name, ("prompt",)),
+                     info_key="hint", optional=True)(technique)
+
+
+def _check_hints(hints: dict[str, list[dict]], encoders: list[Callable]) -> None:
+    """Raise unless every pool of ``hints`` is that of an encoder in
+    ``encoders``, so a misspelt name cannot leave an encoding without hints,
+    and of none in :data:`NEVER_HINTED`, whose text a hint would change."""
+    if unnamed := sorted(set(hints) - {fn.__name__ for fn in encoders}):
+        raise ValueError(
+            f"configs/jailbreak/{_HINTS_FILE} has hints for {unnamed}, which are "
+            "not encoders of obfuscation/encoding.py; name an encoder or remove "
+            "the entry.")
+    if held := sorted(set(hints) & NEVER_HINTED):
+        raise ValueError(
+            f"configs/jailbreak/{_HINTS_FILE} has hints for {held}, which the "
+            "natural kind draws: a hint would change their text. Remove the "
+            "entry, or take the encoding out of NEVER_HINTED of "
+            "obfuscation/encoding.py.")
+
+
+_check_hints(_HINTS, _ENCODERS)
+
+#: The registry's encodings: each with a pool of hints is its encoder with them.
+_TECHNIQUES = [_with_hint(fn) if fn.__name__ in _HINTS else fn for fn in _ENCODERS]
 
 
 def get_encoding_functions() -> list[Callable]:
-    """Return all encoding/cyphering technique functions."""
-    return [
-        to_base64,
-        to_rot13,
-        to_rot18,
-        to_rot47,
-        to_unicode_escape,
-        to_ascii_ordinal,
-        to_separator,
-        to_leetspeak_basic,
-        to_leetspeak_intermediate,
-        to_leetspeak_advanced,
-        to_morse,
-        to_braille,
-        to_reversed_characters,
-        to_reversed_words,
-        to_reversed_word_order,
-        to_lookalike_letters,
-        to_zero_width_noise,
-        to_hex,
-        to_binary,
-        to_url_encoding,
-        to_html_entities,
-        to_base32,
-        to_base85,
-        to_caesar_cipher,
-        to_atbash,
-        to_fullwidth,
-        to_math_styled,
-    ]
+    """Return all encoding/cyphering technique functions: the plain encoder,
+    or, for one with a pool of hints, the encoder with its hint."""
+    return list(_TECHNIQUES)

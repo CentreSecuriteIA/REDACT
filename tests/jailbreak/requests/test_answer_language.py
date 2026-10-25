@@ -53,16 +53,21 @@ class TestAnswerLanguageRegistry:
         assert "to_ask_answer_in_maori" in [
             f.__name__ for f in get_answer_language_functions()]
 
-    def test_the_six_languages_of_spec_1_2_are_answer_languages_only(self):
-        """Their translation waits for a measured length ratio and GlotLID
-        labels."""
-        from redact.jailbreak.pool import languages
-
+    def test_the_six_languages_of_spec_1_2_are_answer_languages_since_1_2(self):
         slugs = ["hmong", "guarani", "chinese", "hindi", "yoruba", "amharic"]
         added = [f.__name__ for f in get_answer_language_functions()
                  if f.since == "1.2"]
         assert added == [f"to_ask_answer_in_{slug}" for slug in slugs]
-        assert not {f"to_{slug}" for slug in slugs} & languages()
+
+    def test_guarani_is_an_answer_language_only(self):
+        """Its translation measured too poorly (TranslateGemma loops on a
+        fifth of its sentences); the other five of the six are translations
+        too, four since spec 1.3 and Yoruba since spec 1.4."""
+        from redact.jailbreak.pool import languages
+
+        assert "to_guarani" not in languages()
+        assert {"to_hmong", "to_chinese", "to_hindi", "to_amharic",
+                "to_yoruba"} <= languages()
 
 
 class TestIndividualLanguageFunctions:

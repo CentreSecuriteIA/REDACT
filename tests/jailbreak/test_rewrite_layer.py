@@ -1,13 +1,16 @@
-"""The rewrite layer: the spec's first layer, which holds no technique yet.
+"""The rewrite layer: the spec's first layer, off by default.
 
-A stand-in technique, tagged by hand, shows what the layer does once it has
-one; nothing here edits a file.
+``POOL`` is every technique but the layer's own, so a stand-in technique,
+tagged by hand, can be the layer's only one and show what the layer does;
+nothing here edits a file. The last tests are about the 16 techniques the
+layer holds.
 """
 
 import csv
 import json
 import logging
 import random
+from collections import Counter
 
 import pandas as pd
 import pytest
@@ -20,9 +23,14 @@ from redact import paths
 from redact.dataset import Manifest
 from redact.dataset.dealing import Dealer
 from redact.dataset.planfile import read_plan
-from redact.jailbreak.augmentation import resolve, rounds_of
+from redact.jailbreak.augmentation import (
+    defaults,
+    layers_off_by_default,
+    resolve,
+    rounds_of,
+)
 from redact.jailbreak.chain import in_layer_order
-from redact.jailbreak.plan import plan_run
+from redact.jailbreak.plan import default_escalation_schedule, plan_run
 from redact.jailbreak.pool import (
     all_techniques,
     registry,
@@ -32,13 +40,13 @@ from redact.jailbreak.pool import (
 from redact.jailbreak.rewrite import get_all_rewrite_functions
 from redact.jailbreak.rules import compatible
 from redact.jailbreak.sampling import sample_combination, sample_exact_combination
-from redact.jailbreak.technique import KINDS, load_spec
+from redact.jailbreak.technique import KINDS, load_spec, read_spec
 from redact.llms.model_config import default_model_for_role
 from redact.recipe import augmentations_of, load_dataset_type, load_recipe, resolve_role
 from redact.stages import generate_jailbreaks
 from tests.jailbreak.test_pipeline_jailbreaks import _inputs
 
-POOL = all_techniques()
+POOL = [fn for fn in all_techniques() if fn.layer != "rewrite"]
 BY_NAME = registry(POOL)
 _BUDGET = {"max_complexity": 9, "max_obfuscations": 3,
            "allow_request_obfuscation": True}
@@ -73,14 +81,19 @@ def _dealer(seed: int) -> Dealer:
 
 # --- the layer ------------------------------------------------------------------
 
-def test_the_rewrite_layer_comes_first_and_holds_no_technique_yet():
+def test_the_rewrite_layer_comes_first_and_holds_16_techniques_in_three_families():
     spec = load_spec()
     assert spec["layer_order"] == [
-        "rewrite", "hacking", "manipulation", "obfuscation", "requests"]
+        "rewrite", "hacking", "obfuscation", "requests", "manipulation"]
     assert spec["layer_rates"]["rewrite"] == 0
-    assert get_all_rewrite_functions() == []
-    assert not [name for name, family in spec["families"].items()
-                if family["layer"] == "rewrite"]
+    assert {name for name, family in spec["families"].items()
+            if family["layer"] == "rewrite"} == {
+        "persuasion", "tense_rewrite", "model_distractors"}
+    rewrites = get_all_rewrite_functions()
+    assert Counter(fn.families[0] for fn in rewrites) == {
+        "persuasion": 12, "tense_rewrite": 2, "model_distractors": 2}
+    assert {(fn.layer, fn.requires_llm, tuple(fn.kinds), fn.since, fn.complexity)
+            for fn in rewrites} == {("rewrite", True, ("adversarial",), "1.3", 2)}
 
 
 def test_the_rewrite_layer_takes_one_pick_per_combination():
@@ -238,12 +251,38 @@ def test_a_rewrite_layer_left_short_is_logged_as_any_layer(tmp_path, caplog):
         "pick (see jb.coverage.csv)."]
 
 
+def test_a_plan_deals_the_real_rewrite_families_evenly_at_the_layer_rate(tmp_path):
+    """Half of 12 units draw one rewrite technique each: two of each of the
+    three families, no technique twice."""
+    allowed = resolve({"adversarial": {"layers": {"allow": ["rewrite"]}}},
+                      "adversarial")
+    plan_run(_one_group(12), technique_pool(allowed),
+             manifest_path=tmp_path / "jb.manifest.jsonl", seed=3,
+             sample_kwargs={"include_rewrite": True},
+             layer_rates={"rewrite": 0.5}, verbose=False)
+    counts = _coverage(tmp_path / "jb.coverage.csv")
+    assert counts[("layer", "rewrite")] == 6    # noqa: PLR2004
+    assert [counts[("family", family)] for family in (
+        "persuasion", "tense_rewrite", "model_distractors")] == [2, 2, 2]
+    assert max(counts[("technique", fn.__name__)]
+               for fn in get_all_rewrite_functions()) == 1
+
+
 # --- the pool -------------------------------------------------------------------
 
-def test_layers_deny_rewrite_leaves_a_rewrite_technique_out_of_the_pool(monkeypatch):
+def _register(monkeypatch, *rewrites) -> None:
+    """``rewrites`` registered beside every other layer's technique and in place
+    of the layer's own, for the pool and the rounds: none leaves the layer
+    empty, as it was before it held any."""
+    for module in (JPool, JAugmentation):
+        monkeypatch.setattr(module, "all_techniques", lambda: [*POOL, *rewrites])
+
+
+def test_layers_allow_rewrite_puts_a_rewrite_technique_in_the_pool(monkeypatch):
     rewrite = _stand_in()
-    monkeypatch.setattr(JPool, "all_techniques", lambda: [*POOL, rewrite])
-    allowed = resolve({"adversarial": {"layers": {"deny": []}}}, "adversarial")
+    _register(monkeypatch, rewrite)
+    allowed = resolve({"adversarial": {"layers": {"allow": ["rewrite"]}}},
+                      "adversarial")
     assert rewrite not in technique_pool(resolve(None, "adversarial"))
     assert rewrite in technique_pool(allowed)
 
@@ -257,25 +296,147 @@ _ROUND_BEFORE = {"max_complexity": 6, "max_obfuscations": 2, "include_hacking": 
                  "include_requests": True, "allow_request_obfuscation": True}
 
 
+def test_the_spec_has_the_rewrite_layer_off_by_default():
+    assert load_spec()["layers_off_by_default"] == ["rewrite"]
+    assert layers_off_by_default() == ["rewrite"]
+
+
+@pytest.mark.parametrize("off", [["rewrites"], "rewrite"])
+def test_the_spec_may_name_only_layers_of_its_layer_order_off_by_default(
+        tmp_path, off):
+    spec = json.loads(
+        (paths.jailbreak_configs_dir() / "combination_spec.json").read_text("utf-8"))
+    spec["layers_off_by_default"] = off
+    spec["generators"] = {}
+    path = tmp_path / "combination_spec.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    with pytest.raises(ValueError) as raised:
+        read_spec(path)
+    assert str(raised.value) == (
+        "combination_spec.json: layers_off_by_default must be a list of layers of "
+        f"layer_order, got {off!r}; write names of ['rewrite', 'hacking', "
+        "'obfuscation', 'requests', 'manipulation'].")
+
+
 @pytest.mark.parametrize("kind", KINDS)
-def test_both_packaged_kinds_deny_the_rewrite_layer(kind):
+def test_both_packaged_kinds_deny_the_rewrite_layer_by_the_spec(kind):
+    """The file names no layer; the spec's list denies it."""
+    assert defaults()[kind]["layers"] == {"deny": []}
     assert resolve(None, kind)["layers"] == {"deny": ["rewrite"]}
 
 
 @pytest.mark.parametrize("dataset_type", ["eval", "training"])
-def test_the_dataset_types_keep_the_packaged_deny(dataset_type):
+def test_the_dataset_types_resolve_their_layers_as_before(dataset_type):
+    """``{"deny": ["rewrite"]}`` and no ``allow`` key, so their resolved
+    kinds are what they were (their pools and draws are pinned elsewhere)."""
     base = load_dataset_type(dataset_type)["augmentations"]
     for kind in KINDS:
         resolved = resolve(None, kind, base=base)
         assert resolved is None or resolved["layers"] == {"deny": ["rewrite"]}
 
 
-def test_a_layers_deny_given_replaces_the_packaged_one_whole():
-    """The overlay rule: a type file, or a section, that gives its own
-    ``layers.deny`` names ``rewrite`` in it to keep the layer off."""
-    for given in (["hacking"], ["rewrite", "hacking"]):
-        base = {"adversarial": {"layers": {"deny": given}}}
-        assert resolve(None, "adversarial", base=base)["layers"]["deny"] == given
+@pytest.mark.parametrize(("deny", "denied"), [
+    (["hacking"], ["hacking", "rewrite"]),
+    (["rewrite", "hacking"], ["rewrite", "hacking"]),
+    ([], ["rewrite"]),
+])
+def test_a_kinds_own_layers_deny_still_denies_the_rewrite_layer(deny, denied):
+    """A deny given replaces the default's whole, in a section or a type
+    file; the spec's layer joins it whether it names the layer or not."""
+    given = {"adversarial": {"layers": {"deny": deny}}}
+    for resolved in (resolve(given, "adversarial"),
+                     resolve(None, "adversarial", base=given)):
+        assert resolved["layers"] == {"deny": denied}
+
+
+def test_a_kinds_own_layers_deny_keeps_a_registered_rewrite_out(monkeypatch):
+    rewrite = _stand_in()
+    _register(monkeypatch, rewrite)
+    kind = resolve({"adversarial": {"layers": {"deny": ["hacking"]}}}, "adversarial")
+    assert rewrite not in technique_pool(kind)
+    assert rounds_of(kind) == [{**_ROUND_BEFORE, "include_hacking": False}]
+
+
+def test_layers_allow_given_over_a_deny_that_names_the_layer_allows_it():
+    """An allowed name leaves the default's deny, as for families and
+    techniques: a run may allow the layer over a type file, or a
+    ``config_dir`` copy, that denies it."""
+    base = {"adversarial": {"layers": {"deny": ["rewrite", "hacking"]}}}
+    kind = resolve({"adversarial": {"layers": {"allow": ["rewrite"]}}},
+                   "adversarial", base=base)
+    assert kind["layers"] == {"deny": ["hacking"], "allow": ["rewrite"]}
+    assert resolve({"adversarial": kind}, "adversarial") == kind
+
+
+def test_layers_allow_naming_a_layer_on_by_default_raises():
+    with pytest.raises(ValueError) as raised:
+        resolve({"adversarial": {"layers": {"allow": ["hacking"]}}}, "adversarial")
+    assert str(raised.value) == (
+        "augmentations.adversarial.layers.allow names 'hacking', which is on "
+        "already: layers.allow turns on only the layers combination_spec.json has "
+        "off by default (['rewrite']). Take it out of layers.allow.")
+
+
+@pytest.mark.parametrize(("given", "key", "name"), [
+    ({"techniques": {"allow": ["to_persuade_scarcity"]}}, "techniques.allow",
+     "to_persuade_scarcity"),
+    ({"families": {"allow": ["persuasion"]}}, "families.allow", "persuasion"),
+    ({"family_weights": {"persuasion": 2}}, "family_weights", "persuasion"),
+], ids=["technique", "family", "weight"])
+def test_naming_a_rewrite_technique_without_layers_allow_raises(given, key, name):
+    """The pool would drop it, and a kind that named nothing else would draw
+    nothing; with the layer allowed it is drawn."""
+    with pytest.raises(ValueError) as raised:
+        resolve({"adversarial": given}, "adversarial")
+    assert str(raised.value) == (
+        f"augmentations.adversarial.{key} names {name!r}, of the rewrite layer, "
+        "which combination_spec.json has off by default, so the kind would not "
+        'draw it: write "layers": {"allow": ["rewrite"]} in the kind to turn the '
+        f"layer on, or take it out of {key}.")
+    allowed = resolve({"adversarial": {**given, "layers": {"allow": ["rewrite"]}}},
+                      "adversarial")
+    assert [fn for fn in technique_pool(allowed) if fn.layer == "rewrite"]
+
+
+def test_layers_allow_on_the_natural_kind_raises():
+    """Every rewrite technique says ["adversarial"], so it would turn nothing
+    on; an empty layer, as before it held a technique, is let through."""
+    with pytest.raises(ValueError) as raised:
+        resolve({"natural": {"layers": {"allow": ["rewrite"]}}}, "natural")
+    assert str(raised.value) == (
+        "augmentations.natural.layers.allow names 'rewrite', none of whose "
+        "techniques the natural kind draws (their kinds in combination_spec.json), "
+        "so it turns nothing on; take it out of layers.allow.")
+
+
+def _config_dir(tmp_path, layers: dict):
+    """A config folder whose ``augmentations.json`` is the packaged one with
+    ``layers`` in both kinds."""
+    section = json.loads(
+        (paths.jailbreak_configs_dir() / "augmentations.json").read_text("utf-8"))
+    for kind in KINDS:
+        section[kind]["layers"] = layers
+    (tmp_path / "jailbreak").mkdir()
+    (tmp_path / "jailbreak" / "augmentations.json").write_text(
+        json.dumps(section), encoding="utf-8")
+    return tmp_path
+
+
+@pytest.mark.parametrize("where", ["section", "config_dir"])
+def test_a_layer_named_under_both_allow_and_deny_raises(tmp_path, where):
+    """In a section; in a copy, whose message names the file."""
+    both = {"allow": ["rewrite"], "deny": ["rewrite"]}
+    if where == "section":
+        section, config_dir = {"adversarial": {"layers": both}}, None
+        named = "augmentations.adversarial"
+    else:
+        section, config_dir = None, _config_dir(tmp_path, both)
+        named = f"{tmp_path / 'jailbreak' / 'augmentations.json'}: adversarial"
+    with pytest.raises(ValueError) as raised:
+        resolve(section, "adversarial", config_dir=config_dir)
+    assert str(raised.value) == (
+        f"{named}.layers names ['rewrite'] under both allow and deny; write each "
+        "under one of them.")
 
 
 def test_the_packaged_kinds_rounds_are_those_written_before_the_layer():
@@ -285,42 +446,106 @@ def test_the_packaged_kinds_rounds_are_those_written_before_the_layer():
     assert rounds_of(resolve(None, "natural")) == [{"exact_techniques": 1}]
 
 
-def test_a_kind_that_allows_the_empty_layer_has_the_rounds_written_before_it():
+def test_a_kind_that_allows_the_empty_layer_keeps_the_rounds_written_before_it(
+        monkeypatch):
     """With no rewrite technique registered, allowing the layer changes no draw,
-    so its rounds stay as they were and a plan kept from the section resumes."""
-    allowed = resolve({"adversarial": {"layers": {"deny": []}}}, "adversarial")
+    so its rounds stay as they were."""
+    _register(monkeypatch)
+    allowed = resolve({"adversarial": {"layers": {"allow": ["rewrite"]}}},
+                      "adversarial")
     assert rounds_of(allowed) == [_ROUND_BEFORE]
-    hacking_off = resolve({"adversarial": {"layers": {"deny": ["hacking"]}}},
-                          "adversarial")
+    hacking_off = resolve(
+        {"adversarial": {"layers": {"deny": ["hacking"], "allow": ["rewrite"]}}},
+        "adversarial")
     assert rounds_of(hacking_off) == [{**_ROUND_BEFORE, "include_hacking": False}]
 
 
-def test_a_kind_that_allows_the_layer_says_include_rewrite_once_a_technique_exists(
-        monkeypatch):
-    monkeypatch.setattr(JAugmentation, "all_techniques",
-                        lambda: [*POOL, _stand_in()])
-    kind = resolve({"adversarial": {"layers": {"deny": []},
+def test_a_kind_that_allows_the_layer_says_include_rewrite_for_its_techniques():
+    kind = resolve({"adversarial": {"layers": {"allow": ["rewrite"]},
                                     "layer_rates": {"rewrite": 0.25}}}, "adversarial")
     assert kind["layer_rates"] == {"rewrite": 0.25}
     assert rounds_of(kind) == [{**_ROUND_BEFORE, "include_rewrite": True}]
-    hacking_off = resolve({"adversarial": {"layers": {"deny": ["hacking"]}}},
-                          "adversarial")
+    hacking_off = resolve(
+        {"adversarial": {"layers": {"deny": ["hacking"], "allow": ["rewrite"]}}},
+        "adversarial")
     assert rounds_of(hacking_off) == [
         {**_ROUND_BEFORE, "include_hacking": False, "include_rewrite": True}]
     assert rounds_of(resolve(None, "adversarial")) == [_ROUND_BEFORE]
 
 
-def test_a_config_dir_copy_made_before_the_layer_has_the_rounds_it_had(tmp_path):
-    """The file the former release wrote, ``layers.deny`` empty, allows the
-    layer; its rounds say nothing of it."""
-    section = json.loads(
-        (paths.jailbreak_configs_dir() / "augmentations.json").read_text("utf-8"))
-    section["adversarial"]["layers"] = {"deny": []}
-    (tmp_path / "jailbreak").mkdir()
-    (tmp_path / "jailbreak" / "augmentations.json").write_text(
-        json.dumps(section), encoding="utf-8")
-    kind = resolve(None, "adversarial", config_dir=tmp_path)
-    assert kind["layers"] == {"deny": []}
+def test_a_kind_whose_pool_holds_no_rewrite_keeps_its_rounds_with_the_layer_allowed():
+    """The eval type's lists name no rewrite family, so allowing the layer
+    there adds nothing to its pool and nothing to its rounds: a kept eval
+    plan resumes."""
+    base = load_dataset_type("eval")["augmentations"]
+    allowed = resolve({"adversarial": {"layers": {"allow": ["rewrite"]}}},
+                      "adversarial", base=base)
+    assert rounds_of(allowed) == rounds_of(resolve(None, "adversarial", base=base))
+
+
+def test_the_escalation_carries_the_kinds_rewrite_rate_into_its_budget_rounds():
+    kind = resolve({"adversarial": {"layers": {"allow": ["rewrite"]},
+                                    "layer_rates": {"rewrite": 0.5},
+                                    "rounds": "escalation"}}, "adversarial")
+    schedule = default_escalation_schedule()
+    rounds = rounds_of(kind)
+    assert [r.get("sampling_probs") for r in rounds] == [
+        None, None, *({"rewrite": 0.5, **r["sampling_probs"]} for r in schedule[2:])]
+    # A kind that does not draw the layer keeps the schedule's rates.
+    plain = resolve({"adversarial": {"rounds": "escalation"}}, "adversarial")
+    assert [r.get("sampling_probs") for r in rounds_of(plain)] == [
+        r.get("sampling_probs") for r in schedule]
+
+
+_RATE_0 = "draw it at rate 0"
+
+
+@pytest.mark.parametrize(("given", "flat"), [
+    ({}, "[0]"),
+    ({"layer_rates": {"rewrite": 0.5}}, None),
+    ({"layer_rates": {"rewrite": 0.5}, "rounds": "escalation"}, None),
+    ({"rounds": "escalation"}, "[2, 3]"),
+    ({"layer_rates": {"rewrite": 0.5},
+      "rounds": [{"max_complexity": 6}, {"layer_rates": {"hacking": 0.9}}]}, "[1]"),
+], ids=["no rate", "rate", "escalation with a rate", "escalation without",
+        "a round's own rates"])
+def test_allowing_the_layer_warns_for_each_budget_round_at_rate_0(caplog, given, flat):
+    with caplog.at_level("WARNING", logger="redact.jailbreak.augmentation"):
+        resolve({"adversarial": {"layers": {"allow": ["rewrite"]}, **given}},
+                "adversarial")
+    warned = [r.getMessage() for r in caplog.records if _RATE_0 in r.getMessage()]
+    if flat is None:
+        assert warned == []
+    else:
+        (message,) = warned
+        assert f"its budget round(s) {flat} (from 0) draw it at rate 0" in message
+
+
+def test_a_rewrite_rate_with_the_layer_off_warns(caplog):
+    with caplog.at_level("WARNING", logger="redact.jailbreak.augmentation"):
+        resolve({"adversarial": {"layer_rates": {"rewrite": 0.5}}}, "adversarial")
+        resolve({"adversarial": {"layer_rates": {"rewrite": 0}}}, "adversarial")
+    (record,) = caplog.records
+    assert record.getMessage() == (
+        "augmentations.adversarial gives the rewrite layer a rate in layer_rates, "
+        'but the layer is off, so the kind draws no rewrite: write "layers": '
+        '{"allow": ["rewrite"]} to turn it on, or take the rate out.')
+
+
+@pytest.mark.parametrize("deny", [[], ["rewrite"]], ids=["empty", "names rewrite"])
+def test_a_config_dir_copy_made_before_denies_the_layer(tmp_path, monkeypatch, deny):
+    """The former releases wrote ``"deny": []`` (before the layer) and
+    ``"deny": ["rewrite"]`` (before the spec listed it off by default): both
+    deny the layer, a registered rewrite technique included, and their
+    rounds say nothing of it."""
+    rewrite = _stand_in()
+    _register(monkeypatch, rewrite)
+    config_dir = _config_dir(tmp_path, {"deny": deny})
+    for kind in KINDS:
+        assert resolve(None, kind, config_dir=config_dir)["layers"] == {
+            "deny": ["rewrite"]}
+    kind = resolve(None, "adversarial", config_dir=config_dir)
+    assert rewrite not in technique_pool(kind)
     assert rounds_of(kind) == [_ROUND_BEFORE]
 
 
@@ -332,14 +557,20 @@ def test_the_flat_keywords_keep_the_rewrite_layer_denied():
 
 @pytest.mark.parametrize(("layers", "round_before"), [
     (None, _ROUND_BEFORE),
+    ({"deny": ["rewrite"]}, _ROUND_BEFORE),
     ({"deny": ["hacking"]}, {**_ROUND_BEFORE, "include_hacking": False}),
     ({"deny": []}, _ROUND_BEFORE),
-], ids=["packaged deny", "hacking denied alone", "no deny"])
+    ({"allow": ["rewrite"]}, _ROUND_BEFORE),
+], ids=["packaged deny", "former packaged deny", "hacking denied alone", "no deny",
+        "layer allowed"])
 def test_a_plan_kept_from_before_the_layer_resumes(
         tmp_path, monkeypatch, layers, round_before):
-    """A section that gives its own ``layers.deny`` allows the layer, but with
-    no technique in it the plan file records the rounds a plan made before the
-    layer recorded, and resumes."""
+    """Whatever the section's ``layers`` say, the former packaged
+    ``{"deny": ["rewrite"]}`` among them, the plan file records the rounds a
+    plan made before the layer recorded, and resumes: the layer is denied, so
+    the rounds say nothing of it though the layer now holds techniques.
+    Where the section allows the layer, its pure ``encode`` pool holds no
+    rewrite technique, so the rounds say nothing of it either."""
     out = tmp_path / "jb.csv"
     adversarial = {"pure_only": True, "translation": False,
                    "families": {"allow": ["encode"]}}
@@ -366,12 +597,31 @@ def test_a_rewrite_technique_does_not_plan_the_translation_model(monkeypatch):
     rewrite = _stand_in()
     rewrite.requires_llm = True
     monkeypatch.setattr(JPool, "all_techniques", lambda: [*POOL, rewrite])
-    section = {"adversarial": {"layers": {"deny": []}, "translation": False},
+    section = {"adversarial": {"layers": {"allow": ["rewrite"]}, "translation": False},
                "natural": None}
     pool = technique_pool(augmentations_of({"augmentations": section})["adversarial"])
     assert rewrite in pool
     assert not uses_translation(pool)
     assert resolve_role({}, "translation", section) == []
+
+
+def test_a_dialect_plans_the_translation_model_only_under_the_switch():
+    """A dialect runs on the translation model, so a kind that draws one plans
+    it; with the translation switch off the dialect leaves the pool (dropped
+    beside the other family it allows) and the model is not planned."""
+    on = {"adversarial": {"families": {"allow": ["dialect"]}, "translation": True},
+          "natural": None}
+    # Named beside another family, so switching off drops dialect, not raises.
+    off = {"adversarial": {"families": {"allow": ["dialect", "encode"]},
+                           "translation": False},
+           "natural": None}
+    assert uses_translation(
+        technique_pool(augmentations_of({"augmentations": on})["adversarial"]))
+    assert resolve_role({}, "translation", on) == [
+        default_model_for_role("translation")]
+    off_pool = technique_pool(augmentations_of({"augmentations": off})["adversarial"])
+    assert off_pool and not uses_translation(off_pool)
+    assert resolve_role({}, "translation", off) == []
 
 
 @pytest.mark.parametrize("dataset_type", ["eval", "training"])

@@ -63,6 +63,48 @@ def test_the_stage_drives_with_the_pool_its_model_allows(tmp_path, monkeypatch):
     assert (seen["pool_size"], seen["cap"]) == (28, 4)
 
 
+def _stop_at_drive(monkeypatch):
+    """Make the stage raise before any model call, right after its warnings."""
+    import redact.jailbreak.pipeline as JPipe
+
+    def stop(source, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(JPipe, "drive_units", stop)
+
+
+def test_warns_once_when_glotlid_is_missing_for_a_langid_gate(tmp_path, monkeypatch,
+                                                              caplog):
+    import logging
+
+    import redact.stages as stages
+    _stop_at_drive(monkeypatch)
+    monkeypatch.setattr(stages.langid, "available", lambda: False)
+    kind = {"families": {"allow": ["code_switching"]},
+            "layers": {"deny": ["rewrite", "hacking", "manipulation", "requests"]}}
+    with caplog.at_level(logging.WARNING, logger="redact.stages"), \
+            pytest.raises(KeyboardInterrupt):
+        generate_jailbreaks(
+            inputs=_inputs(), output_path=tmp_path / "jailbreaks.csv",
+            augmentation={"adversarial": kind, "natural": None},
+            auto_generate_benign=False, verbose=False, seed=7)
+    hits = [r for r in caplog.records
+            if "code-switch or romanization" in r.message]
+    assert len(hits) == 1
+
+
+def test_no_langid_warning_for_a_pure_pool(tmp_path, monkeypatch, caplog):
+    import logging
+
+    import redact.stages as stages
+    monkeypatch.setattr(stages.langid, "available", lambda: False)
+    with caplog.at_level(logging.WARNING, logger="redact.stages"):
+        generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "j.csv",
+                            seed=7, **PURE_KW)
+    assert not [r for r in caplog.records
+                if "code-switch or romanization" in r.message]
+
+
 def test_plan_then_execute(tmp_path):
     out = tmp_path / "jailbreaks.csv"
     df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7, **PURE_KW)
@@ -398,6 +440,75 @@ def test_entry_types_keep_the_inputs_of_those_types(tmp_path):
     assert list(df["entry_type"]) == ["benign", "benign"]
 
 
+def test_a_kind_whose_section_leaves_no_technique_is_skipped(tmp_path, caplog):
+    """Every layer denied: no plan of identity rows, but a WARNING."""
+    out = tmp_path / "jb.csv"
+    every_layer = {"deny": ["hacking", "manipulation", "obfuscation", "requests"]}
+    with caplog.at_level("WARNING"):
+        df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                                 **_pure(layers=every_layer))
+    assert df.empty and not out.exists()
+    assert not Manifest.sidecar(out).path.exists()
+    assert ("adversarial kind skipped: its section leaves no technique to draw"
+            in caplog.text)
+
+
+# --- inputs that share an id ----------------------------------------------------
+
+
+def _twins(n: int = 4, twin_type: str = "harmful") -> pd.DataFrame:
+    """``n`` inputs of Crime, then the first one's text again under Hobby,
+    as ``twin_type``."""
+    prompts = [f"prompt number {i} about a topic" for i in range(n)]
+    return pd.DataFrame({
+        "prompt": [*prompts, prompts[0]],
+        "category": ["Crime"] * n + ["Hobby"],
+        "entry_type": ["harmful"] * n + [twin_type]})
+
+
+def test_inputs_that_share_an_id_are_planned_once_with_a_warning(tmp_path, caplog):
+    """The last row of the id is kept: its unit, its columns, its group."""
+    out = tmp_path / "jb.csv"
+    with caplog.at_level("WARNING"):
+        df = generate_jailbreaks(inputs=_twins(), output_path=out, seed=1, **PURE_KW)
+    plan = Manifest.sidecar(out).load()
+    twin = content_id("prompt number 0 about a topic")
+    assert [(r["category"], r["entry_type"]) for r in plan
+            if r["sample_id"] == twin] == [("Hobby", "harmful")]
+    assert len(plan) == len(df) == len(_twins()) - 1
+    assert df.loc[df["input_id"] == twin, "category"].tolist() == ["Hobby"]
+    assert ("2 input rows share their id with another (the same text, or an id "
+            "given twice); the plan keeps the last row of each id and leaves out 1"
+            in caplog.text)
+
+
+def test_inputs_that_share_an_id_under_two_entry_types_raise(tmp_path):
+    """Either row's label would be the other's: nothing is planned."""
+    out = tmp_path / "jb.csv"
+    with pytest.raises(ValueError, match=r"1 input id\(s\) are each held by rows "
+                                         r"of different entry types"):
+        generate_jailbreaks(inputs=_twins(twin_type="benign"), output_path=out,
+                            seed=1, **PURE_KW)
+    assert not out.exists() and not Manifest.sidecar(out).path.exists()
+
+
+def test_a_run_killed_between_saves_resumes_every_unit_of_inputs_that_share_an_id(
+        tmp_path, monkeypatch):
+    """Two units under one ledger key lost the second when a run stopped
+    between their saves; one unit per id loses none."""
+    import redact.jailbreak.pipeline as JPipe
+
+    out, inputs = tmp_path / "jb.csv", _twins(40)
+    # The rows of the second save (32 units, then the rest) land, not its acks.
+    kill_after_rows(monkeypatch, JPipe, on_call=2)
+    with pytest.raises(Killed):
+        generate_jailbreaks(inputs=inputs, output_path=out, seed=1, **PURE_KW)
+    generate_jailbreaks(inputs=inputs, output_path=out, seed=1, **PURE_KW)
+    rows = pd.read_csv(out, dtype=str)
+    assert len(Manifest.sidecar(out).load()) == len(rows) == len(inputs) - 1
+    assert rows["input_id"].is_unique
+
+
 # --- a kept plan against the run's section --------------------------------------
 
 
@@ -409,6 +520,12 @@ def test_a_plan_records_what_it_was_made_with(tmp_path):
     import json
 
     from redact.jailbreak import load_spec
+    from redact.jailbreak.plan import rules_id
+    from redact.jailbreak.pool import all_techniques, registry
+
+    # The registered technique, tagged from the spec: with a decode hint it
+    # is not the plain encoder in obfuscation/encoding.py.
+    to_base64 = registry(all_techniques())["to_base64"]
 
     out = tmp_path / "jb.csv"
     generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
@@ -417,7 +534,8 @@ def test_a_plan_records_what_it_was_made_with(tmp_path):
     assert made_with == {
         "seed": 1, "rounds": made_with["rounds"], "pool": ["to_base64"],
         "family_weights": None, "layer_rates": None,
-        "spec_version": load_spec()["version"]}
+        "spec_version": load_spec()["version"],
+        "rules": rules_id([to_base64], rounds=made_with["rounds"])}
     assert [r["exact_techniques"] for r in made_with["rounds"]] == [1]
 
 
@@ -617,6 +735,34 @@ def test_the_benign_data_is_made_with_the_stages_taxonomy_overlay_and_batch(
         "taxonomy", "taxonomy_dir", "prompt_dir", "batch_size")} == {
         "taxonomy": "mine", "taxonomy_dir": tmp_path / "taxonomy",
         "prompt_dir": tmp_path / "prompts", "batch_size": 4}
+
+
+@pytest.mark.parametrize(("given", "checker"), [
+    ({}, "jb-gen"), ({"check_model": "jb-check"}, "jb-check")],
+    ids=["generation model", "named check model"])
+def test_the_benign_pairs_are_checked_by_the_check_model_else_the_generation_model(
+        tmp_path, monkeypatch, given, checker):
+    """fsh draws no technique a check model checks, but needs the benign
+    pairs, which the check model reads: a named one is created for them."""
+    import redact.stages as P
+
+    created = []
+
+    def create(model):
+        created.append(model)
+        return make_client(MockBackend("unused", model=model), model)
+
+    monkeypatch.setattr(P.ModelClient, "create", create)
+    loads = _benign_loads(monkeypatch)
+    generate_jailbreaks(
+        inputs=_inputs(), output_path=tmp_path / "jb.csv", seed=7, model="jb-gen",
+        augmentation={"adversarial": {
+            "techniques": {"allow": ["to_fsh_random_short"]}, "translation": False,
+            "rounds": [{"exact_techniques": 1}]}, "natural": None},
+        verbose=False, **given)
+    (load,) = loads
+    assert (load["client"].model, load["check"].model) == ("jb-gen", checker)
+    assert created == ["jb-gen", *given.values()]
 
 
 def test_a_resume_loads_the_benign_data_its_plan_needs_whatever_its_pool(
@@ -1133,6 +1279,7 @@ def test_pool_fills_a_call_with_a_later_step_and_a_new_unit(tmp_path, monkeypatc
 
 def test_a_technique_is_given_the_check_model_the_generation_model_unless_named(
         tmp_path, monkeypatch):
+    """A technique whose reply a check model checks (here the typo check)."""
     seen = []
 
     def checks(text, *, check_model=None, **kwargs):
@@ -1140,11 +1287,30 @@ def test_a_technique_is_given_the_check_model_the_generation_model_unless_named(
         return text + "!", ""
 
     checks.kinds = ["adversarial", "natural"]
+    checks.check = "typos"
     for folder, given in (("default", {}), ("named", {"check_model": "jb-check"})):
         (tmp_path / folder).mkdir()
         _llm_run(tmp_path / folder, monkeypatch, [("zq0", checks)], _StepBackend(),
                  techniques=(checks,), **given)
     assert seen == [GEN, "jb-check"]
+
+
+def test_a_named_check_model_is_not_created_when_no_technique_is_checked(
+        tmp_path, monkeypatch):
+    """Pure obfuscations check nothing with a model: the generation model's
+    client stands in, and the check model is never loaded."""
+    import redact.stages as P
+
+    created = []
+
+    def create(model):
+        created.append(model)
+        return make_client(MockBackend("unused", model=model), model)
+
+    monkeypatch.setattr(P.ModelClient, "create", create)
+    generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "jb.csv", seed=1,
+                        model=GEN, check_model="jb-check", **PURE_KW)
+    assert created == [GEN]
 
 
 class _TypoBackend(MockBackend):

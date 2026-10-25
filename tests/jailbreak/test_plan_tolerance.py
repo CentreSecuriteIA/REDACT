@@ -11,6 +11,10 @@ by hand at a version after it. The last tests are about the techniques the
 library itself retired.
 """
 
+import json
+from collections import Counter
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -22,6 +26,7 @@ from redact.dataset.planfile import read_plan, write_plan
 from redact.jailbreak.augmentation import resolve
 from redact.jailbreak.plan import combination_of
 from redact.jailbreak.pool import all_techniques, registry, technique_pool
+from redact.jailbreak.rules import compatible
 from redact.stages import generate_jailbreaks
 from tests.conftest import MockBackend
 from tests.jailbreak.test_pipeline_jailbreaks import (
@@ -110,6 +115,20 @@ def test_naming_a_deprecated_technique_in_techniques_allow_draws_it_with_a_warni
     assert pool == [retired]
 
 
+def test_naming_a_deprecated_technique_in_techniques_allow_is_logged(
+        monkeypatch, caplog):
+    """The DeprecationWarning shows only for code run as __main__, so a run
+    also logs it."""
+    _retire(monkeypatch)
+    with caplog.at_level("WARNING", logger="redact.jailbreak.augmentation"):
+        resolve({"adversarial": {"techniques": {"allow": ["to_rot13"]},
+                                 "translation": False}}, "adversarial")
+    (record,) = caplog.records
+    assert record.getMessage().startswith(
+        f"augmentations.adversarial.techniques.allow names to_rot13 ({LATER}), "
+        "which the spec retired")
+
+
 # --- a kept plan on resume -----------------------------------------------------
 
 
@@ -124,6 +143,7 @@ def test_a_technique_added_after_the_plan_warns_once_and_keeps_the_plan(
     assert "added ['to_reversed'] and retired []" in warning
     assert "does not draw the added techniques" in warning
     assert "resume=False" in warning
+    assert "order it records" not in warning  # the rules are the plan's
     # Every planned unit ran as planned; none drew the new technique.
     assert Manifest.sidecar(out).load() == plan
     assert len(rows) == len(plan)
@@ -174,23 +194,391 @@ def test_a_technique_retired_by_the_plan_s_own_version_raises(tmp_path, monkeypa
         _resume(out)
 
 
+def _rewrite_plan_file(out, **made_with) -> None:
+    """Set the keys ``made_with`` in the plan file beside ``out``; a key
+    given as None is taken out, as a plan file written before it held it."""
+    manifest = Manifest.sidecar(out).path
+    record = read_plan(manifest)
+    for key, value in made_with.items():
+        if value is None:
+            del record[key]
+        else:
+            record[key] = value
+    write_plan(manifest, record)
+
+
 def _without_spec_version(out) -> None:
     """Make the plan file beside ``out`` one written before it recorded
     ``spec_version``."""
-    manifest = Manifest.sidecar(out).path
-    made_with = read_plan(manifest)
-    del made_with["spec_version"]
-    write_plan(manifest, made_with)
+    _rewrite_plan_file(out, spec_version=None)
 
 
-def test_a_plan_file_without_a_spec_version_resumes_quietly(
+def test_a_plan_file_without_a_spec_version_warns_and_its_rows_record_1_0(
         tmp_path, monkeypatch, caplog):
+    """It was drawn at the first version, which is not today's."""
     out = tmp_path / "jb.csv"
     plan = _planned(out, monkeypatch)
     _without_spec_version(out)
     with caplog.at_level("WARNING"):
         rows = _resume(out)
-    assert _warnings(caplog) == [] and len(rows) == len(plan)
+    (warning,) = _warnings(caplog)
+    assert f"(spec version 1.0, now {NOW})" in warning
+    assert f"0 of its {len(plan)} pending units" in warning
+    assert set(rows["combination_spec_version"].astype(str)) == {"1.0"}
+
+
+def test_a_plan_file_without_rules_warns_that_it_does_not_record_them(
+        tmp_path, monkeypatch, caplog):
+    out = tmp_path / "jb.csv"
+    plan = _planned(out, monkeypatch)
+    _rewrite_plan_file(out, rules=None)
+    with caplog.at_level("WARNING"):
+        rows = _resume(out)
+    (warning,) = _warnings(caplog)
+    assert "the plan file does not record the rules it was drawn by" in warning
+    assert f"0 of its {len(plan)} pending units" in warning
+    assert len(rows) == len(plan)
+
+
+#: A plan's rounds: one budget round with the request obfuscation on, as the
+#: packaged attacks have it, and the eval type's two count rounds.
+_BUDGET = [{"allow_request_obfuscation": True}]
+_COUNT = [{"exact_techniques": 1}, {"exact_techniques": 2}]
+
+
+def test_the_rules_id_moves_with_a_rule_not_with_the_pool_order_or_a_comment(
+        monkeypatch):
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_base64"], every["to_rot13"]]
+    before = JP.rules_id(pool, rounds=_BUDGET)
+    assert JP.rules_id(pool[::-1], rounds=_BUDGET) == before
+    spec = T.load_spec()
+    with monkeypatch.context() as patch:
+        patch.setattr(JP, "load_spec", lambda: {**spec, "layer_rates": {
+            **spec["layer_rates"], "_comment": "reworded"}})
+        assert JP.rules_id(pool, rounds=_BUDGET) == before
+    monkeypatch.setattr(pool[0], "complexity", pool[0].complexity + 1)
+    assert JP.rules_id(pool, rounds=_BUDGET) != before
+
+
+@pytest.mark.parametrize(("name", "tag", "value"), [
+    ("to_base64", "needs_latin", True),
+    ("to_thai", "script", T.LATIN),
+], ids=["needs_latin", "script"])
+def test_the_rules_id_leaves_out_the_tags_no_rule_reads(monkeypatch, name, tag, value):
+    """No rule reads ``needs_latin`` or a translation's ``script`` (the
+    family rules keep the two apart, ``test_rules`` holds it), so tagging
+    one more technique Latin-only does not make every kept plan warn."""
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_base64"], every["to_thai"]]
+    before = JP.rules_id(pool, rounds=_BUDGET)
+    assert getattr(every[name], tag) != value
+    monkeypatch.setattr(every[name], tag, value)
+    assert JP.rules_id(pool, rounds=_BUDGET) == before
+
+
+def test_a_family_s_description_changes_no_rule_draw_or_pool(monkeypatch):
+    """A family's ``description`` is documentation: with every family's
+    taken out, the rules id, a dealt plan and the default pools are as they
+    were."""
+    import redact.jailbreak.plan as JP
+    from tests.jailbreak import simulate
+
+    pool = all_techniques()
+
+    def observed():
+        return (JP.rules_id(pool, rounds=[*_BUDGET, *_COUNT]),
+                simulate.deal(pool, 30, groups=2, seed=1, rounds=[*_BUDGET, *_COUNT]),
+                [fn.__name__ for kind in ("adversarial", "natural")
+                 for fn in technique_pool(resolve(None, kind))])
+
+    before = observed()
+    families = T.load_spec()["families"]
+    assert sum("description" in family for family in families.values()) > 30  # noqa: PLR2004
+    for family in families.values():
+        monkeypatch.delitem(family, "description", raising=False)
+    assert observed() == before
+
+
+def test_the_rules_id_moves_with_the_obfuscations_kept_from_manipulation(monkeypatch):
+    """The first eval release kept the manipulation block on purpose (lifting it
+    would admit 104 eval pairs): a plan drawn under another block list has
+    another rules id, so its resume warns."""
+    import copy
+
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_fsh_random_short"], every["to_base64"]]
+    before = JP.rules_id(pool, rounds=_COUNT)
+    spec = copy.deepcopy(T.load_spec())
+    blocked = spec["manipulation_blocked_obfuscation"]
+    assert "translation" in blocked["families"]
+    monkeypatch.setattr(JP, "load_spec", lambda: spec)
+    blocked["_comment"] = "reworded"
+    assert JP.rules_id(pool, rounds=_COUNT) == before
+    blocked["families"].remove("translation")
+    assert JP.rules_id(pool, rounds=_COUNT) != before
+
+
+def test_the_rules_id_moves_when_a_translation_stops_refusing_encode(monkeypatch):
+    """The first eval release made the family rule: a plan kept from before it has
+    another rules id, so its resume warns."""
+    import copy
+
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_base64"], every["to_french"]]
+    before = JP.rules_id(pool, rounds=_COUNT)
+    spec = copy.deepcopy(T.load_spec())
+    refused = spec["families"]["translation"]["cross_incompatible_with"]
+    assert "encode" in refused
+    refused.remove("encode")
+    monkeypatch.setattr(JP, "load_spec", lambda: spec)
+    assert JP.rules_id(pool, rounds=_COUNT) != before
+
+
+def test_the_rules_id_moves_when_a_technique_stops_refusing_ascii_art(monkeypatch):
+    """The first eval release gave the heavy full-text encodings a rule of their
+    own against ``ascii_art``: a technique's own list is in the id."""
+    import redact.jailbreak.plan as JP
+
+    base64 = registry(all_techniques())["to_base64"]
+    assert base64.cross_incompatible_with == ["ascii_art"]
+    before = JP.rules_id([base64], rounds=_COUNT)
+    monkeypatch.setattr(base64, "cross_incompatible_with", [])
+    assert JP.rules_id([base64], rounds=_COUNT) != before
+
+
+def _request_obfuscation_lists(spec: dict, key: str) -> None:
+    """Change in ``spec`` the ``key`` a request obfuscation reads: one family
+    less in what a translation drawn as one keeps out, or in the families
+    it may be drawn from."""
+    if key == "request_obfuscation_refuses":
+        spec[key]["translation"].remove("structural")
+    else:
+        spec[key].remove("encode_light")
+
+
+@pytest.mark.parametrize("key", [
+    "request_obfuscation_refuses", "request_obfuscation_allowed_families"])
+def test_the_rules_id_moves_with_what_a_request_obfuscation_reads(monkeypatch, key):
+    """A plan with a round that allows the request obfuscation reads the
+    spec's two lists of it, so their content is in its id, a comment is
+    not."""
+    import copy
+
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_french"], every["to_json"]]
+    before = JP.rules_id(pool, rounds=_BUDGET)
+    spec = copy.deepcopy(T.load_spec())
+    spec["request_obfuscation_refuses"]["_comment"] = "reworded"
+    monkeypatch.setattr(JP, "load_spec", lambda: spec)
+    assert JP.rules_id(pool, rounds=_BUDGET) == before
+    _request_obfuscation_lists(spec, key)
+    assert JP.rules_id(pool, rounds=_BUDGET) != before
+
+
+@pytest.mark.parametrize("rounds", [
+    _COUNT, [{}], [{"exact_techniques": 1, "allow_request_obfuscation": True}]],
+    ids=["count", "budget-without-the-step", "count-with-the-key"])
+@pytest.mark.parametrize("key", [
+    "request_obfuscation_refuses", "request_obfuscation_allowed_families"])
+def test_a_plan_no_round_of_which_draws_a_request_obfuscation_keeps_its_rules_id(
+        monkeypatch, key, rounds):
+    """A count round draws no request obfuscation, whatever its settings
+    say, and a budget round only with ``allow_request_obfuscation``: a kept
+    eval or natural plan does not warn when the request obfuscation's lists
+    change."""
+    import copy
+
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_french"], every["to_json"]]
+    before = JP.rules_id(pool, rounds=rounds)
+    spec = copy.deepcopy(T.load_spec())
+    _request_obfuscation_lists(spec, key)
+    monkeypatch.setattr(JP, "load_spec", lambda: spec)
+    assert JP.rules_id(pool, rounds=rounds) == before
+
+
+def test_the_rules_id_moves_with_the_layer_order(monkeypatch):
+    """The first eval release moved the manipulation layer last: a plan kept from
+    before it, whose combinations apply fsh before the cipher, has another
+    rules id, so its resume warns."""
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every["to_fsh_random_short"], every["to_rot13"]]
+    before = JP.rules_id(pool, rounds=_COUNT)
+    spec = T.load_spec()
+    assert spec["layer_order"][-1] == "manipulation"
+    monkeypatch.setattr(JP, "load_spec", lambda: {**spec, "layer_order": [
+        "rewrite", "hacking", "manipulation", "obfuscation", "requests"]})
+    assert JP.rules_id(pool, rounds=_COUNT) != before
+
+
+def _heavy_weight(monkeypatch, weight) -> None:
+    """The spec with ``heavy_encoding_weight`` ``weight``, or without it."""
+    import redact.jailbreak.plan as JP
+
+    spec = T.load_spec()
+    assert spec["heavy_encoding_weight"] == 0.25  # noqa: PLR2004
+    changed = {key: value for key, value in spec.items()
+               if key != "heavy_encoding_weight"}
+    if weight is not None:
+        changed["heavy_encoding_weight"] = weight
+    monkeypatch.setattr(JP, "load_spec", lambda: changed)
+
+
+@pytest.mark.parametrize("weight", [0.5, None], ids=["another", "none"])
+def test_the_rules_id_moves_with_the_heavy_encodings_weight(monkeypatch, weight):
+    """A budget draw deals the heavy full-text encodings at the spec's
+    ``heavy_encoding_weight`` (the first eval release gave them the slot): a budget
+    plan of a pool that holds one, kept from before it or made at another
+    weight, has another rules id, so its resume warns."""
+    import redact.jailbreak.plan as JP
+
+    pool = [registry(all_techniques())["to_base64"]]
+    before = JP.rules_id(pool, rounds=[*_COUNT, {}])
+    _heavy_weight(monkeypatch, weight)
+    assert JP.rules_id(pool, rounds=[*_COUNT, {}]) != before
+
+
+@pytest.mark.parametrize(("names", "rounds"), [
+    (["to_base64"], _COUNT),
+    (["to_rot13", "to_sensitive_words_encode_base64"], _BUDGET),
+], ids=["count-plan", "no-heavy-full-text-encoding"])
+@pytest.mark.parametrize("weight", [0.5, None], ids=["another", "none"])
+def test_a_plan_that_deals_no_heavy_slot_keeps_its_rules_id(
+        monkeypatch, weight, names, rounds):
+    """A count round deals a heavy encoding as encode's member, and a pool
+    without one (a heavy sensitive-word encoding is ``sensitive_words``'s)
+    has nothing to deal in the slot: a kept eval or natural plan does not
+    warn when the weight changes."""
+    import redact.jailbreak.plan as JP
+
+    every = registry(all_techniques())
+    pool = [every[name] for name in names]
+    before = JP.rules_id(pool, rounds=rounds)
+    _heavy_weight(monkeypatch, weight)
+    assert JP.rules_id(pool, rounds=rounds) == before
+
+
+@pytest.mark.parametrize("kind", [{}, {"rounds": _COUNT}], ids=["budget", "count"])
+def test_a_resume_under_the_plan_s_version_and_rules_is_quiet(
+        tmp_path, monkeypatch, caplog, kind):
+    """The budget kind allows the request obfuscation and its pool holds the
+    heavy encodings, so its id holds every key; the count kind's holds
+    neither."""
+    out = tmp_path / "jb.csv"
+    _planned(out, monkeypatch, **kind)
+    with caplog.at_level("WARNING"):
+        _resume(out, **kind)
+    assert _warnings(caplog) == []
+
+
+def test_a_resume_across_a_rule_change_warns_counts_and_stamps_the_plan_s_version(
+        tmp_path, monkeypatch, caplog):
+    """A plan of two obfuscations each, drawn at 1.2; today one of the first
+    unit's techniques may no longer join the other's family. The units that
+    pair the two still run as planned, and every row records 1.2."""
+    out, pair = tmp_path / "jb.csv", [{"exact_techniques": 2}]
+    plan = _planned(out, monkeypatch, rounds=pair)
+    _rewrite_plan_file(out, spec_version="1.2")
+    every = registry(all_techniques())
+    first, second = (every[name] for name in plan[0]["combination"])
+    monkeypatch.setattr(first, "cross_incompatible_with", [second.families[0]])
+    refused = sum(
+        first.__name__ in row["combination"]
+        and any(second.families[0] in every[name].families
+                for name in row["combination"])
+        for row in plan)
+    with caplog.at_level("WARNING"):
+        rows = _resume(out, rounds=pair)
+    (warning,) = _warnings(caplog)
+    assert f"(spec version 1.2, now {NOW})" in warning
+    assert "changed the rules a combination is drawn by" in warning
+    assert f"{refused} of its {len(plan)} pending units" in warning and refused
+    assert "+".join(plan[0]["combination"]) in set(rows["technique"])
+    assert set(rows["combination_spec_version"].astype(str)) == {"1.2"}
+
+
+#: Combinations as a plan records them, the request obfuscation (if any)
+#: right after the request, and whether today's rules refuse them: a
+#: translation drawn as the request obfuscation keeps out a wrapper
+#: (``request_obfuscation_refuses``), which ``compatible`` alone admits.
+_REQUEST = "to_refusal_then_comply"
+_KEPT = [
+    (["to_json", _REQUEST, "to_french"], True),
+    (["to_adversarial_suffix_punctuation", _REQUEST, "to_french"], True),
+    (["to_french", "to_json", _REQUEST], False),
+    (["to_json", _REQUEST, "to_rot13"], False),
+    ([_REQUEST, "to_french"], False),
+    (["to_json", "to_french"], False),
+    (["to_json", _REQUEST, "to_rot13", "to_fsh_random_short"], False),
+    (["to_fsh_random_short", "to_json", _REQUEST, "to_rot13"], False),
+]
+
+
+@pytest.mark.parametrize(("names", "refused"), _KEPT)
+def test_a_kept_combination_is_refused_by_what_its_request_obfuscation_keeps_out(
+        names, refused):
+    """The request obfuscation is the obfuscation right after the request,
+    in the order of every plan, old and new: phase 4's obfuscations apply
+    before the request, a manipulation technique after the request
+    obfuscation (before the first eval release, the manipulation layer applied
+    before the obfuscations, and the request obfuscation was last)."""
+    every = registry(all_techniques())
+    fns = [every[name] for name in names]
+    assert all(fns[i] in compatible(fns[:i], [fns[i]]) for i in range(len(fns)))
+    assert JPipe._refused(names, every) is refused
+
+
+def test_a_resume_counts_the_units_a_request_obfuscation_now_refuses(
+        tmp_path, monkeypatch, caplog):
+    out = tmp_path / "jb.csv"
+    plan = _planned(out, monkeypatch)
+    rows = [{**row, "combination": names}
+            for row, (names, _refused) in zip(plan, _KEPT, strict=False)]
+    Manifest.sidecar(out).write(rows)
+    _rewrite_plan_file(out, rules="before")
+    monkeypatch.setattr(JPipe, "drive_units", lambda units, **kwargs: None)
+    with caplog.at_level("WARNING"):
+        _resume(out)
+    (warning,) = _warnings(caplog)
+    refused = sum(refused for _names, refused in _KEPT[:len(rows)])
+    assert f"{refused} of its {len(rows)} pending units" in warning and refused
+    assert ("applies each combination in the order it records (one drawn before "
+            "the first eval release applies its manipulation technique second, "
+            "not last)") in warning
+    assert "resume=False to plan again by today's rules and order" in warning
+
+
+def test_each_kind_s_rows_record_the_version_its_plan_was_drawn_at(
+        tmp_path, monkeypatch):
+    """One run, two plans: the attacks kept from 1.2, the variations planned
+    afresh. Each file's rows record the version their plan was drawn at."""
+    out = tmp_path / "jb.csv"
+    _planned(out, monkeypatch)
+    _rewrite_plan_file(out, spec_version="1.2")
+    generate_jailbreaks(
+        inputs=_inputs(), output_path=out, seed=1, auto_generate_benign=False,
+        verbose=False, augmentation={
+            "adversarial": _pure()["augmentation"]["adversarial"],
+            "natural": {"families": {"allow": ["casual_writing"]}}})
+    stamps = {name: set(pd.read_csv(tmp_path / name, dtype=str)
+                        ["combination_spec_version"])
+              for name in ("jb.csv", "variations.csv")}
+    assert stamps == {"jb.csv": {"1.2"}, "variations.csv": {NOW}}
 
 
 def test_a_plan_file_without_a_spec_version_was_made_at_the_first_version(
@@ -218,6 +606,170 @@ def test_another_seed_or_section_raises_though_the_library_grew(
     _add(monkeypatch, since=LATER)
     with pytest.raises(ValueError, match=rf"this run's \[{named!r}\].*resume=False"):
         _resume(out, seed=seed, **kind)
+
+
+#: The pools of the kinds at the released spec 1.2, as a plan made then
+#: recorded them (``fixtures/spec_1_2_pools.json``).
+_SPEC_1_2 = json.loads((Path(__file__).parents[1] / "fixtures" / "spec_1_2_pools.json")
+                       .read_text(encoding="utf-8"))
+_FOUR_TRANSLATIONS = ["to_amharic", "to_chinese", "to_hindi", "to_hmong"]
+
+
+#: What spec 1.4 added to the attack pool, by family: twelve persona
+#: templates, the 24 published suffixes, the Yoruba translation, the letter
+#: spacing, the three guardrail-address techniques and the four language-mix
+#: families (four transliterations, ten code-switching techniques, ten
+#: romanizations, six dialects).
+SPEC_1_4_ADDED = {"persona_template": 12, "suffixes": 24, "translation": 1,
+                  "encode": 1, "guardrail_address": 3, "transliteration": 4,
+                  "code_switching": 10, "romanization": 10, "dialect": 6}
+
+
+def _by_family(names: list[str]) -> dict[str, int]:
+    every = registry(all_techniques())
+    return dict(Counter(every[name].families[0] for name in names))
+
+
+def _growth_since_1_2(key: str, pool: list) -> tuple[list[str], list[str]] | None:
+    """What :func:`~redact.jailbreak.pipeline._library_change` finds in
+    ``pool`` against the pool a spec 1.2 plan recorded for ``key``."""
+    made_with = {"spec_version": "1.2", "pool": _SPEC_1_2[key]}
+    return JPipe._library_change(made_with, pool, registry(all_techniques()))
+
+
+def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
+    """The attack pool of a plan made at 1.2 differs from today's by 107
+    names, none retired: 36 dated 1.3 (the four translations switched on
+    among them) and the 71 dated 1.4 (:data:`SPEC_1_4_ADDED`). The library
+    added them after the plan, so the plan is kept and the run warns."""
+    added, retired = _growth_since_1_2(
+        "adversarial", technique_pool(resolve(None, "adversarial")))
+    by_name = registry(all_techniques())
+    by_version = {
+        version: [name for name in added if by_name[name].since == version]
+        for version in {by_name[name].since for name in added}}
+    assert retired == []
+    assert {version: len(names) for version, names in by_version.items()} == {
+        "1.3": 36, "1.4": 71}
+    assert set(_FOUR_TRANSLATIONS) <= set(by_version["1.3"])
+    assert _by_family(by_version["1.4"]) == SPEC_1_4_ADDED
+    assert "to_letter_spacing" in by_version["1.4"]
+
+
+def test_a_natural_plan_of_spec_1_2_finds_the_later_additions_as_growth():
+    """Spec 1.3 added ``to_ask_with_urgency`` to the natural pool, and spec
+    1.4's language-mix step added the four transliterations, the ten
+    code-switching techniques and the ten romanizations (dialect is natural
+    too but only under the translation switch, off here): 25 names in all,
+    none retired."""
+    pool = technique_pool(resolve(None, "natural"))
+    added, retired = _growth_since_1_2("natural", pool)
+    assert retired == [] and "to_ask_with_urgency" in added
+    assert len(added) == 25     # noqa: PLR2004
+    assert {registry(all_techniques())[name].since for name in added} == {"1.3", "1.4"}
+
+
+#: The pools of the kinds at the released spec 1.3, as a plan made then
+#: recorded them (``fixtures/spec_1_3_pools.json``).
+_SPEC_1_3 = json.loads((Path(__file__).parents[1] / "fixtures" / "spec_1_3_pools.json")
+                       .read_text(encoding="utf-8"))
+
+
+def _growth_since_1_3(key: str, pool: list) -> tuple[list[str], list[str]] | None:
+    """What :func:`~redact.jailbreak.pipeline._library_change` finds in
+    ``pool`` against the pool a spec 1.3 plan recorded for ``key``."""
+    made_with = {"spec_version": "1.3", "pool": _SPEC_1_3[key]}
+    return JPipe._library_change(made_with, pool, registry(all_techniques()))
+
+
+def test_an_attack_plan_of_spec_1_3_finds_what_spec_1_4_added_as_growth():
+    """Spec 1.4 switched Yoruba's translation on and added twelve persona
+    templates, the 24 published suffixes, the letter spacing and three
+    guardrail-address techniques: a plan kept from 1.3 finds the 41 as the
+    library's growth, retiring nothing, so the plan is kept and the run
+    warns."""
+    added, retired = _growth_since_1_3(
+        "adversarial", technique_pool(resolve(None, "adversarial")))
+    assert "to_yoruba" in added and retired == []
+    assert {registry(all_techniques())[name].since for name in added} == {"1.4"}
+    assert _by_family(added) == SPEC_1_4_ADDED
+
+
+def test_a_resume_of_a_spec_1_3_plan_warns_that_the_library_added_yoruba(
+        tmp_path, monkeypatch, caplog):
+    """A kept attack plan whose plan file says 1.3 and whose pool lacks
+    Yoruba resumes with one WARNING naming it, and runs as planned."""
+    out = tmp_path / "jb.csv"
+    kind = {"translation": True, "techniques": {"allow": ["to_french", "to_yoruba"]},
+            "rounds": [{"exact_techniques": 1}]}
+    with monkeypatch.context() as patch:
+        patch.setattr(JPipe, "drive_units", lambda units, **kwargs: None)
+        generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                            auto_generate_benign=False, verbose=False,
+                            augmentation={"adversarial": kind, "natural": None})
+    manifest = Manifest.sidecar(out)
+    plan = [{**row, "combination": ["to_french"]} for row in manifest.load()]
+    manifest.write(plan)
+    import redact.jailbreak.plan as JP
+
+    record = read_plan(manifest.path)
+    pool = [name for name in record["pool"] if name != "to_yoruba"]
+    every = registry(all_techniques())
+    # As a 1.3 plan file recorded it: its pool, and the rules id of that pool.
+    _rewrite_plan_file(out, spec_version="1.3", pool=pool, rules=JP.rules_id(
+        [every[name] for name in pool], rounds=record["rounds"]))
+    monkeypatch.setattr(JPipe, "drive_units", lambda units, **kwargs: None)
+    with caplog.at_level("WARNING", logger="redact.jailbreak.pipeline"):
+        generate_jailbreaks(inputs=_inputs(), output_path=out, seed=1,
+                            auto_generate_benign=False, verbose=False,
+                            augmentation={"adversarial": kind, "natural": None})
+    (warning,) = [r.getMessage() for r in caplog.records
+                  if r.name == "redact.jailbreak.pipeline"]
+    assert f"(spec version 1.3, now {NOW})" in warning
+    assert "added ['to_yoruba'] and retired []" in warning
+    assert "changed the rules" not in warning
+    assert Manifest.sidecar(out).load() == plan
+
+
+def test_an_eval_plan_of_spec_1_3_is_refused_since_eval_pool_v2_changed_the_section():
+    """Eval pool v2 admitted families older than the plan (``indirect`` is
+    of spec 1.0) to the eval type's section: the pool differs by more than
+    the library's growth, so a kept eval plan of the first pool raises on
+    resume, naming ``pool`` (run it again with ``resume=False``)."""
+    from redact.recipe import load_dataset_type
+
+    section = resolve(load_dataset_type("eval")["augmentations"], "adversarial")
+    assert _growth_since_1_3("eval:adversarial", technique_pool(section)) is None
+    # The first pool alone, as a plan of 1.3 recorded it, is no change at all.
+    first = [fn for fn in technique_pool(section)
+             if fn.__name__ in _SPEC_1_3["eval:adversarial"]]
+    assert _growth_since_1_3("eval:adversarial", first) == ([], [])
+
+
+def test_a_natural_plan_of_spec_1_3_finds_the_language_mix_as_growth():
+    """The natural kind leaves translation off, so neither Yoruba nor a
+    dialect joins it; the 24 other language-mix techniques spec 1.4 admitted
+    to it do, retiring nothing."""
+    added, retired = _growth_since_1_3(
+        "natural", technique_pool(resolve(None, "natural")))
+    assert retired == []
+    assert _by_family(added) == {
+        "transliteration": 4, "code_switching": 10, "romanization": 10}
+
+
+def test_an_eval_plan_of_spec_1_2_is_refused_since_eval_pool_v2_changed_the_section():
+    """The 36 techniques of a 1.2 eval plan were the eval pool until eval
+    pool v2, which holds them all and 90 more, some older than the plan: a
+    1.2 eval plan raises on resume, naming ``pool``."""
+    from redact.recipe import load_dataset_type
+
+    pool = technique_pool(resolve(
+        load_dataset_type("eval")["augmentations"], "adversarial"))
+    assert _growth_since_1_2("eval:adversarial", pool) is None
+    eval_pool = json.loads((Path(__file__).parents[1] / "fixtures" / "eval_pool.json")
+                           .read_text(encoding="utf-8"))
+    assert set(_SPEC_1_2["eval:adversarial"]) < set(eval_pool)
+    assert len(eval_pool) - len(_SPEC_1_2["eval:adversarial"]) == 90    # noqa: PLR2004
 
 
 # --- the techniques the library retired ----------------------------------------

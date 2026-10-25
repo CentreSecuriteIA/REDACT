@@ -6,6 +6,7 @@ import dataclasses
 import inspect
 import random
 from collections.abc import Callable, Iterable
+from functools import partial
 from pathlib import Path
 
 from redact.dataset.dealing import stable_seed
@@ -58,12 +59,18 @@ def _wrap(gen: TechniqueGen, limit: int | None, root: str | None) -> TechniqueGe
             return stop.value
 
 
+def _record(scenarios: list, technique: str, scene: str) -> None:
+    """Append ``technique``'s ``scene`` to ``scenarios``."""
+    scenarios.append((technique, scene))
+
+
 def run_chain(
     techniques: list[Callable],
     text: str,
     *,
     internals_root: str | None = None,
     rng_seed: tuple | None = None,
+    scenarios: list | None = None,
     **kwargs,
 ) -> TechniqueGen:
     """Run ``text`` through ``techniques`` in order, yielding each model call.
@@ -72,8 +79,21 @@ def run_chain(
     the technique's ``max_tokens`` tag and, with ``internals_root``, tagged for
     capture under ``{internals_root}/{technique}``. Each technique gets the
     ``kwargs`` it takes (``gen_model``, ``translate_model``, ``check_model``,
-    ``benign_data``, ``prompt_dir``) and, with ``rng_seed``, an ``rng`` of
-    its own: ``random.Random(stable_seed(*rng_seed, technique.__name__))``.
+    ``benign_data``, ``prompt_dir``, and ``source_prompt``: ``text``, the
+    input the chain starts from, unless the caller gives one other than
+    ``None``) and, with
+    ``rng_seed``, an ``rng`` of its own:
+    ``random.Random(stable_seed(*rng_seed, technique.__name__))``. The
+    ``source_prompt`` is for a technique that reads the clean input rather
+    than what the steps before it wrote: a selected ``fsh`` or ``dap``
+    variant, applied last, picks its examples' subcategory on it and inserts
+    the finished text among them.
+
+    With ``scenarios``, a list, each technique that takes it (or
+    ``**kwargs``) also gets ``record_scenario``, a callable that appends
+    ``(technique name, scene)`` to the list: a cognitive or persona
+    technique calls it with the scene it builds the prompt on
+    (:mod:`redact.jailbreak.scenarios`). Without one, no technique gets it.
 
     Returns ``(text, info)``: the steps' infos joined by ``;``, a step that
     left the text unchanged as ``noop=<name>``. The first rejection stops the
@@ -81,11 +101,15 @@ def run_chain(
     a step that empties the text (an empty model reply, a render with nothing
     drawn) is a rejection.
     """
+    if kwargs.get("source_prompt") is None:
+        kwargs["source_prompt"] = text
     result = text
     info_parts: list[str] = []
     for technique in techniques:
         if rng_seed is not None:
             kwargs["rng"] = random.Random(stable_seed(*rng_seed, technique.__name__))
+        if scenarios is not None:
+            kwargs["record_scenario"] = partial(_record, scenarios, technique.__name__)
         tech_kwargs = _select_kwargs(technique, kwargs)
         if inspect.isgeneratorfunction(technique):
             gen = technique(result, **tech_kwargs)
@@ -114,9 +138,11 @@ def run_chain(
 
 
 def in_layer_order(techniques: Iterable[Callable]) -> list[Callable]:
-    """``techniques`` in the order they apply: by the spec's layer order, then
-    by rank within the layer (``within_layer_order``: in the obfuscation
-    layer, the whole-text rewrites before the word-level steps)."""
+    """``techniques`` in the order they apply: by the spec's layer order
+    (``rewrite``, ``hacking``, ``obfuscation``, ``requests``, then
+    ``manipulation``, which inserts the finished question), then by rank
+    within the layer (``within_layer_order``: in the obfuscation layer, the
+    whole-text rewrites before the word-level steps)."""
     layer_order = load_spec()["layer_order"]
 
     def _sort_key(fn: Callable) -> tuple[int, int]:

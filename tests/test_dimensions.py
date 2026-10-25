@@ -14,17 +14,20 @@ from redact.recipe import augmentations_of
 from redact.recipe import check_dimensions as _check_dimensions
 
 _FAMILY_TAGS = {
-    "language": ["translation", "answer_language"],
+    "language": ["translation", "answer_language", "code_switching", "romanization",
+                 "dialect"],
     "surface_noise": ["typos", "casual_writing", "noise", "suffixes"],
-    "encoding": ["encode", "sensitive_words", "tokenbreak", "ascii_art"],
+    "encoding": ["encode", "sensitive_words", "wording", "tokenbreak", "ascii_art",
+                 "payload_split", "word_art", "transliteration"],
     "container": ["structural", "neutral_container"],
     "role_framing": ["persona", "framing", "cognitive", "impersonation",
-                     "benign_role"],
+                     "benign_role", "persona_template"],
     "request_shape": ["indirect", "distractor_prefix", "distractor_suffix",
                       "continuation", "asking", "temporal", "smalltalk_prefix",
-                      "smalltalk_suffix"],
+                      "smalltalk_suffix", "guardrail_address", "persuasion",
+                      "tense_rewrite", "model_distractors"],
     "answer_shape": ["answer_format"],
-    "example_priming": ["fsh", "dap"],
+    "example_priming": ["fsh", "dap", "fake_turns"],
 }
 
 _AXIS_TAGS = {
@@ -166,7 +169,8 @@ class TestTheCheck:
                 in message)
         assert ("the container families (adversarial: neutral_container, "
                 "structural; natural: neutral_container).") in message
-        assert "the example_priming families (adversarial: dap, fsh)" in message
+        assert ("the example_priming families (adversarial: dap, fake_turns, fsh)"
+                in message)
         assert message.count("undecided") == len(("request_shape", "container",
                                                    "example_priming"))
         assert 'params inputs.axes, as {"focus": null}' in message
@@ -203,7 +207,8 @@ class TestTheCheck:
     def test_authorship_and_role_framing_are_ruled_distinct(self):
         """The owner's ruling: who writes the message (the writer axis) is not
         a role or scenario the message sets up, so the axis varies beside the
-        persona, framing, cognitive and impersonation families."""
+        persona, framing, cognitive, persona_template and impersonation
+        families."""
         assert dimensions.relation("authorship", "role_framing") is None
         assert A.varied(A.resolve("inputs"))["writer"] == "authorship"
         kinds = augmentations_of({})
@@ -211,6 +216,57 @@ class TestTheCheck:
                  for fn in JPool.technique_pool(kind)}
         assert set(_FAMILY_TAGS["role_framing"]) <= drawn
         check_dimensions({}, augmentations_of({}))
+
+    def test_eval_pool_v2_needs_no_input_axis_pinned(self):
+        """Eval pool v2's families vary all eight augmentation dimensions
+        (``surface_noise`` new with its published suffixes), and none of them
+        relates to an axis the eval type varies: the inputs' length,
+        register, writer (``authorship``, ruled distinct from
+        ``role_framing`` above), framing (``request_intent``) and domain, and
+        the outputs' three. ``directness`` stays pinned at ``explicit`` and
+        ``focus`` is dealt one value, as before, so the eval inputs are dealt
+        as they were and the check passes with no axis pinned for v2."""
+        from redact.recipe import load_recipe, stage_params
+
+        evals = load_recipe({"dataset_type": "eval"})["augmentations"]
+        families = load_spec()["families"]
+        tags = {families[family]["dimension"]
+                for fn in JPool.technique_pool(evals["adversarial"])
+                for family in fn.families}
+        varied = {}
+        for stage in A.STAGES:
+            given = stage_params(stage, "eval")
+            varied.update({f"{stage}.{axis}": tag for axis, tag in A.varied(A.resolve(
+                stage, given.get("axes"),
+                weighting=given.get("axes_weighting", "table"))).items()})
+        assert sorted(varied) == [
+            "inputs.domain", "inputs.framing", "inputs.length", "inputs.register",
+            "inputs.writer", "outputs.format", "outputs.length", "outputs.register"]
+        assert tags == set(_FAMILY_TAGS)
+        assert [(axis, tag) for axis, axis_tag in varied.items() for tag in tags
+                if dimensions.relation(axis_tag, tag) is not None] == []
+        assert stage_params("inputs", "eval")["axes"] == {
+            "directness": {"explicit": 1, "implicit": 0, "euphemistic": 0}}
+        _check_dimensions({}, evals, dataset_type="eval")
+
+    def test_synonym_substitution_and_directness_are_left_unmarked(self):
+        """The ruling that added no ninth tag: ``to_synonym_substitution``
+        swaps the words a model marks for synonyms, which can name a subject
+        less plainly, as the directness axis (``request_intent``) does; but a
+        family carries one tag, its family (``sensitive_words``) encodes,
+        and marking ``encoding`` against ``request_intent`` would stop every
+        training run, whose attacks draw it beside the varied axis."""
+        from redact.jailbreak.pool import registry
+        from redact.recipe import load_recipe
+
+        synonyms = registry(JPool.all_techniques())["to_synonym_substitution"]
+        assert synonyms.families == ["sensitive_words"]
+        assert load_spec()["families"]["sensitive_words"]["dimension"] == "encoding"
+        assert dimensions.relation("encoding", "request_intent") is None
+        assert A.varied(A.resolve("inputs"))["directness"] == "request_intent"
+        training = load_recipe({"dataset_type": "training"})["augmentations"]
+        assert synonyms in JPool.technique_pool(training["adversarial"])
+        _check_dimensions({}, training, dataset_type="training")
 
     @pytest.mark.parametrize("name", ["eval_example.json", "training_example.json"])
     def test_the_example_recipes_and_their_types_pass(self, name):

@@ -61,7 +61,13 @@ from redact.dataset import (
     take_per_group,
     write_concat,
 )
-from redact.dataset.planfile import coverage_path, plan_path, variants_path
+from redact.dataset.planfile import (
+    coverage_path,
+    plan_path,
+    read_plan,
+    scenarios_path,
+    variants_path,
+)
 from redact.jailbreak import augmentation as augmentation_kinds
 from redact.jailbreak import pool as jailbreak_pool
 from redact.jailbreak.obfuscation import langid
@@ -553,6 +559,7 @@ def generate_jailbreaks(
     augmentation: dict | None = None,
     variations_path: str | Path | None = None,
     config_dir: str | Path | None = None,
+    scenarios: bool = False,
 ) -> pd.DataFrame:
     """Augment input prompts with jailbreak technique combinations and natural
     variations (batched).
@@ -590,8 +597,12 @@ def generate_jailbreaks(
         translation_model: Model for the translation family. ``None`` uses the
             ``translation`` role, independently of ``model``.
         check_model: Model that checks what a technique's model writes (the
-            typo check). ``None`` is ``model``, so no other model loads.
-            Translation keeps its own checkers: the translator itself, or
+            typo, scenario and rewrite checks) and each benign pair the stage
+            generates. ``None`` is ``model``, so no other model loads; given,
+            its client is created only when a kind that runs draws a
+            technique with such a check or one that needs the benign data
+            (:func:`redact.jailbreak.pool.uses_check_model`), else ``model``
+            stands in. Translation keeps its own checkers: the translator itself, or
             for a machine translation ``model`` as the judge.
         auto_generate_benign: Pre-load or generate benign data for FSH/DAP.
         batch_size: Requests per model call; twice as many units are live.
@@ -609,6 +620,12 @@ def generate_jailbreaks(
             and ``taxonomy/`` files are read in place of the packaged ones
             (``taxonomy_dir``, given, wins for the benign taxonomy;
             :mod:`redact.config_overlay`). ``None``: the packaged only.
+        scenarios: Record the scene each cognitive or persona technique
+            builds its prompt on in ``<stem>.scenarios.csv`` beside each
+            kind's manifest (``input_id``, ``iteration``, ``sample_id``,
+            ``technique``, ``scenario``; :mod:`redact.jailbreak.scenarios`).
+            Off by default: the scenes are kept nowhere else, the row holds
+            the prompt built on them.
 
     Deprecated aliases:
         ``max_complexity``, ``max_obfuscations``, ``pure_only``,
@@ -674,28 +691,50 @@ def generate_jailbreaks(
     if "prompt" not in inputs.columns:
         raise ValueError("inputs must contain a 'prompt' (or 'sample') column.")
 
-    if any(jailbreak_pool.uses_translation(jailbreak_pool.technique_pool(kind))
-           and not _of_entry_types(inputs, kind["entry_types"]).empty
-           for _name, kind, _out, _man in kinds):
+    def drawn(uses) -> bool:
+        """Whether a kind that runs on these inputs draws what ``uses`` asks."""
+        return any(uses(jailbreak_pool.technique_pool(kind))
+                   and not _of_entry_types(inputs, kind["entry_types"]).empty
+                   for _name, kind, _out, _man in kinds)
+
+    if drawn(jailbreak_pool.uses_translation):
         _check_machine_translation(translation_model, prompt_dir)
+    if drawn(jailbreak_pool.uses_langid_gate) and not langid.available():
+        logger.warning(
+            "jailbreaks: a code-switch or romanization technique is drawn and "
+            "GlotLID is not available, so their language gate is skipped and a "
+            "rewrite the model left in plain English passes it; the meaning "
+            "check still runs. Install redact[langid] and fetch its model with "
+            "scripts/download_models.py.")
     client = ModelClient.create(model or default_model_for_role("uncensored_gen"))
-    check = ModelClient.create(check_model) if check_model else client
+    # A check model only when a technique the kinds draw has its reply
+    # checked, or needs the benign pairs it checks, so a separate local one
+    # is not loaded for nothing.
+    check = (ModelClient.create(check_model)
+             if check_model and drawn(jailbreak_pool.uses_check_model) else client)
     benign = Path(benign_path) if benign_path else paths.benign_csv(data_dir)
 
     def run(name: str, kind: dict, out_path: Path, manifest_path: Path | None,
             **kwargs) -> pd.DataFrame:
+        pool = jailbreak_pool.technique_pool(kind)
         of_kind = _of_entry_types(inputs, kind["entry_types"])
-        if of_kind.empty:
-            logger.warning(
-                "%s kind skipped: entry_types %s match none of the inputs' (%s); "
-                "it writes nothing.", name, kind["entry_types"],
-                sorted(set(inputs["entry_type"].astype(str))))
+        if not pool or of_kind.empty:
+            if not pool:
+                logger.warning(
+                    "%s kind skipped: its section leaves no technique to draw "
+                    "(every layer, family or technique of the pool denied); it "
+                    "writes nothing.", name)
+            else:
+                logger.warning(
+                    "%s kind skipped: entry_types %s match none of the inputs' "
+                    "(%s); it writes nothing.", name, kind["entry_types"],
+                    sorted(set(inputs["entry_type"].astype(str))))
             if not resume:
                 clear_stage(**_kind_files(out_path, manifest_path))
             return pd.DataFrame()
         return run_augmentation(
             of_kind,
-            jailbreak_pool.technique_pool(kind),
+            pool,
             client=client, check=check, translation_model=translation_model,
             out_path=out_path,
             benign_path=benign, benign_taxonomy=benign_taxonomy,
@@ -704,7 +743,8 @@ def generate_jailbreaks(
             rounds=augmentation_kinds.rounds_of(kind),
             family_weights=kind["family_weights"] or None,
             auto_generate_benign=auto_generate_benign, batch_size=batch_size,
-            resume=resume, verbose=verbose, manifest_path=manifest_path, **kwargs,
+            resume=resume, verbose=verbose, manifest_path=manifest_path,
+            scenarios=scenarios, **kwargs,
         )
 
     rows = pd.DataFrame()
@@ -737,12 +777,12 @@ def _check_machine_translation(translation_model: str | None, prompt_dir) -> Non
 
 def _kind_files(out_path: Path, manifest_path: Path | None) -> dict:
     """:func:`redact.dataset.clear_stage`'s kwargs for the files of one kind
-    of the jailbreak stage: its CSV, manifest, coverage table, plan and
-    variants table."""
+    of the jailbreak stage: its CSV, manifest, coverage table, plan,
+    variants table and scenarios table."""
     manifest = manifest_path or Manifest.sidecar(out_path).path
     return {"artifact": out_path, "manifest_path": manifest,
             "also": (coverage_path(manifest), plan_path(manifest),
-                     variants_path(manifest))}
+                     variants_path(manifest), scenarios_path(manifest))}
 
 
 def _variations_csv(data_dir, output_path, variations_path) -> Path:
@@ -1044,6 +1084,15 @@ def build_dataset(
     (:class:`redact.dataset.Exclusion`); it counts both in
     ``Datasets/eval_excluded.json``, which the run record's counts take.
 
+    The jailbreak and variation rows gain two columns, read from their
+    ``technique`` through the library's registry
+    (:func:`redact.jailbreak.pool.chain_tags`): ``families``, the first
+    family of each technique, and ``layers``, its layer, each ``+``-joined
+    in the order of ``technique``; a name no registered technique has gives
+    ``?<name>`` and ``?``. They follow the jailbreak file's columns in
+    ``complete_dataset.csv`` and ``technique`` in ``eval_jailbreaks.csv``,
+    and are empty on every other row.
+
     Each file is copied in chunks into a temporary file that then replaces
     it. Only the rows whose ``accepted`` is true are copied; a CSV without
     that column is copied whole. A row whose ``sample_id`` an earlier part
@@ -1118,6 +1167,7 @@ def build_dataset(
     if verbose:
         logger.info("Build %s", "Complete Dataset" if mode == "training"
                     else "Eval Datasets")
+    tags = _TechniqueTags()
     parts = _stage_parts(
         data_dir, inputs_path=inputs_path, jailbreak_path=jailbreak_path,
         variations_path=variations_path, responses_path=responses_path,
@@ -1136,17 +1186,22 @@ def build_dataset(
         if held_files:
             _warn_on_shared_benign(data_dir, held_by)
             exclusion = Exclusion(held_files)
-        built = _build_eval(data_dir, parts, exclusion, verbose=verbose,
+        built = _build_eval(data_dir, parts, exclusion, tags, verbose=verbose,
                             read_back=read_back)
         if exclusion is not None:
             _save_excluded(data_dir, held_files, exclusion.counts, verbose=verbose)
+        tags.report(verbose)
         return built
 
     out_path = (Path(output_path) if output_path
                 else paths.complete_dataset_csv(data_dir))
+    for name in ("jailbreaks", "variations"):
+        if name in parts:
+            parts[name] = parts[name]._replace(columns=tags.columns_of(parts[name]))
     # A row whose id an earlier part wrote is left out: an adversarial no-op
     # is its input, and a variation can be a jailbreak's text.
     written = write_concat(out_path, list(parts.values()), unique="sample_id")
+    tags.report(verbose)
     guard = parts["variations"].where if "variations" in parts else None
     if guard is not None and guard.left_out:
         logger.warning(
@@ -1275,6 +1330,67 @@ class _NaturalVariations:
         return ~out
 
 
+class _TechniqueTags:
+    """The ``families`` and ``layers`` columns of the jailbreak and
+    variation parts of one build, each a function of a chunk read from its
+    ``technique`` column (:func:`redact.jailbreak.pool.chain_tags`, through
+    the registry of every technique, a retired one included). The cells of
+    each combination are worked out once. The rows written that name a
+    technique no registered one is are counted in ``unknown_rows``, and
+    those names in ``unknown``.
+    """
+
+    def __init__(self) -> None:
+        self.techniques = jailbreak_pool.registry(jailbreak_pool.all_techniques())
+        self._tags: dict[str, tuple[str, str]] = {}
+        self.unknown: set[str] = set()
+        self.unknown_rows = 0
+
+    def _of(self, chain: str) -> tuple[str, str]:
+        if chain not in self._tags:
+            self._tags[chain] = jailbreak_pool.chain_tags(chain, self.techniques)
+        return self._tags[chain]
+
+    def _chains(self, chunk: pd.DataFrame) -> pd.Series:
+        if "technique" not in chunk.columns:
+            return pd.Series("", index=chunk.index)
+        return chunk["technique"].fillna("").astype(str)
+
+    def families(self, chunk: pd.DataFrame) -> pd.Series:
+        """The ``families`` cells of ``chunk``'s rows; counts the rows that
+        name a technique no registered one is."""
+        chains = self._chains(chunk)
+        for chain in chains:
+            if chain == jailbreak_pool.IDENTITY:
+                continue
+            if missing := {name for name in chain.split("+")
+                           if name and name not in self.techniques}:
+                self.unknown |= missing
+                self.unknown_rows += 1
+        return chains.map(lambda chain: self._of(chain)[0])
+
+    def layers(self, chunk: pd.DataFrame) -> pd.Series:
+        """The ``layers`` cells of ``chunk``'s rows."""
+        return self._chains(chunk).map(lambda chain: self._of(chain)[1])
+
+    def columns_of(self, part: Part) -> dict:
+        """The columns of a training build's jailbreak or variation part: the
+        file's own, as they are, then ``families`` and ``layers``."""
+        own = list(pd.read_csv(part.source, nrows=0).columns)
+        return {**{name: name for name in own},
+                "families": self.families, "layers": self.layers}
+
+    def report(self, verbose: bool) -> None:
+        """With ``verbose``, log the technique names the registry does not
+        have, which some rows' ``families`` and ``layers`` give as ``?``."""
+        if verbose and self.unknown:
+            logger.info(
+                "Build: %d jailbreak or variation rows name a technique this "
+                "library does not register (%s), as a row written by another "
+                "version of it may; their families read ?<name> and their "
+                "layers ?.", self.unknown_rows, ", ".join(sorted(self.unknown)))
+
+
 #: The files of an eval build, by the key its front returns their rows under.
 _EVAL_FILES = {"inputs": paths.eval_inputs_csv, "outputs": paths.eval_outputs_csv,
                "jailbreaks": paths.eval_jailbreaks_csv}
@@ -1286,11 +1402,12 @@ _FROM_INPUT = ("subcategory", "source_taxonomy")
 
 def _build_eval(
     data_dir: str | Path | None, parts: dict[str, Part],
-    exclusion: Exclusion | None, *, verbose: bool, read_back: bool,
+    exclusion: Exclusion | None, tags: _TechniqueTags, *, verbose: bool,
+    read_back: bool,
 ) -> dict[str, pd.DataFrame]:
     """Write the three eval files from the stage ``parts``, less the rows
     ``exclusion`` leaves out; their rows, by file."""
-    files = _eval_parts(parts)
+    files = _eval_parts(parts, tags)
     if exclusion is not None:
         if "inputs" in parts:
             exclusion.read_inputs(parts["inputs"].source)
@@ -1311,9 +1428,10 @@ def _build_eval(
     return built
 
 
-def _eval_parts(parts: dict[str, Part]) -> dict[str, list[Part]]:
+def _eval_parts(parts: dict[str, Part], tags: _TechniqueTags) -> dict[str, list[Part]]:
     """The parts of each eval file, in the order they are written, each
-    mapped onto the file's columns.
+    mapped onto the file's columns; an attack's ``families`` and ``layers``
+    are read from its ``technique`` by ``tags``.
 
     A stage part the build did not find is one without rows, so each file
     has its columns whatever the run made.
@@ -1343,10 +1461,12 @@ def _eval_parts(parts: dict[str, Part]) -> dict[str, list[Part]]:
                           "paraphrase_model": "paraphrase_model"}
     attacks = {"sample_id": "sample_id", "text": "jailbreak", "label": "entry_type",
                "is_jailbreak": True, "technique": "technique",
+               "families": tags.families, "layers": tags.layers,
                "complexity": "complexity", "num_techniques": "num_techniques",
                "iteration": "iteration", "input_id": "input_id", **derived}
     negatives = {**attacks, "text": "sample", "is_jailbreak": False,
-                 "technique": None, "complexity": None, "num_techniques": None,
+                 "technique": None, "families": None, "layers": None,
+                 "complexity": None, "num_techniques": None,
                  "iteration": None, "input_id": None, **origin}
     return {
         "inputs": [part("inputs", columns=inputs),
@@ -1780,17 +1900,37 @@ def _jailbreaks_kwargs(ctx: RunContext) -> dict:
     )
 
 
-def _jailbreaks_files(ctx: RunContext) -> tuple[list[Path], dict]:
-    """The file of each kind that is on: a kind left out is on, one given as
-    None is off."""
+def _jailbreak_kinds(ctx: RunContext) -> dict[str, tuple[Path, Path]]:
+    """The CSV and the manifest of each kind that is on: a kind left out is
+    on, one given as None is off."""
     given = _params(ctx, "jailbreaks")
     output, variations = given.get("output_path"), given.get("variations_path")
-    files = {
-        "adversarial": Path(output) if output else paths.jailbreaks_csv(ctx.data_dir),
-        "natural": _variations_csv(ctx.data_dir, output, variations),
+    adversarial = Path(output) if output else paths.jailbreaks_csv(ctx.data_dir)
+    natural = _variations_csv(ctx.data_dir, output, variations)
+    manifest = given.get("manifest_path")
+    kinds = {
+        "adversarial": (adversarial, Path(manifest) if manifest
+                        else Manifest.sidecar(adversarial).path),
+        "natural": (natural, Manifest.sidecar(natural).path),
     }
-    return [path for kind, path in files.items()
-            if ctx.augmentations.get(kind, {}) is not None], {}
+    return {kind: files for kind, files in kinds.items()
+            if ctx.augmentations.get(kind, {}) is not None}
+
+
+def _jailbreaks_files(ctx: RunContext) -> tuple[list[Path], dict]:
+    """The file of each kind that is on."""
+    return [out for out, _manifest in _jailbreak_kinds(ctx).values()], {}
+
+
+def jailbreak_rules(ctx: RunContext) -> dict[str, str | None]:
+    """The ``rules`` id of each jailbreak kind that is on, as its plan file
+    records it (:func:`redact.jailbreak.plan.rules_id`): what the kind's
+    rows were drawn by, which tells files made before and after a change of
+    the rules apart while the spec version stays. ``None`` for a kind with
+    no plan file (one that wrote nothing), or one written before it
+    recorded the rules."""
+    return {kind: (read_plan(manifest) or {}).get("rules")
+            for kind, (_out, manifest) in _jailbreak_kinds(ctx).items()}
 
 
 def _build_kwargs(ctx: RunContext) -> dict:
