@@ -396,11 +396,11 @@ def _build_check_messages(
 
 
 def _chat_translate_gen(
-    prompt: str, name: str, *, translator: str, check_model: str, num_retries: int,
+    prompt: str, name: str, *, translator: str, checker: str, num_retries: int,
     prompt_dir,
 ) -> TechniqueGen:
     """Translate ``prompt`` into the language (or dialect) ``name`` on a chat
-    ``translator``, checking each round with ``check_model`` and feeding the
+    ``translator``, checking each round with ``checker`` and feeding the
     verdict back, up to ``num_retries`` rounds. Returns ``(translation, name)``
     or ``(last, "DISCARDED; language=<name>; ...")`` on exhaustion. Shared by
     the translation family and the dialect family."""
@@ -412,7 +412,7 @@ def _chat_translate_gen(
             _build_translate_messages(prompt, name, feedback, prompt_dir),
         )
         verdict = yield LLMRequest(
-            check_model, _build_check_messages(prompt, translation, name, prompt_dir)
+            checker, _build_check_messages(prompt, translation, name, prompt_dir)
         )
         if is_accepted(verdict):
             return translation, name
@@ -465,7 +465,7 @@ def _translate_gen(
             num_retries=num_retries, prompt_dir=prompt_dir))
     return (yield from _chat_translate_gen(
         prompt, name, translator=translator,
-        check_model=translate_check_model or translator,
+        checker=translate_check_model or translator,
         num_retries=num_retries, prompt_dir=prompt_dir))
 
 

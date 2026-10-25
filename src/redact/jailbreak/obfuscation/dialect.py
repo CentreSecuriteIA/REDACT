@@ -136,7 +136,7 @@ def _dialect_gen(
         return text, info
     text, info = yield from _chat_translate_gen(
         prompt, name, translator=translator,
-        check_model=translate_check_model or translator,
+        checker=translate_check_model or translator,
         num_retries=num_retries, prompt_dir=prompt_dir)
     return text, info
 

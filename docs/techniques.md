@@ -11,7 +11,10 @@ needs the benign data (`requires_benign`), and the kinds that may draw it
 (`kinds`, [below](#the-natural-pool)). This page lists them by name, for
 the `allow` and `deny` lists of the
 [augmentation section](configuration.md#the-augmentation-section), and says
-briefly what each family does.
+briefly what each family does. [The catalog](catalog.md), generated from
+the code, gives each technique's tags, model calls, template variants,
+prompts and pools, the techniques it combines with and the rules that
+refuse the others, and a family by family matrix.
 
 The spec also dates each technique: `since` is the spec version that added
 it (`"1.0"` when absent) and `deprecated` the one that retired it. A retired

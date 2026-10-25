@@ -360,7 +360,12 @@ contract.
    `PYTHONPATH=src python -m tests.jailbreak.test_docs_counts`, and update
    the totals the sentences of `CLAUDE.md`, `README.md` and that page's
    introduction quote; `tests/jailbreak/test_docs_counts.py` fails until
-   both agree with the spec.
+   both agree with the spec. Then write [the catalog](catalog.md) again,
+   `docs/catalog.md` and `docs/catalog.json`, with
+   `PYTHONPATH=src python -m redact.jailbreak.catalog` (or
+   `scripts/catalog.py`): `tests/jailbreak/test_catalog.py` fails until it
+   is the code's. A change to a rule, a pool, a template file or a prompt
+   moves it too.
 
 To retire a technique, never remove it: a kept plan replays its techniques
 by name, and `tests/jailbreak/test_registry.py::test_registry_only_grows`
