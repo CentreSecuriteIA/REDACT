@@ -307,7 +307,7 @@ technique is picked first. A technique may not join a combination when:
   the whole text, so one is enough, and a cipher before a translation would
   hand the translator a cipher; the ten `to_sensitive_words_encode_*` were
   kept from a translation by their other family already; the
-  [eval release](configuration.md#release-notes) removed from the eval pool
+  [first eval release](configuration.md#release-notes) removed from the eval pool
   the 40 pairs of its eight translations with its five encodings); the four
   spec 1.4 language-mix families (`dialect`, `code_switching`,
   `transliteration`, `romanization`) refuse the same ten families, `translation`
@@ -506,7 +506,7 @@ draws changes for some texts from about 40 characters and for most from
 about 90, a text of about 830 characters or more is rejected where it used
 to be drawn, and so were most inputs when the second round paired it with a
 `heavy` encoding that lengthens the text (`to_unicode_escape`,
-`to_ascii_ordinal`, `to_morse`); the [eval release](configuration.md#release-notes)
+`to_ascii_ordinal`, `to_morse`); the [first eval release](configuration.md#release-notes)
 keeps ASCII art from those encodings, so a fresh eval plan no longer draws
 the pairs. An eval plan kept across the change mixes the two renderings. [What the families do](#what-the-families-do) has the
 figures.

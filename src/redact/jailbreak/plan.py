@@ -395,7 +395,7 @@ def rules_id(pool: list[Callable], *, rounds: list[dict]) -> str:
     """The content id of what the draws of a plan of ``pool`` by ``rounds``
     (each round's sampler settings, as its plan file records them) read
     off the spec: its ``layer_order`` (the order a combination applies in,
-    which put the manipulation layer last in the eval release),
+    which put the manipulation layer last in the first eval release),
     ``layer_max_picks`` and ``layer_rates``, the obfuscations it keeps from
     the manipulation layer; when a round allows the request obfuscation (a
     budget round with ``allow_request_obfuscation``), the families a request

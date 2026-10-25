@@ -45,7 +45,7 @@ _FIXTURES = Path(__file__).parents[1] / "fixtures"
 _PAIRS = _FIXTURES / "eval_pairs.json"
 _POOL = _FIXTURES / "eval_pool.json"
 
-#: The 36 techniques of the first eval pool (eval releases 1 and 2), which
+#: The 36 techniques of the first eval pool (the first and second eval releases), which
 #: eval pool v2 holds whole; ``fixtures/spec_1_3_pools.json`` recorded them
 #: as a spec 1.3 eval plan did.
 FIRST_POOL = (
@@ -295,7 +295,7 @@ def test_the_eval_s_fsh_and_dap_insert_the_question_last_beside_five_partners():
     """The manipulation layer applies last: the 40 pairs of the first eval
     pool that hold one of the eight ``fsh`` and ``dap`` techniques put the
     finished question, wrapped or with its request, among the examples. Each
-    was applied fsh or dap first before the eval release, so these 40
+    was applied fsh or dap first before the first eval release, so these 40
     changed their text, and no other pair of that pool did. Eval pool v2
     pairs them with more partners, each applied before them too."""
     by = registry(_eval_pool())

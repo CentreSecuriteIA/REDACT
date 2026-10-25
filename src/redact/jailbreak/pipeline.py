@@ -461,7 +461,7 @@ def _refused(names: list[str], registry: dict[str, Callable]) -> bool:
     (:func:`after_request_obfuscation`). The request obfuscation is the
     obfuscation right after the request, in every plan's order: the other
     obfuscations apply before the request, and only a manipulation
-    technique after the request obfuscation (before the eval release the
+    technique after the request obfuscation (before the first eval release the
     manipulation layer applied before the obfuscations, and the request
     obfuscation was last). A name no technique has is left to the replay,
     which raises on it."""
@@ -503,6 +503,7 @@ def _warn_since_plan(
         if rules == "unknown" else "",
         refused, pending,
         ", applies each combination in the order it records (one drawn before "
-        "the eval release applies its manipulation technique second, not last)"
+        "the first eval release applies its manipulation technique second, not "
+        "last)"
         if rules else "",
         made_at, " by today's rules and order" if rules else "")

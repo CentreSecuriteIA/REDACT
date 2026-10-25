@@ -508,7 +508,7 @@ With the switch `false`, the translation *and the dialect* an allow list names
 left out of the resolved kind, with a WARNING naming them:
 `augmentations.<kind>.translation is false, so the translation or dialect it
 names is left out: [...]`. So `"adversarial": {"translation": false}` over the
-eval type is a one-key override: its pool keeps the other 28 techniques. An
+eval type is a one-key override: its pool keeps the other 118 techniques. An
 allow list left empty by this is dropped when the other list still names
 something; when nothing but translation or dialect was allowed, the kind
 raises (`families.allow: ["dialect"]` with the switch off raises, it does not
@@ -592,7 +592,7 @@ not a family, so `family_weights` cannot name it (`"encode:heavy"` raises
 as any name the kind does not draw); weight `encode` to move both. It is a
 quota in every budget round, not a floor: a round whose budget would have
 dealt them more as `encode`'s members, the escalation's last, draws fewer
-(the sixth change of the [eval release](#release-notes)). A count round deals
+(the sixth change of the [first eval release](#release-notes)). A count round deals
 them as `encode`'s members.
 [internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)
 explains the dealing.
@@ -752,10 +752,15 @@ certain. Admitted, and why:
 
 Not admitted, and why:
 
-- `sensitive_words`, `tokenbreak`, `wording`, `word_art`, `payload_split`:
-  a model marks the words or cuts the text, and 56 to 74% of their draws
-  were measured discarded, so what an eval holds would follow the marking
-  model.
+- `sensitive_words`, `tokenbreak`, `wording`, `word_art` and
+  `to_payload_split_semantic`: a model marks the words or cuts the text, and
+  56 to 74% of their draws were measured discarded, so what an eval holds
+  would follow the marking model.
+- `to_payload_split`, the pure half of `payload_split` (it cuts at word
+  boundaries and calls no model): the review did not take it up. The
+  family goes in whole under `families.allow`, so admitting it would take
+  the technique by name under `techniques.allow` and leave its semantic
+  sibling out; a later eval review can.
 - `typos`, `casual_writing`, `noise`: surface noise, a natural variation
   more than an attack (`typos` is also a model rewrite).
 - `cognitive`, `persona`: a model writes the scene, 26 to 32% discarded;
@@ -766,7 +771,7 @@ Not admitted, and why:
 - The natural-only families (`smalltalk_prefix`, `smalltalk_suffix`,
   `benign_role`): no attack may draw them.
 - The many-shot `fsh` and `dap` variants: denied already.
-- The other ten `answer_format` and two `temporal` techniques: the eval
+- The other eleven `answer_format` and two `temporal` techniques: the eval
   keeps naming `to_refusal_then_comply` and `to_use_past_tense` alone; the
   review did not take up the others.
 - The other 18 answer languages, the four noise suffixes and the 22 other
@@ -831,7 +836,7 @@ dealt as before and only the attacks move.
 
 Eval files built before this release are not comparable with those built
 after. The type's `dataset_type_hash` in the run records goes from
-`fed23bff741bd864` (`70d99166ba903f36` at the first eval release) to
+`70d99166ba903f36` (the first eval release, `643c0ed`) to
 `9aa90d52e957ef31`, and the jailbreaks plan file's pool from 36 names to
 126. A kept eval plan raises on resume, naming `pool`, since the section
 admits families older than the plan, more than the library's growth: run
@@ -1416,7 +1421,8 @@ techniques and combinations as they were, and its pending units draw hints,
 so a run resumed across this change holds encoded texts with and without
 one. No combination, pool or round changes, and the `eval` and natural
 kinds draw no hinted encoding. (The second eval release then gave the five
-heavy encodings of the eval pool hints too, 26 hinted encodings in all: about
+heavy encodings of the eval pool hints too, 26 hinted encodings then, 27 since
+spec 1.4's letter spacing: about
 half the eval rows that draw `to_base64`, `to_unicode_escape`,
 `to_ascii_ordinal`, `to_morse` or `to_braille` come with a hint, and their
 `technique_info` gains `hint=<name>`.)

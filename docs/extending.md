@@ -305,7 +305,7 @@ contract.
    names it raises. One the attacks should draw only when a section asks
    carries both kinds and goes in `natural_only_families`
    (`casual_writing`).
-   - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 72
+   - **The natural pool.** `tests/fixtures/natural_pool.json` pins the 96
      names the natural kind draws by default, and
      `tests/jailbreak/test_pool.py` fails until you decide: give the
      technique `"kinds": ["adversarial"]`, or add its name to the fixture.

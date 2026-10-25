@@ -96,7 +96,7 @@ def test_a_kept_plan_runs_its_techniques_in_the_order_it_recorded(
 
 
 # --- the manipulation layer, last -------------------------------------------------
-# Since the eval release the manipulation layer applies last: the obfuscations,
+# Since the first eval release the manipulation layer applies last: the obfuscations,
 # the request and the request obfuscation change the question alone, and fsh,
 # dap or a fake turn put the finished question among their examples or after
 # their invented turn. A selected fsh or dap variant picks its examples on the

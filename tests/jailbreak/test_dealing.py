@@ -294,7 +294,7 @@ def test_the_default_attacks_draw_every_technique_of_their_pool(section):
     technique, or one no simulated input may take, is not asked for. When
     the layers of one rate were locked in or out of phase (commit 590babe),
     some techniques were drawn 2 times at seed 42 and 14 at 43; one plan now
-    holds them all. The eval release's rules left the ten heavy full-text
+    holds them all. The first eval release's rules left the ten heavy full-text
     encodings 5 draws in all under the unit budget and 10 under the group
     budget, five and two of them never, until they got a dealing slot of
     their own (``sampling.HEAVY_ENCODINGS``)."""
@@ -509,7 +509,7 @@ _BUDGETS = [
 # units of its group, at the same rate, and through the units' rng and counts
 # the rest of their draws follow (235 of the 240 dealt units; the 200 undealt
 # draws, which ask no dealer, do not move). The rule keeping a translation from
-# every encode technique moved it in the eval release: a draw that held both
+# every encode technique moved it in the first eval release: a draw that held both
 # now takes another technique, and through the unit's rng and its group's
 # counts the rest of its draw (128 of the 240 dealt units, 19 of the 200
 # undealt draws). The script rule it made dead, a Latin-only technique beside a
@@ -758,7 +758,7 @@ def test_a_planned_request_obfuscation_that_translates_holds_nothing_to_translat
 # The eval type's plan of 300 inputs in three groups at its seed, 43, pinned
 # before the packaged attacks turned the request obfuscation on. The eval
 # pool and its draws are pinned (fixtures/eval_pool.json); they move only in
-# an eval review. The eval release moved it, first by the rule keeping a
+# an eval review. The first eval release moved it, first by the rule keeping a
 # translation from every encode technique: the pool lost 40 of its 335
 # pairs (each of its eight translations beside each of its five encodings),
 # and 283 of the 300 round-2 units are dealt another pair, the group counts

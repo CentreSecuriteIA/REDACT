@@ -305,7 +305,7 @@ def test_a_family_s_description_changes_no_rule_draw_or_pool(monkeypatch):
 
 
 def test_the_rules_id_moves_with_the_obfuscations_kept_from_manipulation(monkeypatch):
-    """The eval release kept the manipulation block on purpose (lifting it
+    """The first eval release kept the manipulation block on purpose (lifting it
     would admit 104 eval pairs): a plan drawn under another block list has
     another rules id, so its resume warns."""
     import copy
@@ -326,7 +326,7 @@ def test_the_rules_id_moves_with_the_obfuscations_kept_from_manipulation(monkeyp
 
 
 def test_the_rules_id_moves_when_a_translation_stops_refusing_encode(monkeypatch):
-    """The eval release made the family rule: a plan kept from before it has
+    """The first eval release made the family rule: a plan kept from before it has
     another rules id, so its resume warns."""
     import copy
 
@@ -344,7 +344,7 @@ def test_the_rules_id_moves_when_a_translation_stops_refusing_encode(monkeypatch
 
 
 def test_the_rules_id_moves_when_a_technique_stops_refusing_ascii_art(monkeypatch):
-    """The eval release gave the heavy full-text encodings a rule of their
+    """The first eval release gave the heavy full-text encodings a rule of their
     own against ``ascii_art``: a technique's own list is in the id."""
     import redact.jailbreak.plan as JP
 
@@ -411,7 +411,7 @@ def test_a_plan_no_round_of_which_draws_a_request_obfuscation_keeps_its_rules_id
 
 
 def test_the_rules_id_moves_with_the_layer_order(monkeypatch):
-    """The eval release moved the manipulation layer last: a plan kept from
+    """The first eval release moved the manipulation layer last: a plan kept from
     before it, whose combinations apply fsh before the cipher, has another
     rules id, so its resume warns."""
     import redact.jailbreak.plan as JP
@@ -442,7 +442,7 @@ def _heavy_weight(monkeypatch, weight) -> None:
 @pytest.mark.parametrize("weight", [0.5, None], ids=["another", "none"])
 def test_the_rules_id_moves_with_the_heavy_encodings_weight(monkeypatch, weight):
     """A budget draw deals the heavy full-text encodings at the spec's
-    ``heavy_encoding_weight`` (the eval release gave them the slot): a budget
+    ``heavy_encoding_weight`` (the first eval release gave them the slot): a budget
     plan of a pool that holds one, kept from before it or made at another
     weight, has another rules id, so its resume warns."""
     import redact.jailbreak.plan as JP
@@ -535,7 +535,7 @@ def test_a_kept_combination_is_refused_by_what_its_request_obfuscation_keeps_out
     """The request obfuscation is the obfuscation right after the request,
     in the order of every plan, old and new: phase 4's obfuscations apply
     before the request, a manipulation technique after the request
-    obfuscation (before the eval release, the manipulation layer applied
+    obfuscation (before the first eval release, the manipulation layer applied
     before the obfuscations, and the request obfuscation was last)."""
     every = registry(all_techniques())
     fns = [every[name] for name in names]
@@ -558,8 +558,8 @@ def test_a_resume_counts_the_units_a_request_obfuscation_now_refuses(
     refused = sum(refused for _names, refused in _KEPT[:len(rows)])
     assert f"{refused} of its {len(rows)} pending units" in warning and refused
     assert ("applies each combination in the order it records (one drawn before "
-            "the eval release applies its manipulation technique second, not "
-            "last)") in warning
+            "the first eval release applies its manipulation technique second, "
+            "not last)") in warning
     assert "resume=False to plan again by today's rules and order" in warning
 
 
