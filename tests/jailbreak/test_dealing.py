@@ -568,7 +568,12 @@ _BUDGETS = [
 # not the Swiss German dialects) moved it by the name alone: the draws are
 # the same, with the new name in the 5 of the 240 dealt units and the 2 of
 # the 200 undealt draws that held the technique (its row keeps its place).
-_PINNED_DRAWS = "ca39fc158e15fa9ab4ec9b1afa893de5e5c58693f878c64562291ef39ed379a2"
+# Spec 1.5's four semantic-reencoding techniques (to_mathprompt,
+# to_adversarial_poetry, to_stego_paragraph, to_infoflood: one new obfuscation
+# family) moved it: they join the obfuscation family-first picks, so the
+# group's family counts and tie-break names change from the first obfuscation
+# pick on, and 12 of the 200 undealt draws now hold one.
+_PINNED_DRAWS = "74c3608cf9c373ad3573f73f6580f0661dd835fe074e3cb4042d7bcd700cf612"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

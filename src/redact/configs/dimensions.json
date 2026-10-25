@@ -12,6 +12,10 @@
     "side": "augmentation",
     "definition": "The written form of some or all of the message's characters or words, when it is other than plain text in the message's own alphabet."
   },
+  "semantic_form": {
+    "side": "augmentation",
+    "definition": "A reformulation that re-expresses the request's meaning in another symbolic or literary form (a symbolic-math problem, verse, an acrostic hidden in a benign paragraph, or an information-overload restatement) while keeping it recoverable."
+  },
   "container": {
     "side": "augmentation",
     "definition": "A data format, markup or document structure that the finished message is placed inside."

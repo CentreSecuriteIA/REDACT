@@ -19,6 +19,7 @@ _FAMILY_TAGS = {
     "surface_noise": ["typos", "casual_writing", "noise", "suffixes"],
     "encoding": ["encode", "sensitive_words", "wording", "tokenbreak", "ascii_art",
                  "payload_split", "word_art", "transliteration"],
+    "semantic_form": ["semantic_reencoding"],
     "container": ["structural", "neutral_container"],
     "role_framing": ["persona", "framing", "cognitive", "impersonation",
                      "benign_role", "persona_template"],
@@ -57,7 +58,7 @@ class TestTheTable:
             assert entry["side"] in dimensions.SIDES
             assert entry["definition"].endswith(".")
 
-    def test_the_augmentation_tags_are_the_eight_of_the_plan(self):
+    def test_the_augmentation_tags_are_the_nine_of_the_plan(self):
         assert dimensions.tags_of("augmentation") == list(_FAMILY_TAGS)
 
     def test_the_generation_tags_are_the_nine_of_the_plan(self):
@@ -242,7 +243,10 @@ class TestTheCheck:
         assert sorted(varied) == [
             "inputs.domain", "inputs.framing", "inputs.length", "inputs.register",
             "inputs.writer", "outputs.format", "outputs.length", "outputs.register"]
-        assert tags == set(_FAMILY_TAGS)
+        # The eval pool draws no semantic-reencoding family (spec 1.5,
+        # adversarial only and not named in eval.json), so it varies the eight
+        # dimensions but semantic_form.
+        assert tags == set(_FAMILY_TAGS) - {"semantic_form"}
         assert [(axis, tag) for axis, axis_tag in varied.items() for tag in tags
                 if dimensions.relation(axis_tag, tag) is not None] == []
         assert stage_params("inputs", "eval")["axes"] == {
