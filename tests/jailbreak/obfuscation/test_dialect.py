@@ -141,3 +141,95 @@ def test_a_chat_translator_takes_the_variant_by_name(monkeypatch):
     assert info == "Canadian French"
     assert [r.model for r in requests] == ["chat-fake", "chat-fake"]
     assert "Canadian French" in " ".join(m["content"] for m in requests[0].messages)
+
+
+# --- de-CH: no sharp s ----------------------------------------------------------
+# Swiss Standard German writes ss (SS) for the sharp s, so a Swiss German
+# piece holding U+00DF or U+1E9E is rejected (reason ``eszett``) and translated
+# again; no other dialect, and not the translation family, refuses it.
+
+_SHARP = "Die Stra\u00dfe ist gro\u00df und wei\u00df."
+_SWISS = "Die Strasse ist gross und weiss."
+_CAPITAL = "DIE STRA\u1e9eE IST GROSS UND WEISS, SAG ES MIR."
+
+
+def test_the_sharp_s_check_rejects_the_letter_in_either_case():
+    assert D._eszett_reason(_SWISS) is None
+    assert D._eszett_reason(_SHARP) == "eszett"
+    assert D._eszett_reason(_CAPITAL) == "eszett"
+
+
+def test_only_swiss_german_refuses_the_sharp_s():
+    """The extra check of each variant, on a piece with a sharp s: Swiss
+    German alone rejects it; the four variants without an extra check still
+    have none, and Traditional Chinese keeps its Traditional-share check only."""
+    refused = {}
+    for row in D.LANGUAGES:
+        check = D._extra_check(row)
+        refused[row["slug"]] = check is not None and check(_SHARP, "source") == "eszett"
+    assert refused == {row["slug"]: row["slug"] == "swiss_german" for row in D.LANGUAGES}
+    without = {row["slug"] for row in D.LANGUAGES if D._extra_check(row) is None}
+    assert without == {"brazilian_portuguese", "mexican_spanish", "canadian_french",
+                       "egyptian_arabic"}
+    swiss = D._extra_check(next(r for r in D.LANGUAGES if r["slug"] == "swiss_german"))
+    assert swiss(_SWISS, "source") is None
+    chinese = D._extra_check(
+        next(r for r in D.LANGUAGES if r["slug"] == "traditional_chinese"))
+    assert chinese(_SHARP, "source") is None
+    assert chinese("国这东时会来", "source") == "simplified"
+
+
+def _swiss_answer(forwards):
+    """The translator writes ``forwards`` in turn (the last repeated) and
+    translates back to the English prompt; the judge accepts."""
+    replies = list(forwards)
+
+    def answer(request):
+        if request.model != MT:
+            return "Yes"
+        source, target, text = _wire(request)
+        if source == "en":
+            assert target == "de-CH"
+            return replies.pop(0) if len(replies) > 1 else replies[0]
+        return "The street is wide and white."
+    return answer
+
+
+_PROMPT = "The street is wide and white, tell me."
+
+
+def test_a_swiss_german_piece_with_a_sharp_s_is_translated_again(monkeypatch):
+    monkeypatch.setattr(langid, "detect", lambda text: "deu_Latn")
+    requests, (text, info) = _drive(
+        _BY["to_dialect_swiss_german"](_PROMPT, translate_model=MT, gen_model=GEN),
+        _swiss_answer([_SHARP, _SWISS]))
+    assert info == "Swiss German" and text == _SWISS
+    assert [r.model for r in requests] == [MT, MT, MT, GEN]  # again, back, judge
+
+
+def test_a_swiss_german_piece_that_keeps_its_sharp_s_is_discarded(monkeypatch):
+    monkeypatch.setattr(langid, "detect", lambda text: "deu_Latn")
+    requests, (_, info) = _drive(
+        _BY["to_dialect_swiss_german"](_PROMPT, translate_model=MT, gen_model=GEN),
+        _swiss_answer([_CAPITAL]))
+    assert info == "DISCARDED; language=Swiss German; piece=1/1; feedback=eszett"
+    assert [r.model for r in requests] == [MT] * 4  # four rounds, no judge
+
+
+def test_a_german_translation_keeps_its_sharp_s(monkeypatch):
+    """The translation family shares the machine-translation path but not the
+    dialect's extra check: German of Germany writes the sharp s."""
+    from redact.jailbreak.obfuscation.translation import to_german
+
+    monkeypatch.setattr(langid, "detect", lambda text: "deu_Latn")
+
+    def answer(request):
+        if request.model != MT:
+            return "Yes"
+        source, target, text = _wire(request)
+        return _SHARP if source == "en" else "The street is wide and white."
+
+    requests, (text, info) = _drive(
+        to_german(_PROMPT, translate_model=MT, gen_model=GEN), answer)
+    assert info == "German" and text == _SHARP
+    assert [r.model for r in requests] == [MT, MT, GEN]

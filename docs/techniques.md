@@ -799,10 +799,15 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   It runs on the `translation` model, so a kind's `translation` switch gates
   it as it gates the translation family (off removes it), and a pool that
   holds one plans that model. The code checks what GlotLID and the
-  characters can tell: the base language's labels, a length band, and for
-  Traditional Chinese a share of Traditional over Simplified characters;
-  GlotLID tells the base language, not the region, so the region itself is
-  not checked. Spec `check` `translate`, 2 to 12 calls.
+  characters can tell: the base language's labels, a length band, for
+  Traditional Chinese a share of Traditional over Simplified characters
+  (`simplified`), and for Swiss German no sharp s (`ß` or `ẞ`; Swiss
+  Standard German writes `ss`), a piece holding one rejected (`eszett`) and
+  translated again, as a piece failing any check is; these character checks
+  run on a machine translator, while a chat translator's output is read by
+  its check model alone. GlotLID tells the base language, not the region, so
+  the region itself is not checked. Spec `check` `translate`, 2 to 12
+  calls.
 - `code_switching` (10, `to_code_switch_<slug>`) has the generation model
   rewrite the prompt with some phrases in a second language and the rest in
   English, keeping its meaning: Spanish, French, German, Portuguese,

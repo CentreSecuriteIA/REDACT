@@ -8,9 +8,10 @@ machine-translation path (checks, back-translation, judge) on a machine
 translator, or the chat path by the variant's name on a chat translator. One
 technique per row of ``dialect_variants.json`` (``to_dialect_<slug>``). Gated
 by what GlotLID and the characters can tell: the base language's GlotLID
-labels and length band (GlotLID reads the base language, not the region), and
-for Traditional Chinese a share of Traditional over Simplified characters.
-Region adherence itself is not checked here (see the blockers note).
+labels and length band (GlotLID reads the base language, not the region), for
+Traditional Chinese a share of Traditional over Simplified characters, and for
+Swiss German no sharp s (Swiss Standard German writes ``ss``). Region
+adherence itself is not checked here (see the blockers note).
 
 ``info`` is ``language=<name>``; ``DISCARDED; language=<name>; ...`` on
 failure, as translation's.
@@ -43,6 +44,11 @@ DEFAULT_RATIO = 1.0
 _SIMPLIFIED = set("国这东时会来对说没过应开学实发为书门车马鸟长风飞术语问题")
 _TRADITIONAL = set("國這東時會來對說沒過應開學實發為書門車馬鳥長風飛術語問題")
 
+#: The sharp s, lower and upper case. Swiss Standard German does not write
+#: it (``ss``, ``SS`` in its place), so a ``de-CH`` piece holding one is
+#: German of Germany or Austria, not Swiss. U+00DF and U+1E9E.
+ESZETT = frozenset("\u00df\u1e9e")
+
 
 def _ratio(variant: dict) -> float:
     """The length-band median ratio for ``variant``: its base language's
@@ -64,13 +70,37 @@ def _traditional_reason(translation: str, trad_share: float) -> str | None:
     return None
 
 
+def _eszett_reason(translation: str) -> str | None:
+    """Why ``translation`` is rejected as not Swiss Standard German, or
+    ``None``: it holds a sharp s (:data:`ESZETT`), which Swiss German writes
+    as ``ss``."""
+    if any(c in ESZETT for c in translation):
+        return "eszett"
+    return None
+
+
 def _extra_check(variant: dict):
-    """A per-piece check beyond the language and length checks, or ``None``:
-    the Traditional-share check for a variant with ``trad_share``."""
+    """A per-piece check beyond the language and length checks, or ``None``
+    for a variant with none: the Traditional-share check for a variant with
+    ``trad_share`` (``simplified``), the sharp-s check for one with
+    ``no_eszett`` (``eszett``). The first reason found is the piece's."""
+    checks = []
     share = variant.get("trad_share")
-    if share is None:
+    if share is not None:
+        checks.append(lambda translation: _traditional_reason(translation, share))
+    if variant.get("no_eszett"):
+        checks.append(_eszett_reason)
+    if not checks:
         return None
-    return lambda translation, source: _traditional_reason(translation, share)
+
+    def check(translation: str, source: str) -> str | None:
+        for reason_of in checks:
+            reason = reason_of(translation)
+            if reason is not None:
+                return reason
+        return None
+
+    return check
 
 
 def _dialect_gen(
@@ -88,8 +118,10 @@ def _dialect_gen(
 
     On a machine-translation model the region/script code is sent and the
     output checked by the base language's labels, the length band and the
-    extra check; on a chat model the variant is translated by name. ``info``
-    is the variant's name, or ``DISCARDED; language=<name>; ...``.
+    extra check (:func:`_extra_check`); on a chat model the variant is
+    translated by name and read by the chat check model alone, no extra
+    check. ``info`` is the variant's name, or
+    ``DISCARDED; language=<name>; ...``.
     """
     translator = translate_model or _resolve_translate_model()
     name = variant["name"]
