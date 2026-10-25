@@ -46,13 +46,16 @@ def _at_weight(monkeypatch, weight: float) -> None:
 
 # --- the weight in the spec ----------------------------------------------------
 
-def test_the_packaged_weight_is_one_quarter_and_the_spec_reads_it():
-    """0.25 since spec 1.4: 0.2 drew the ten 30 or 31 times in 3,000 default
-    attack units once the four language-mix families joined the obfuscation
-    picks, where the weight was set for about 40; 0.25 draws 37 to 40
-    (seeds 42 to 46, in one, three or ten groups)."""
-    assert load_spec()["heavy_encoding_weight"] == 0.25  # noqa: PLR2004
-    assert heavy_encoding_weight() == 0.25  # noqa: PLR2004
+def test_the_packaged_weight_is_0_35_and_the_spec_reads_it():
+    """0.35 since the spec-1.5 integration retune. 0.2 was set for about 40,
+    0.25 (spec 1.4) drew ~40 until spec 1.5's literature-gap obfuscation
+    families (packets A to D) diluted the layer's family-first picks and the
+    slot fell to 27 at 0.25; 0.35 draws the ten 36 to 40 per 3,000 default
+    attack units (seeds 42 to 46, in one, three or ten groups), none undrawn,
+    back to the ~40 aim (0.3 drew ~32, 0.4 ~42 with one encoding undrawn in a
+    ten-group cell)."""
+    assert load_spec()["heavy_encoding_weight"] == 0.35  # noqa: PLR2004
+    assert heavy_encoding_weight() == 0.35  # noqa: PLR2004
 
 
 def _spec_with(tmp_path, **changes):
@@ -118,7 +121,7 @@ def test_a_spec_without_the_weight_has_no_slot(without_the_slot):
 
 
 def test_the_slot_takes_the_spec_s_weight_times_encode_s(monkeypatch):
-    """The plan's dealers weigh the slot at 0.25, or 0.25 times the kind's
+    """The plan's dealers weigh the slot at 0.35, or 0.35 times the kind's
     ``encode`` weight."""
     weights = []
 
@@ -131,7 +134,7 @@ def test_the_slot_takes_the_spec_s_weight_times_encode_s(monkeypatch):
     simulate.plan_rows(simulate.inputs(4), all_techniques())
     simulate.plan_rows(simulate.inputs(4), all_techniques(),
                        family_weights={"encode": 2})
-    assert [w[HEAVY_ENCODINGS] for w in weights] == [0.25, 0.5]
+    assert [w[HEAVY_ENCODINGS] for w in weights] == [0.35, 0.7]
 
 
 def test_family_weights_cannot_name_the_slot():

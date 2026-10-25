@@ -586,7 +586,7 @@ favours a family's cheaper techniques). `family_weights` may name only
 families the kind's pool draws. In a budget round the ten heavy full-text
 encodings (`to_base64`, `to_morse` and the others of `encode_weight` heavy
 that encode the whole text) are dealt in a slot of their own beside
-`encode`, at the spec's `heavy_encoding_weight` (0.25) times `encode`'s
+`encode`, at the spec's `heavy_encoding_weight` (0.35) times `encode`'s
 weight, so they are drawn about a quarter as often as a family: the slot is
 not a family, so `family_weights` cannot name it (`"encode:heavy"` raises
 as any name the kind does not draw); weight `encode` to move both. It is a
@@ -956,10 +956,12 @@ copy the packaged adversarial lists into it
   set for about 40 (44 to 50 at spec 1.3). Over seeds 42 to 46 in one, three
   and ten groups (15 plans of 3,000 units a weight) the mean is 30.1 at 0.2,
   38.8 at 0.25, 46.5 at 0.3, 51.7 at 0.35 and 59.6 at 0.4, and one of the ten
-  goes undrawn in 2, 0, 0, 0 and 1 of the 15 plans (in ten groups), so the
-  weight is 0.25 now: 37 or 38 draws in one group, 38 or 39 in three, 40 in
-  ten, the least drawn of the ten 3 times in one and three groups and 1 to 3
-  in ten. The escalation's round 3 draws 36 of them (30 at 0.2) and round 4
+  goes undrawn in 2, 0, 0, 0 and 1 of the 15 plans (in ten groups), so
+  spec 1.4 set the weight to 0.25: 37 or 38 draws in one group, 38 or 39 in
+  three, 40 in ten, the least drawn of the ten 3 times in one and three
+  groups and 1 to 3 in ten. (The spec-1.5 integration retuned the weight
+  again, to 0.35, after its literature-gap families diluted the picks: see
+  the internals note.) The escalation's round 3 draws 36 of them (30 at 0.2) and round 4
   27 or 28 (24). A plan of 300 inputs in 15 groups of 20 draws 8 to 11 at
   any weight from 0.2 to 0.4: each small group's slot takes its first pick
   early and its next only after more units than the group has. A count round
@@ -967,7 +969,7 @@ copy the packaged adversarial lists into it
   the weight, so the eval draws do not move. A budget plan kept from before
   resumes with the WARNING that the rules its combinations were drawn by
   changed (its `rules` id holds the weight) and replays its combinations;
-  plan it again with `resume=False` to draw at 0.25.
+  plan it again with `resume=False` to draw at the current weight.
 - **The second eval release (text only).** The eval pool, its pairs and its
   pinned draws stayed as they were, but the text of some eval rows moved:
   the variants of `to_nefarious_goal`, `to_fill_in_blank`,
@@ -1134,7 +1136,7 @@ a run you already have, and what you will see; each point has its note below.
   wrapper and a container out of the unit (which makes the translation the
   unit's only obfuscation); and a budget round deals the ten heavy full-text
   encodings in a slot of their own at the spec's `heavy_encoding_weight`,
-  0.2 (0.25 since spec 1.4's retune), a quota rather than a floor (about 45
+  0.2 (0.35 since the spec-1.5 integration retune, 0.25 at spec 1.4), a quota rather than a floor (about 45
   draws of the ten in 3,000 units of the escalation's last round, where they
   were about 121; the note on the first eval release, below).
 - **Stricter checks, and what they skip.** An allow list or `family_weights`
@@ -2012,8 +2014,8 @@ offline.
 
 The sixth change is for training only: a budget round deals the ten heavy
 full-text encodings in a slot of their own beside `encode`, at the spec's
-new `heavy_encoding_weight`, 0.2 (0.25 since spec 1.4's retune, in the
-spec 1.4 notes), times `encode`'s weight
+new `heavy_encoding_weight`, 0.2 (0.35 since the spec-1.5 integration
+retune, 0.25 at spec 1.4), times `encode`'s weight
 (`HEAVY_ENCODINGS` in `jailbreak/sampling.py`, a name the dealer counts them
 under). Dealt as `encode`'s members, a heavy one fitted only a unit with 3
 points left, and the light members kept the family's count high, so it was
@@ -2379,7 +2381,7 @@ values. Delete every file you do not change, then set `prompt_dir`.
 | File | Holds | Read by |
 |---|---|---|
 | `configs/llm/gpu_pricing.json` | Provider, then GPU name as `nvidia-smi` reports it, then hourly USD per GPU; `*` is a provider's fallback | the cost roll-up |
-| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layers_off_by_default` (the layers a kind leaves out unless its `layers.allow` names them, checked against `layer_order` as the spec loads), `decode_hint_rate` (the share of hinted encodings that write a decode hint, 0.5), `heavy_encoding_weight` (the weight, times `encode`'s, of the slot a budget round deals the ten heavy full-text encodings in, 0.25, above 0 and at most 1; left out, they are dealt as `encode`'s members), `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`, `check` and `calls`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `request_obfuscation_refuses` (per family a request obfuscation is drawn from, the families it then keeps out of the combination: a translation keeps `suffixes`, `structural` and `neutral_container`; as the spec loads, each key must be a family a request obfuscation is drawn from, `translation` or `encode` (the light encodings `request_obfuscation_allowed_families` calls `encode_light`), and each name an obfuscation-layer family, since the step is drawn after every other layer's pick), `generators` (the families whose techniques come one per row of a data file, expanded into `techniques` as the spec loads), `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, `needs_latin`, optional `max_tokens`, `cross_incompatible_with`, `kinds`, `check`, `calls`, `since`, the spec version that added the technique, and `deprecated`, the one that retired it) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
+| `configs/jailbreak/combination_spec.json` | `version`, `layer_order`, `layers_off_by_default` (the layers a kind leaves out unless its `layers.allow` names them, checked against `layer_order` as the spec loads), `decode_hint_rate` (the share of hinted encodings that write a decode hint, 0.5), `heavy_encoding_weight` (the weight, times `encode`'s, of the slot a budget round deals the ten heavy full-text encodings in, 0.35, above 0 and at most 1; left out, they are dealt as `encode`'s members), `layer_rates`, `layer_max_picks`, `families` (layer, order within the layer, incompatibilities, `dimension`, optional `kinds`, `check` and `calls`; a `description`, which nothing reads), `manipulation_blocked_obfuscation`, `request_obfuscation_allowed_families`, `request_obfuscation_refuses` (per family a request obfuscation is drawn from, the families it then keeps out of the combination: a translation keeps `suffixes`, `structural` and `neutral_container`; as the spec loads, each key must be a family a request obfuscation is drawn from, `translation` or `encode` (the light encodings `request_obfuscation_allowed_families` calls `encode_light`), and each name an obfuscation-layer family, since the step is drawn after every other layer's pick), `generators` (the families whose techniques come one per row of a data file, expanded into `techniques` as the spec loads), `techniques` (families, complexity, `requires_llm`, `requires_benign`, `encode_weight`, `needs_latin`, optional `max_tokens`, `cross_incompatible_with`, `kinds`, `check`, `calls`, `since`, the spec version that added the technique, and `deprecated`, the one that retired it) | `jailbreak/technique.py` (`load_spec`, `tag`), `pool.py`, `rules.py`, `sampling.py`, `chain.py`, `augmentation.py`; its `version` goes in each row and in the jailbreak run record |
 | `configs/jailbreak/languages.json` | One row per language: `name`, `slug`, `complexity`, `script`, whether it has a `translation` and an `answer_language` technique, and the spec versions that added them: `since` (the row) and `translation_since` (its translation, when later) | `jailbreak/technique.py` (the spec's generators), `obfuscation/translation.py`, `requests/answer_language.py` |
 | `configs/jailbreak/obfuscation/suffix_strings.json` | One row per adversarial suffix published in the literature: `slug`, `suffix`, `source`, `optimized_against`, `since`, and optionally `notes`, `complexity`, `deprecated`; each row is an attack-only technique `to_adversarial_suffix_<slug>` of the `suffixes` family | `jailbreak/technique.py` (the spec's generators), `obfuscation/suffixes.py`, which refuses at import a row without one of the five |
 | `configs/jailbreak/augmentations.json` | The two default kinds and `natural_only_families` | `jailbreak/augmentation.py` |

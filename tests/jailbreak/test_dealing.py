@@ -332,32 +332,29 @@ def test_the_default_attacks_draw_every_technique_of_their_pool(section):
 
 # The ten heavy full-text encodings, dealt in a slot of their own beside encode
 # in a budget draw (sampling.HEAVY_ENCODINGS, at the spec's
-# heavy_encoding_weight, 0.25).
+# heavy_encoding_weight, 0.35).
 _HEAVY = ("to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
           "to_braille", "to_hex", "to_binary", "to_html_entities", "to_base32",
           "to_base85")
 
 
 def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares):
-    """3,000 units in three groups: 35 draws of the ten, 3 or 4 each. The
-    slot fixes the total, not a count for each encoding. The spec 1.4
-    language-mix families and spec 1.5's `bijection` joined the obfuscation
-    layer, so the layer's family-first picks are shared among more families
-    and at the weight of 0.2 the slot's count fell from 45 to 30 (the bounds
-    were 28 to 42 then); spec 1.4 retuned the weight to 0.25 for about 40, and
-    the bounds are those of spec 1.3 again. Dealt as encode's members the ten
-    got 12, two of them never; dealt as a family of their own (weight 1),
-    ~200. All of spec 1.5's literature-gap obfuscation families now share the
-    layer's family-first picks (packet A's unicode_smuggling and char_injection,
-    packet B's bijection, packet C's semantic_reencoding, translationese and
-    sociolect), so at 0.25 the slot fell to its worst at the fixture's three
-    groups, seed 42: 27, min 2. The bounds are widened here, not the weight
-    changed; the post-merge retune of heavy_encoding_weight (the next commit)
-    restores the ~40 aim and tightens them again (see
-    .claude/completion_blockers.md B16/B17)."""
+    """3,000 units in three groups: ~36 draws of the ten, 3 or 4 each. The
+    slot fixes the total, not a count for each encoding. The slot was set at
+    `heavy_encoding_weight` 0.2 for about 40 draws (then 44 to 50), fell to
+    30 or 31 once spec 1.4's four language-mix families joined the obfuscation
+    picks and was retuned to 0.25, then fell again to 27 (min 2) once all of
+    spec 1.5's literature-gap obfuscation families joined (packet A's
+    unicode_smuggling and char_injection, packet B's bijection, packet C's
+    semantic_reencoding, translationese and sociolect). The integration retune
+    moved the weight to 0.35, which draws the ten 36 to 40 per 3,000 default
+    attack units over seeds 42 to 46 in one, three or ten groups (36 at the
+    fixture's three groups, seed 42), with none of the ten undrawn in any of
+    those cells: about the ~40 aim again. Dealt as encode's members the ten got
+    12, two of them never; dealt as a family of their own (weight 1), ~200."""
     counts = [default_shares[name]["count"] for name in _HEAVY]
-    assert 25 <= sum(counts) <= 60  # noqa: PLR2004
-    assert min(counts) >= 2  # noqa: PLR2004
+    assert 34 <= sum(counts) <= 44  # noqa: PLR2004
+    assert min(counts) >= 3  # noqa: PLR2004
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3, 7, 42, 43, 44, 45, 46, 123])
@@ -603,8 +600,10 @@ _BUDGETS = [
 # code_framing, reasoning_injection, bijection; packet C: semantic_reencoding,
 # translationese, sociolect) and once more after heavy_encoding_weight is
 # retuned. The eval type's pin below does not move: no eval pool draws any of
-# the new families.
-_PINNED_DRAWS = "e2eca5f692d0d5f972cfcb356973d4a80bba6c31f0f3e86eb0834ac7dcb25b97"
+# the new families. The integration retune of heavy_encoding_weight (0.25 ->
+# 0.35) moved it once more: the weight scales the heavy full-text encodings'
+# dealing slot, which the budget rounds of this digest draw.
+_PINNED_DRAWS = "90385eb30989e7145e1140868d2daa19f5a187a0bca2b9af7d7015a048cfb58e"
 
 
 

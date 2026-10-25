@@ -413,7 +413,7 @@ order.
   `encode`, `encode_weight` heavy; not the three heavy
   `to_sensitive_words_encode_*`, which are `sensitive_words` techniques)
   under a name of their own, `HEAVY_ENCODINGS` (`"encode:heavy"`), beside
-  `encode`, at the spec's `heavy_encoding_weight` (0.25) times encode's
+  `encode`, at the spec's `heavy_encoding_weight` (0.35) times encode's
   weight (`plan_run` adds it to the dealer's weights). `deal_key(fn,
   heavy_apart=)` gives the name, read by `_pick_by_family` and `_observe`;
   `assign_combination` passes `heavy_apart` for a budget draw only. Dealt
@@ -421,27 +421,32 @@ order.
   and the light members kept encode's count high, so encode was seldom the
   family dealt on such a unit: after the first eval release's rules the ten were
   drawn 8 to 16 times in 3,000 units of the default attacks (three groups,
-  seeds 42 to 46). With the slot at 0.25 they are drawn 37 to 40 times
-  (seeds 42 to 46, in one, three or ten groups), about a quarter of a
-  family's draws, and `encode`'s draws per unit go from 0.218 without it
-  to 0.230 (seed 42, three groups). The total depends on the grouping,
-  since each group's dealer starts the slot at 0: 37 or 38 in one group, 38
-  or 39 in three, 40 in ten (seeds 42 to 50) and 47 to 51 in 46 uneven
-  groups of 30 to 100 units; the least drawn of the ten is drawn 3 times in
-  one and in three groups and 1 to 3 times in ten (the slot fixes a total,
-  not a count for each encoding). In small groups the weight hardly
+  seeds 42 to 46). With the slot at 0.35 they are drawn 36 to 40 times
+  (seeds 42 to 46, in one, three or ten groups), about the owner's aim of
+  40. The total depends on the grouping, since each group's dealer starts
+  the slot at 0: 37 in one group, 36 in three, 40 in ten (seeds 42 to 46);
+  the least drawn of the ten is drawn 3 times in one and in three groups
+  (the slot fixes a total, not a count for each encoding). In small groups
+  the weight hardly
   matters: 300 units in 15 groups of 20 draw 8 to 11 at any weight from 0.2
   to 0.4, since each group's slot takes its first pick early and its next
   only after more units than the group has. It is a quota in every budget
   round, not a floor, since the weight does not read the round's budget: in
   the escalation (3,000 units a round, three groups, seeds 42 to 46) round
-  3 draws 36 of the ten and round 4 27 or 28, where round 4's budget dealt
-  them about 121 times as encode's members (spec 1.3). The weight was 0.2
+  3 draws 36 of the ten and round 4 27 or 28 (measured at the spec-1.4
+  weight 0.25; the 0.35 retune scales both up by about the weight ratio),
+  where round 4's budget dealt them about 121 times as encode's members
+  (spec 1.3). The weight was 0.2
   when the slot came (44 to 50 draws at spec 1.3); spec 1.4's four
   language-mix families share the obfuscation picks among more families,
-  which brought 0.2 down to 30 or 31, so spec 1.4 retuned it for about 40
-  (the mean over seeds 42 to 46 in one, three and ten groups: 30.1 at 0.2,
-  38.8 at 0.25, 46.5 at 0.3, 51.7 at 0.35, 59.6 at 0.4).
+  which brought 0.2 down to 30 or 31, so spec 1.4 retuned it to 0.25 for
+  about 40 (the spec-1.4 mean over seeds 42 to 46 in one, three and ten
+  groups: 30.1 at 0.2, 38.8 at 0.25, 46.5 at 0.3, 51.7 at 0.35, 59.6 at
+  0.4). Spec 1.5's literature-gap obfuscation families (packets A to D)
+  diluted the picks again, so 0.25 fell to 27; the spec-1.5 integration
+  retuned the weight to 0.35, whose spec-1.5 mean is about 27 at 0.25, 32
+  at 0.3, 38 at 0.35 and 42 at 0.4 (one of the ten undrawn in a ten-group
+  plan at 0.3 and 0.4, none at 0.35).
   A count draw (`exact_techniques`: the eval type, the natural kind, the
   first two escalation rounds) and a draw without a dealer deal them as
   encode's members, as before, so their draws do not move. The slot is not
