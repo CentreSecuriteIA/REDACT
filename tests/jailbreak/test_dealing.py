@@ -568,7 +568,15 @@ _BUDGETS = [
 # not the Swiss German dialects) moved it by the name alone: the draws are
 # the same, with the new name in the 5 of the 240 dealt units and the 2 of
 # the 200 undealt draws that held the technique (its row keeps its place).
-_PINNED_DRAWS = "ca39fc158e15fa9ab4ec9b1afa893de5e5c58693f878c64562291ef39ed379a2"
+# Spec 1.5's unicode_smuggling (three attack-only obfuscation techniques: two
+# full-prompt hidings, complexity 3, and one invisible suffix, complexity 1,
+# all refusing every other obfuscation family and the manipulation layer)
+# joined the obfuscation family-first picks, so the group's family counts and
+# the tie-break names change from the first obfuscation pick on, and the
+# undealt draws gain the new family (199 of the 240 dealt units, 21 of them
+# holding one of the three; 13 of the 200 undealt draws, 8 holding one). The
+# eval type's pin below does not move: no eval pool draws the family.
+_PINNED_DRAWS = "0a67d5f2af34ef58b790429766b26bcb17c36e5391479667fdcc63cf6e7b3ed5"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

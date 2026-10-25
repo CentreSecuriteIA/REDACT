@@ -47,6 +47,8 @@
   "obfuscation/structural_templates.json:to_json": {"family": "structural", "variants": 10, "floor": 8},
   "obfuscation/structural_templates.json:to_markdown": {"family": "structural", "variants": 9, "floor": 8},
   "obfuscation/structural_templates.json:to_xml": {"family": "structural", "variants": 9, "floor": 8},
+  "obfuscation/unicode_smuggling_templates.json:tag_carrier": {"family": "unicode_smuggling", "variants": 8, "floor": 8},
+  "obfuscation/unicode_smuggling_templates.json:vs_carrier": {"family": "unicode_smuggling", "variants": 8, "floor": 8},
   "obfuscation/word_art_templates.json:decode": {"family": "word_art", "variants": 8, "floor": 8},
   "obfuscation/wording_templates.json:pseudonym_key": {"family": "wording", "variants": 8, "floor": 8},
   "obfuscation/wording_templates.json:word_game_solve": {"family": "wording", "variants": 8, "floor": 8},

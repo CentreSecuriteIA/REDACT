@@ -18,7 +18,7 @@ _FAMILY_TAGS = {
                  "dialect"],
     "surface_noise": ["typos", "casual_writing", "noise", "suffixes"],
     "encoding": ["encode", "sensitive_words", "wording", "tokenbreak", "ascii_art",
-                 "payload_split", "word_art", "transliteration"],
+                 "payload_split", "word_art", "transliteration", "unicode_smuggling"],
     "container": ["structural", "neutral_container"],
     "role_framing": ["persona", "framing", "cognitive", "impersonation",
                      "benign_role", "persona_template"],
