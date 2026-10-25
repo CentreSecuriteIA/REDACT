@@ -67,6 +67,7 @@ print(json.dumps({
     "techniques": {fn.__name__: {"families": fn.families, "kinds": fn.kinds,
                                  "complexity": fn.complexity, "since": fn.since,
                                  "requires_llm": fn.requires_llm,
+                                 "refuses": list(fn.cross_incompatible_with or ()),
                                  "applied": fn("a prompt")} for fn in made},
     "pools": {name: sorted(fn.__name__ for fn in technique_pool(kind)
                            if fn.__name__.startswith("to_adversarial_suffix_"))
@@ -92,9 +93,8 @@ def test_each_row_registers_an_attack_only_technique_when_the_package_imports(tm
                                           "to_adversarial_suffix_beta_2"]
     alpha = report["techniques"]["to_adversarial_suffix_alpha"]
     assert alpha == {"families": ["suffixes"], "kinds": ["adversarial"], "complexity": 1,
-                     "since": "1.4", "requires_llm": False,
-                     "applied": ["a prompt zz alpha omega",
-                                 "slug=alpha;source=Stand-in 2026, arXiv:0000.00000"]}
+                     "since": "1.4", "requires_llm": False, "refuses": ["ascii_art"],
+                     "applied": ["a prompt zz alpha omega", "slug=alpha"]}
     beta = report["techniques"]["to_adversarial_suffix_beta_2"]
     # A row's complexity is read; its kinds are not: no row is natural.
     assert (beta["complexity"], beta["kinds"]) == (2, ["adversarial"])
@@ -123,8 +123,7 @@ def test_the_packaged_file_s_rows_are_attack_only_suffix_techniques():
     for fn, row in zip(made, rows, strict=True):
         assert (fn.families, fn.kinds, fn.since) == (["suffixes"], ["adversarial"],
                                                      row["since"])
-        assert fn("p") == (f"p {row['suffix']}",
-                           f"slug={row['slug']};source={row['source']}")
+        assert fn("p") == (f"p {row['suffix']}", f"slug={row['slug']}")
     assert S.get_suffix_functions() == [*S.NOISE_SUFFIXES, *made]
 
 
@@ -149,8 +148,40 @@ def test_an_empty_file_registers_the_family_with_its_noise_suffixes_alone(
 def test_a_row_s_technique_appends_its_suffix_after_a_space():
     fn = S.make_suffix_fn(_ROWS[0])
     assert fn.__name__ == "to_adversarial_suffix_alpha"
-    assert fn("a prompt") == ("a prompt zz alpha omega",
-                              "slug=alpha;source=Stand-in 2026, arXiv:0000.00000")
+    assert fn("a prompt") == ("a prompt zz alpha omega", "slug=alpha")
+
+
+def test_a_row_s_info_is_its_slug_alone_whatever_its_source_says():
+    """The source and the model stay in the data file: a dataset row's
+    ``technique_info`` names the slug, and a source may hold any text."""
+    row = {**_ROWS[0], "source": "a; b = c, retrieved 2026-10-25"}
+    _, info = S.make_suffix_fn(row)("a prompt")
+    assert info == "slug=alpha"
+    assert "source" not in info and "a; b" not in info
+
+
+def test_the_published_suffixes_refuse_ascii_art_both_ways():
+    """As the unicode and emoji noise suffixes do: a published suffix holds
+    characters the fonts lack. 24 published x to_ascii_art pairs are refused
+    whichever is picked first, and the punctuation and fragment suffixes
+    still pair with it (26 of the family's 28 refuse it)."""
+    from redact.jailbreak.rules import compatible
+
+    every = {fn.__name__: fn for fn in all_techniques()}
+    art = every["to_ascii_art"]
+    published = [every[f"to_adversarial_suffix_{row['slug']}"] for row in S.suffix_rows()]
+    family = [fn for fn in all_techniques() if fn.families[0] == "suffixes"]
+
+    def refused(fn):
+        return art not in compatible([fn], [art]) and fn not in compatible([art], [fn])
+
+    def accepted(fn):
+        return art in compatible([fn], [art]) and fn in compatible([art], [fn])
+
+    assert len(published) == 24 and all(refused(fn) for fn in published)   # noqa: PLR2004
+    assert [fn.__name__ for fn in family if accepted(fn)] == [
+        "to_adversarial_suffix_punctuation", "to_adversarial_suffix_fragments"]
+    assert sum(refused(fn) for fn in family) == 26     # noqa: PLR2004
 
 
 def _without(field: str) -> dict:
@@ -162,12 +193,11 @@ def _without(field: str) -> dict:
       for field in S.REQUIRED_FIELDS],
     ({**_ROWS[0], "suffix": "  "}, "row 'alpha' must give ['suffix']"),
     ({**_ROWS[0], "optimized_against": 7}, "row 'alpha' must give ['optimized_against']"),
-    ({**_ROWS[0], "source": "a; b"}, "the source of row 'alpha' may not hold a ';'"),
     ({**_ROWS[0], "notes": ["a"]}, "the notes of row 'alpha' must be a string"),
     ({**_ROWS[0], "slug": "Alpha-1"}, "row 'Alpha-1' must have a slug of lower-case"),
     ({**_ROWS[0], "slug": "emoji"}, "row 'emoji' must have a slug of lower-case"),
     (_without("slug"), "row 0 has no slug"),
-], ids=[*S.REQUIRED_FIELDS, "blank suffix", "not a string", "semicolon", "notes",
+], ids=[*S.REQUIRED_FIELDS, "blank suffix", "not a string", "notes",
         "slug case", "a noise slug", "no slug"])
 def test_a_row_that_breaks_a_rule_raises_naming_it(tmp_path, row, message):
     _write_rows(tmp_path, [row])
@@ -274,8 +304,6 @@ def problems(doc: object) -> list[str]:
             if slug in seen_slugs:
                 found.append(f"row {i}: slug repeats")
             seen_slugs.add(slug)
-        if isinstance(row["source"], str) and ";" in row["source"]:
-            found.append(f"row {i}: source holds a ';', the info's separator")
         for field in ("optimized_against", "notes"):
             for model in _MODEL_IDS:
                 for spelled in re.findall(re.escape(model), str(row[field]), re.I):
@@ -351,11 +379,6 @@ class TestTheCheckCanFail:
     def test_a_slug_that_is_not_snake_case(self, doc):
         bad = self._rows(doc)
         bad["rows"][0]["slug"] = "Not-Snake"
-        assert problems(bad)
-
-    def test_a_source_with_the_info_separator(self, doc):
-        bad = self._rows(doc)
-        bad["rows"][0]["source"] += "; retrieved"
         assert problems(bad)
 
     def test_a_model_spelled_otherwise(self, doc):

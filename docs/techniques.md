@@ -324,7 +324,8 @@ technique is picked first. A technique may not join a combination when:
   layer cap);
 - one of its families is in the `cross_incompatible_with` of a taken
   technique's own spec entry, or a taken family is in its own. The spec keeps
-  `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode`,
+  `to_adversarial_suffix_emoji`, `to_adversarial_suffix_unicode`, the 24
+  published suffixes (the `suffixes` generator gives each the key),
   `to_braille`, `to_tokenbreak_split`, `to_lookalike_letters`,
   `to_zero_width_noise`, `to_fullwidth`, `to_math_styled` and the three
   `to_emoji_sprinkle_*` from `ascii_art`, since no font draws the characters
@@ -833,10 +834,12 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   published in the literature, one technique per row of
   `configs/jailbreak/obfuscation/suffix_strings.json` (the spec's `suffixes`
   generator: `to_adversarial_suffix_<slug>`, after the four noise ones),
-  appended after a space as published, with the info
-  `slug=<slug>;source=<source>`. Each row says where the string was
-  published (`source`) and which model it was optimized against
-  (`optimized_against`); a published suffix is used as it was written, never
+  appended after a space as published, with the info `slug=<slug>` (the
+  source and the model stay in the data file). Each row says where the
+  string was published (`source`) and which model it was optimized against
+  (`optimized_against`). A published suffix refuses `ascii_art`, as the
+  unicode and emoji ones do: its characters are ones the fonts lack. A
+  published suffix is used as it was written, never
   optimized here (that needs a gradient search against a white-box model for
   each target). The published ones are attack only, as the generator's
   `kinds` say whatever a row gives, so the natural kind draws only the

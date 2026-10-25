@@ -5,9 +5,10 @@ A noise suffix's ``info`` is ``suffix=<suffix>``. The published suffixes are
 data, one row each of ``configs/jailbreak/obfuscation/suffix_strings.json``
 (:data:`SUFFIX_FILE`), which the spec's ``suffixes`` generator also reads: a
 row makes ``to_adversarial_suffix_<slug>``, which appends the row's suffix
-after a space, as the noise suffixes do, and writes
-``slug=<slug>;source=<source>``. A row without its fields fails the import,
-naming the row (:func:`suffix_rows`).
+after a space, as the noise suffixes do, and writes ``slug=<slug>`` (the
+source and the model stay in the data file, not in every row of a dataset).
+A row without its fields fails the import, naming the row
+(:func:`suffix_rows`).
 """
 
 import random
@@ -109,9 +110,8 @@ def suffix_rows(folder: str | Path | None = None) -> list[dict]:
     """The rows of :data:`SUFFIX_FILE` under ``folder`` (the packaged
     ``configs/jailbreak/`` by default), each checked: a slug of lower-case
     letters, digits and underscores that is none of :data:`NOISE_SLUGS`,
-    and every one of :data:`REQUIRED_FIELDS` a non-empty string, the
-    ``source`` without a ``;`` (it goes into the info, whose fields ``;``
-    separates); ``notes``, when given, a string.
+    and every one of :data:`REQUIRED_FIELDS` a non-empty string; ``notes``,
+    when given, a string.
 
     Raises:
         ValueError: A row breaks one of these, named by its slug (or its
@@ -137,10 +137,6 @@ def _check_row(row: dict) -> None:
         raise ValueError(
             f"{SUFFIX_FILE}: row {slug!r} must give {missing}, each a non-empty "
             f"string; every row gives {list(REQUIRED_FIELDS)}.")
-    if ";" in row["source"]:
-        raise ValueError(
-            f"{SUFFIX_FILE}: the source of row {slug!r} may not hold a ';', which "
-            "separates the fields of a technique's info.")
     if not isinstance(row.get("notes", ""), str):
         raise ValueError(
             f"{SUFFIX_FILE}: the notes of row {slug!r} must be a string, got "
@@ -150,8 +146,8 @@ def _check_row(row: dict) -> None:
 def make_suffix_fn(row: dict) -> Callable:
     """The technique of the published suffix ``row``,
     ``to_adversarial_suffix_<slug>``: the prompt, a space, the suffix; its
-    info ``slug=<slug>;source=<source>``."""
-    suffix, info = row["suffix"], f"slug={row['slug']};source={row['source']}"
+    info ``slug=<slug>``."""
+    suffix, info = row["suffix"], f"slug={row['slug']}"
 
     def fn(prompt: str) -> tuple[str, str]:
         return prompt + " " + suffix, info

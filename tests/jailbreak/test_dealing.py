@@ -528,7 +528,11 @@ _BUDGETS = [
 # counts the rest of its draw (57 of the 240 dealt units, 46 of them holding
 # one of the 25 new techniques; 68 of the 200 undealt draws, 62 holding one).
 # The eval type's pin does not move: no eval pool draws Yoruba or a suffix.
-_PINNED_DRAWS = "670ed57f35d215a8628014ffec219a83cc1c9a5041d7ad6923095c6eeab35bfe"
+# The published suffixes refusing ascii_art moved it once more, by one draw:
+# an undealt draw that took a published suffix first no longer has ascii_art
+# among its candidates, so the rng's next picks land elsewhere (1 of the 200
+# undealt draws; none of the 240 dealt units, and no draw held both before).
+_PINNED_DRAWS = "2a6d123f4419bf053ac1fca52ff3c73fccfa7d24d6a84a7ea7194858375b0fe8"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

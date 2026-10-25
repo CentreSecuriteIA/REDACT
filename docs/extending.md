@@ -440,7 +440,7 @@ which stay in code:
    of its technique's name `to_adversarial_suffix_<slug>`, none of the noise
    suffixes' `punctuation`, `fragments`, `unicode`, `emoji`), `suffix` (the
    string as published), `source` (the paper, its arXiv id or the repository
-   it is from, without a `;`), `optimized_against` (the model or models), and
+   it is from), `optimized_against` (the model or models), and
    `since`, the spec version that adds it; `notes`, `complexity` (default 1)
    and `deprecated` are optional. `obfuscation/suffixes.py` refuses a row
    without one of the five at import, naming it. Append the row: its place is
