@@ -9,6 +9,7 @@ from .char_injection import get_char_injection_functions
 from .code_switching import get_code_switching_functions
 from .dialect import get_dialect_functions
 from .encoding import get_encoding_functions
+from .flip_tokens import get_flip_token_functions
 from .neutral_container import get_neutral_container_functions
 from .noise import get_noise_functions
 from .payload_split import get_payload_split_functions
@@ -57,4 +58,5 @@ def get_all_obfuscation_functions() -> list[Callable]:
         + get_semantic_reencoding_functions()
         + get_translationese_functions()
         + get_sociolect_functions()
+        + get_flip_token_functions()
     )

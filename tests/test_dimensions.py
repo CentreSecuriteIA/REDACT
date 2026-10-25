@@ -17,7 +17,7 @@ _FAMILY_TAGS = {
     "language": ["translation", "answer_language", "code_switching", "romanization",
                  "dialect", "translationese", "sociolect"],
     "surface_noise": ["typos", "casual_writing", "noise", "suffixes",
-                      "char_injection"],
+                      "char_injection", "flip_tokens"],
     "encoding": ["encode", "sensitive_words", "wording", "tokenbreak", "ascii_art",
                  "payload_split", "word_art", "transliteration",
                  "unicode_smuggling", "bijection"],
