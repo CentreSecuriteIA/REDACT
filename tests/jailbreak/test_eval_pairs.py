@@ -206,6 +206,27 @@ def test_the_record_gives_back_every_pair_and_only_those():
         "admitted": [refused[0]]}
 
 
+def test_a_mixed_family_pair_writes_the_shorter_list():
+    """A family pair that admits most of its pairs writes the few it refuses,
+    one that refuses most (or half) writes the few it admits: one pair
+    dropped from a family pair the rules admit whole is written as that pair
+    refused, and every mixed verdict lists the shorter side."""
+    pairs = snapshot()
+    members = _families(_eval_pool())
+    written = record(pairs, members)["family_pairs"]
+    whole = next(key for key, verdict in sorted(written.items())
+                 if verdict == "all"
+                 and len(_pairs_between(members, *key.split("|"))) > 2)  # noqa: PLR2004
+    dropped = sorted(_pairs_between(members, *whole.split("|")))[0]
+    fewer = [pair for pair in pairs if pair != dropped]
+    assert record(fewer, members)["family_pairs"][whole] == {"refused": [dropped]}
+    for key, verdict in record(fewer, members)["family_pairs"].items():
+        if isinstance(verdict, dict):
+            (kind, listed), = verdict.items()
+            others = len(_pairs_between(members, *key.split("|"))) - len(listed)
+            assert len(listed) < others if kind == "refused" else len(listed) <= others
+
+
 def test_four_family_pairs_are_mixed_and_each_admits_the_letter_spacing_alone():
     """Of the 22 families' 253 family pairs (250 with a pair: a family of
     one technique has none with itself), the rules admit all or none of the

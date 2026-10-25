@@ -143,6 +143,25 @@ def test_a_chat_translator_takes_the_variant_by_name(monkeypatch):
     assert "Canadian French" in " ".join(m["content"] for m in requests[0].messages)
 
 
+def test_a_chat_translator_is_checked_by_the_named_check_model(monkeypatch):
+    """``translate_check_model`` reads a chat translation in place of the
+    translator, as on the machine-translation path it judges."""
+    monkeypatch.setattr(D, "is_machine_translation", lambda model: False)
+    calls = {"n": 0}
+
+    def answer(request):
+        calls["n"] += 1
+        return "oui voici le plan complet pour aujourd hui" if calls["n"] % 2 == 1 \
+            else "Yes, it is a faithful translation."
+
+    requests, (_, info) = _drive(
+        _BY["to_dialect_canadian_french"](
+            "Give me the full plan for today.", translate_model="chat-fake",
+            translate_check_model="checker-fake", gen_model=GEN), answer)
+    assert info == "Canadian French"
+    assert [r.model for r in requests] == ["chat-fake", "checker-fake"]
+
+
 # --- de-CH: no sharp s ----------------------------------------------------------
 # Swiss Standard German writes ss (SS) for the sharp s, so a German
 # (Switzerland) piece holding U+00DF or U+1E9E is rejected (reason

@@ -324,14 +324,20 @@ class TestCheck:
         assert len(data["short"]) == _PAIRS
 
     def test_a_rejected_pair_is_asked_for_alone_again_with_the_verdict(self, tmp_path):
+        from redact.llm_pipeline import CHECK_TEMPERATURE
+
         gen, check = _generator(), _checker(["Question 3?"])
         out, data = _run(tmp_path, gen, check)
         again = [r for r in gen.requests if _asks_one(r["messages"])]
         assert len(again) == _UNITS                  # pair 3 of each unit
         assert all("No, Question 3? is not benign." in r["messages"][-1]["content"]
                    for r in again)
-        # The new pair was checked and accepted, and takes the old one's place.
-        assert sum("Again?" in str(r["messages"]) for r in check.requests) == _UNITS
+        # The new pair was checked and accepted, and takes the old one's place;
+        # its check, as the first, at the check temperature.
+        rechecks = [r for r in check.requests if "Again?" in str(r["messages"])]
+        assert len(rechecks) == _UNITS
+        assert {r["temperature"] for r in rechecks} == {CHECK_TEMPERATURE}
+        assert {r["temperature"] for r in check.requests} == {CHECK_TEMPERATURE}
         questions = [pair["prompt"] for pair in data["short"]]
         assert "Question 3?" not in questions and "Again?" in questions
         assert len(questions) == _PAIRS

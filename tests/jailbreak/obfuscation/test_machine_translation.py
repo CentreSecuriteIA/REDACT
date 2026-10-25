@@ -134,6 +134,22 @@ class TestTheChecks:
         _, (_, info) = _run("Good morning.", _Fake())
         assert info == "Swahili"
 
+    @pytest.mark.parametrize(("slug", "label", "name"), [
+        ("chinese", "cmn_Hani", "Chinese"), ("japanese", "jpn_Jpan", "Japanese")])
+    def test_each_language_is_held_to_its_own_median(self, mt, slug, label, name):
+        """A translation at its language's measured median length passes.
+        Chinese and Japanese run to a third and a half of the English, which
+        a median of 1.0 would reject as too short every round."""
+        mt["value"] = label
+        source = "Tell me about the weather in the mountains this week, please."
+        size = round(len(source) * T.MEDIAN_RATIO[slug])
+        fn = getattr(T, f"to_{slug}")
+        _, (text, info) = _drive(
+            fn(source, translate_model=MT, gen_model=GEN),
+            _Fake(forward=lambda text, n: "译" * size))
+        assert (text, info) == ("译" * size, name)
+        assert len(text) / len(source) < T.LENGTH_RATIO_BAND[0]
+
     def test_a_reply_three_times_too_long_is_a_length_outlier(self):
         def long(text, n):
             return text * 3 if n == 1 else f"sw:{text}"

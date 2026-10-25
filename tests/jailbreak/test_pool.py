@@ -568,6 +568,31 @@ def test_uses_translation():
         _kind(translation=False, families={"allow": ["dialect", "encode"]})))
 
 
+def test_a_pool_of_dialects_alone_plans_the_translation_model():
+    """A dialect runs on the translation model: a pool that holds dialects
+    and no translation still needs it, so the run plans it."""
+    from redact.jailbreak.obfuscation.dialect import get_dialect_functions
+    from redact.jailbreak.obfuscation.translation import get_translation_functions
+    from redact.llms.model_config import default_model_for_role
+    from redact.recipe import resolve_role
+
+    assert uses_translation(get_dialect_functions())
+    assert not uses_translation([fn for fn in all_techniques()
+                                 if not {"translation", "dialect"} & set(fn.families)])
+    translations = [fn.__name__ for fn in get_translation_functions()]
+    section = {"adversarial": {"families": {"allow": ["dialect"]},
+                               "techniques": {"deny": translations}},
+               "natural": None}
+    pool = technique_pool(resolve(section, "adversarial"))
+    assert {fn.families[0] for fn in pool} == {"dialect"}
+    assert resolve_role({}, "translation", section) == [
+        default_model_for_role("translation")]
+    # The switch off leaves the dialects out, and the model with them.
+    section["adversarial"].update(
+        translation=False, families={"allow": ["dialect", "structural"]})
+    assert resolve_role({}, "translation", section) == []
+
+
 def test_the_registered_techniques_match_the_spec():
     JPool._check_against_spec(all_techniques())
 
