@@ -308,16 +308,18 @@ _HEAVY = ("to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
 
 
 def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares):
-    """3,000 units in three groups at seed 42: 45 draws of the ten, 3 to 6
-    each. The slot fixes the total, not a count for each encoding, and the
-    total grows with the number of groups, since each group's dealer starts
-    it at 0: 44 or 45 in one group, 45 in three and 46 to 50 in ten (seeds 42
-    to 50), 52 to 56 in 46 uneven groups of 30 to 100 units; the least drawn
-    of the ten is drawn 3 or 4 times in one and three groups, 0 to 3 times in
-    ten. Dealt as encode's members they got 12, two of them never; dealt as a
-    family of their own (a weight of 1), about 200."""
+    """3,000 units in three groups at seed 42: 33 draws of the ten, about 3
+    each. The slot fixes the total, not a count for each encoding; the total
+    grows with the number of groups, since each group's dealer starts it at 0:
+    33 or 34 in one group, 33 or 34 in three and 36 to 40 in ten (seeds 42 to
+    46); the least drawn of the ten is drawn 3 times in one and three groups,
+    0 to 2 times in ten. The spec 1.4 language-mix families (transliteration,
+    code-switching, romanization) joined the obfuscation layer, so the layer's
+    family-first picks are shared among more families and the slot's absolute
+    count fell from 45 to 33. Dealt as encode's members the ten got 12, two of
+    them never; dealt as a family of their own (a weight of 1), about 200."""
     counts = [default_shares[name]["count"] for name in _HEAVY]
-    assert 36 <= sum(counts) <= 60  # noqa: PLR2004
+    assert 28 <= sum(counts) <= 42  # noqa: PLR2004
     assert min(counts) >= 3  # noqa: PLR2004
 
 
@@ -518,12 +520,12 @@ _BUDGETS = [
 # from the first obfuscation pick on (219 of the 240 dealt units; the 200
 # undealt draws ask no dealer and do not move).
 # Spec 1.4 added the four pure transliteration techniques and the ten
-# model-written code-switching techniques (two new obfuscation families at
-# within_layer_order 13 and 12, complexity 2, drawn by the attacks): they join
-# the obfuscation family-first picks, so the group's family counts and the
-# names the dealer breaks a tie among change from the first obfuscation pick
-# on, and the undealt draws gain new families to choose.
-_PINNED_DRAWS = "6c693a477a0e33a99f1a4a6bfc8c57df8f58a341af7a00570ea156665d43b634"
+# model-written code-switching techniques and the ten romanizations (three new
+# obfuscation families at within_layer_order 13, 12 and 14, complexity 2,
+# drawn by the attacks): they join the obfuscation family-first picks, so the
+# group's family counts and the names the dealer breaks a tie among change
+# from the first obfuscation pick on, and the undealt draws gain new families.
+_PINNED_DRAWS = "a4fa39557eb48fc02b596c6d34a7d06010ed830b3682445f1183d1d7420fc975"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

@@ -9,6 +9,7 @@ from .encoding import get_encoding_functions
 from .neutral_container import get_neutral_container_functions
 from .noise import get_noise_functions
 from .payload_split import get_payload_split_functions
+from .romanization import get_romanization_functions
 from .sensitive_words import get_sensitive_words_functions
 from .structural import get_structural_functions
 from .suffixes import get_suffix_functions
@@ -39,4 +40,5 @@ def get_all_obfuscation_functions() -> list[Callable]:
         + get_word_art_functions()
         + get_transliteration_functions()
         + get_code_switching_functions()
+        + get_romanization_functions()
     )

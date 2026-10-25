@@ -1051,3 +1051,24 @@ def test_code_switching_joins_a_wrapper_a_request_or_a_few_shot(other):
     frame may sit with it (not in the manipulation block)."""
     assert _joins("to_code_switch_spanish", other)
     assert _joins(other, "to_code_switch_spanish")
+
+
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_base64", "to_french", "to_russian", "to_lowercase",
+    "to_cyrillic_transliteration", "to_code_switch_spanish"])
+def test_romanization_refuses_the_whole_text_obfuscations_either_way(other):
+    """Romanization is a whole-text language rewrite at the front: it refuses
+    the obfuscation families a translation does, translation, and the other
+    language-mix families, each way."""
+    assert not _joins("to_romanize_hindi", other)
+    assert not _joins(other, "to_romanize_hindi")
+
+
+def test_a_combination_holds_one_romanization():
+    assert not _joins("to_romanize_hindi", "to_romanize_arabic")
+
+
+@pytest.mark.parametrize("other", ["to_json", "to_summarize", "to_fsh_random_short"])
+def test_romanization_joins_a_wrapper_a_request_or_a_few_shot(other):
+    assert _joins("to_romanize_hindi", other)
+    assert _joins(other, "to_romanize_hindi")

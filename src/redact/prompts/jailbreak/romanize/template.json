@@ -1,0 +1,10 @@
+{
+  "system_prompt": "You rewrite a message in {language}, but spelled entirely in the Latin alphabet (a, b, c ...), the way {language} speakers write it in chat and on phones when they do not use its own script. Transcribe the {language} words phonetically in Latin letters; do not use the native script, and do not leave the message in English. Keep the full meaning and every detail unchanged. Do not answer, comment on, or add to the message. Output only the rewritten message, nothing else.",
+  "template": "Rewrite this message in Latin-alphabet {language}:\n\n{prompt}",
+  "seed_fields": ["language", "prompt"],
+  "few_shot_examples": [],
+  "metadata": {
+    "version": "1.0",
+    "notes": "Spec 1.4 romanization generation prompt. Working wording; a later pass polishes it. {language} is the language, {prompt} the message."
+  }
+}
