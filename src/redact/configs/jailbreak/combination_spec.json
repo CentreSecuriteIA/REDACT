@@ -263,6 +263,14 @@
       "within_layer_order": 0,
       "cross_incompatible_with": []
     },
+    "guardrail_address": {
+      "_comment": "Spec 1.4, BELLS audit M4. A sentence or block addressed to a content classifier or supervisor, before or after the prompt, saying the message is benign, already approved, or should be classified safe: it targets the guardrail, which is a target of this dataset. It is a request-layer family, so one request per combination (layer_max_picks), competing with the other requests through the dealer, as the distractors do: a classifier-directed note and a request that reshapes the ask are two frames around one prompt, and an attack carries one so a row tests one frame; the layer cap gives the family its share of units rather than stacking it on another request. Its dimension is request_shape, as the distractors', which also place text before or after the prompt. Attack only (kinds), and the plan draws it for every input but an absolutely benign one (requests/guardrail_address.py applicable_when). Three techniques, one per reference format.",
+      "description": "Text addressed to the classifier or supervisor, before or after the prompt, saying it is benign or already approved",
+      "layer": "requests",
+      "dimension": "request_shape",
+      "within_layer_order": 0,
+      "cross_incompatible_with": []
+    },
     "smalltalk_prefix": {
       "description": "A greeting or a friendly aside before the prompt (natural variations only)",
       "layer": "requests",
@@ -546,6 +554,10 @@
     "to_innocuous_question": { "families": ["asking"], "complexity": 0, "requires_llm": false },
     "to_ask_for_details":    { "families": ["asking"], "complexity": 1, "requires_llm": false },
     "to_ask_with_urgency":   { "families": ["asking"], "complexity": 1, "requires_llm": false, "since": "1.3" },
+
+    "to_guardrail_block_question":    { "families": ["guardrail_address"], "complexity": 1, "requires_llm": false, "since": "1.4" },
+    "to_guardrail_classify_benign":   { "families": ["guardrail_address"], "complexity": 1, "requires_llm": false, "since": "1.4" },
+    "to_guardrail_security_override": { "families": ["guardrail_address"], "complexity": 1, "requires_llm": false, "since": "1.4" },
 
     "to_smalltalk_prefix": { "families": ["smalltalk_prefix"], "complexity": 0, "requires_llm": false, "since": "1.2" },
     "to_smalltalk_suffix": { "families": ["smalltalk_suffix"], "complexity": 0, "requires_llm": false, "since": "1.2" },

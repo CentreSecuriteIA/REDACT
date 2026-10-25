@@ -1733,6 +1733,24 @@ Turning it on changes no row and no plan: a kept plan resumes with it, and
 the table holds the scenes of the units that run from then on. A fresh run
 removes the table with the kind's other files.
 
+**Release note: two techniques from the BELLS guardrail attacks (spec 1.4).**
+The spec moves to `1.4` for two new attack-only obfuscation and request
+techniques ported from the reference `guardrail_attacks`, so a fresh plan
+draws them and a plan kept from before resumes with the growth WARNING.
+`to_letter_spacing` (the `encode` family) puts a space between every two
+characters a reader sees, the reference `space_between_letters`; the default
+attack pool goes to 218 techniques in 30 families, and the eval type denies
+it by name, so the pinned eval pool is unchanged. `guardrail_address` is a
+new request family of three techniques, the reference
+`benign_instruction_for_classifier`: a line or block addressed to a content
+classifier or supervisor, before or after the prompt, saying the message is
+benign or already approved. It is a request-layer family (one request per
+combination, competing with the others), and the plan draws it for every
+input but an absolutely benign one; the eval type does not allow the family,
+so the eval pool is unchanged
+([techniques.md](techniques.md)). A build's jailbreak rows show them in the
+`families` and `layers` columns like any other.
+
 ## The model registry
 
 `configs/llm/models.json` holds one entry per model, keyed by its registry

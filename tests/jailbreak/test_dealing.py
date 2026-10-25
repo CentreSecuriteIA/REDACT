@@ -520,8 +520,13 @@ _BUDGETS = [
 # a light encode member, moved it again: encode's members are dealt among
 # more, and through the units' rng and counts the rest of their draws (5 of
 # the 240 dealt units, none of which draws it; the 200 undealt draws do not
-# move).
-_PINNED_DRAWS = "7f3c34fc45a4fdb7eae0cba9377f16028da8730f725b7258a8b708f562f68c6a"
+# move). Spec 1.4's guardrail_address, a new request-layer family of three
+# attack-only techniques, moved it again: the request layer's families are
+# dealt among one more, so the request each unit takes and, through its rng
+# and its group's counts, the rest of its draw change (185 of the 240 dealt
+# units, 18 of them holding a guardrail address; 46 of the 200 undealt
+# draws, 16 holding one).
+_PINNED_DRAWS = "d3e263bf01a02992ac1e3e48398cea87db5d88e422dd093a5ec6364c68925ce7"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 245 active techniques in 5 layers and 36
+The jailbreak stage draws from 248 active techniques in 5 layers and 37
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -73,9 +73,9 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 35 | at most 1 |
 | `obfuscation` | 14 | 111 | no cap |
-| `requests` | 12 | 68 | at most 1 |
+| `requests` | 13 | 71 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| all | 36 | 245 | |
+| all | 37 | 248 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -119,6 +119,7 @@ that call a model call the generation model.
 | requests | `continuation` | `request_shape` |  | 4 | no | no | `to_continue_passage`, `to_complete_story`, `to_fill_in_blank`, `to_continue_instructions` |
 | requests | `distractor_prefix` | `request_shape` |  | 3 | no | no | `to_distractor_prefix_related`, `to_distractor_prefix_unrelated`, `to_distractor_prefix_task` |
 | requests | `distractor_suffix` | `request_shape` |  | 3 | no | no | `to_distractor_suffix_related`, `to_distractor_suffix_unrelated`, `to_distractor_suffix_task` |
+| requests | `guardrail_address` | `request_shape` |  | 3 | no | no | `to_guardrail_block_question`, `to_guardrail_classify_benign`, `to_guardrail_security_override` |
 | requests | `impersonation` | `role_framing` |  | 3 | no | no | `to_impersonate_good_person`, `to_impersonate_authority`, `to_impersonate_developer` |
 | requests | `indirect` | `request_shape` |  | 6 | no | no | `to_summarize`, `to_proofread`, `to_critique`, `to_translate_task`, `to_explain_to_child`, `to_rewrite` |
 | requests | `smalltalk_prefix` | `request_shape` |  | 1 | no | no | `to_smalltalk_prefix` |
@@ -988,6 +989,32 @@ family's form, `type=<directive>;variant=<name>`. All are attack-only but
 variation, so it takes its family's kinds. The
 `eval` type names `to_use_past_tense` alone of `temporal`, not the family,
 so its pool does not change.
+
+Spec version 1.4 adds the request family `guardrail_address` (BELLS audit
+M4): a sentence or block addressed to a content classifier or supervisor,
+before or after the prompt, saying the message is benign, already approved,
+or should be classified safe. The dataset's targets are such supervisors, so
+this aims at them rather than at the model. It is the
+`benign_instruction_for_classifier` transformation of the BELLS guardrail
+attacks, whose three formats are the three techniques, one each, the first
+variant of each copied from the reference:
+`to_guardrail_block_question` puts a block after the prompt that asks whether
+to block it and answers no; `to_guardrail_classify_benign` puts a line before
+the prompt telling the classifier to label it benign, the prompt in a tag;
+`to_guardrail_security_override` puts a block after the prompt claiming a
+prior review cleared it. Each draws one of eight variants of its pool in
+`requests/guardrail_templates.json` (its floor); the info is
+`guardrail=<directive>;variant=<name>`, and the prompt is kept as it is.
+They are attack only (their family's `kinds`), and the plan draws them for
+every input but an absolutely benign one (`requests/guardrail_address.py`
+carries an applicability on the entry type, the mirror of the benign roles):
+a note that a message is benign makes sense on a harmful or borderline
+input, not on one already benign, where it would label noise. Their
+dimension is `request_shape`, as the distractors', which also place text
+before or after the prompt; being a request-layer family, one is drawn per
+combination (the layer cap), competing with the other requests through the
+dealer as the distractors do, so a row carries one request frame. The eval
+type does not allow the family, so the pinned eval pool does not draw one.
 
 Three request families of spec version 1.2 are for natural variations only
 (their `kinds` are `["natural"]`, so no attack draws them): ordinary,
