@@ -21,7 +21,7 @@ _FAMILY_TAGS = {
                  "payload_split", "word_art", "transliteration"],
     "container": ["structural", "neutral_container"],
     "role_framing": ["persona", "framing", "cognitive", "impersonation",
-                     "benign_role", "persona_template"],
+                     "benign_role", "persona_template", "policy_framing"],
     "request_shape": ["indirect", "distractor_prefix", "distractor_suffix",
                       "continuation", "asking", "temporal", "smalltalk_prefix",
                       "smalltalk_suffix", "guardrail_address", "fallacy",

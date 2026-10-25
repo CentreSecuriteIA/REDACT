@@ -7,6 +7,8 @@
   "hacking/framing_templates.json:no_moral_constraints": {"family": "framing", "variants": 8, "floor": 8},
   "hacking/framing_templates.json:noble_goal": {"family": "framing", "variants": 8, "floor": 8},
   "hacking/persona_templates.json:mechanics": {"family": "persona_template", "variants": 6, "floor": 6},
+  "hacking/policy_framing_templates.json:policy_puppetry": {"family": "policy_framing", "variants": 9, "floor": 8},
+  "hacking/policy_framing_templates.json:skeleton_key": {"family": "policy_framing", "variants": 8, "floor": 8},
   "manipulation/fake_turns_templates.json:fake_assistant_turn": {"family": "fake_turns", "variants": 8, "floor": 8},
   "manipulation/fake_turns_templates.json:fake_history": {"family": "fake_turns", "variants": 8, "floor": 8},
   "manipulation/fake_turns_templates.json:fake_system_turn": {"family": "fake_turns", "variants": 8, "floor": 8},

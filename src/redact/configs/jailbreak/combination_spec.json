@@ -366,6 +366,14 @@
       "dimension": "request_shape",
       "within_layer_order": 0,
       "cross_incompatible_with": []
+    },
+    "policy_framing": {
+      "_comment": "Spec 1.5. Two pure hacking-layer frames: to_policy_puppetry (HiddenLayer 2025) sets the prompt inside a fake policy or config file (XML/INI/JSON/YAML) with role-play that redefines the assistant's output rules; to_skeleton_key (Microsoft 2024, single-turn form) wraps the prompt in a request to augment the guidelines and warn instead of refuse. A role_framing family, as persona/framing/cognitive: it sets up a role and a rule-set around the request. One hacking technique per combination (layer_max_picks). cross_incompatible_with fsh, dap, fake_turns and impersonation (bound from this family's side), the same reason as persona/cognitive: a hacking-layer social-engineering frame and a manipulation-layer one (few-shot examples or invented turns) are two frames around one prompt, so an attack carries one; and a redefined-identity policy frame plus an impersonation claim would assert two conflicting identities. It does not refuse the obfuscations: a policy wrapper tolerates an obfuscated or request-framed payload inside it.",
+      "description": "The prompt set inside a fake policy/config file with role-play, or wrapped in a request to augment the rules and warn not refuse (Policy Puppetry, Skeleton Key)",
+      "layer": "hacking",
+      "dimension": "role_framing",
+      "within_layer_order": 0,
+      "cross_incompatible_with": ["fsh", "dap", "fake_turns", "impersonation"]
     }
   },
 
@@ -559,6 +567,9 @@
     "to_penalty_game_persona_template":       { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.4" },
     "to_tagged_speaker_persona_template":     { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.4" },
     "to_character_reset_persona_template":    { "families": ["persona_template"], "complexity": 2, "requires_llm": false, "since": "1.4" },
+
+    "to_policy_puppetry": { "families": ["policy_framing"], "complexity": 2, "requires_llm": false, "since": "1.5" },
+    "to_skeleton_key":    { "families": ["policy_framing"], "complexity": 2, "requires_llm": false, "since": "1.5" },
 
     "to_fsh_random_short":   { "families": ["fsh"], "complexity": 2, "requires_llm": false, "requires_benign": true },
     "to_fsh_random_long":    { "families": ["fsh"], "complexity": 2, "requires_llm": false, "requires_benign": true },

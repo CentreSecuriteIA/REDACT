@@ -23,24 +23,24 @@ Contents:
 | What | Count |
 |---|---|
 | Spec version | 1.5 |
-| Techniques registered | 323 |
-| Active techniques | 316 |
+| Techniques registered | 325 |
+| Active techniques | 318 |
 | Retired techniques | 7 |
 | Layers | 5 |
-| Families with an active technique | 42 |
-| Families in the spec | 42 |
-| Compatible pairs of active techniques | 36874 |
-| Variant pools | 96 |
-| Template variants | 699 |
+| Families with an active technique | 43 |
+| Families in the spec | 43 |
+| Compatible pairs of active techniques | 37376 |
+| Variant pools | 98 |
+| Template variants | 716 |
 | Model prompt files | 50 |
 | Jailbreak prompt steps | 29 |
-| Pool `adversarial` | 286 |
-| Pool `adversarial_rewrite` | 302 |
-| Pool `adversarial_no_translation` | 256 |
+| Pool `adversarial` | 288 |
+| Pool `adversarial_rewrite` | 304 |
+| Pool `adversarial_no_translation` | 258 |
 | Pool `natural` | 96 |
 | Pool `natural_translation` | 126 |
 | Pool `eval.adversarial` | 126 |
-| Pool `training.adversarial` | 286 |
+| Pool `training.adversarial` | 288 |
 | Pool `training.natural` | 96 |
 
 ## Layers
@@ -50,7 +50,7 @@ Applied in this order:
 | # | Layer | Cap | Rate | Off by default | Families | Active | Retired | Variants |
 |---|---|---|---|---|---|---|---|---|
 | 1 | `rewrite` | 1 | 0 | yes | 3 | 16 | 0 | 0 |
-| 2 | `hacking` | 1 | 0.5 | no | 4 | 47 | 4 | 46 |
+| 2 | `hacking` | 1 | 0.5 | no | 5 | 49 | 4 | 63 |
 | 3 | `obfuscation` | none |  | no | 18 | 166 | 3 | 216 |
 | 4 | `requests` | 1 | 0.7 | no | 14 | 72 | 0 | 413 |
 | 5 | `manipulation` | 1 | 0.33 | no | 3 | 15 | 0 | 24 |
@@ -58,7 +58,7 @@ Applied in this order:
 Order within a layer (`within_layer_order`):
 
 - `rewrite`: `model_distractors` 0, `persuasion` 0, `tense_rewrite` 0
-- `hacking`: `cognitive` 0, `framing` 0, `persona` 0, `persona_template` 0
+- `hacking`: `cognitive` 0, `framing` 0, `persona` 0, `persona_template` 0, `policy_framing` 0
 - `obfuscation`: `translation` 10, `dialect` 11, `code_switching` 12, `transliteration` 13, `romanization` 14, `typos` 20, `casual_writing` 30, `noise` 35, `sensitive_words` 40, `wording` 45, `tokenbreak` 50, `word_art` 55, `suffixes` 60, `payload_split` 65, `encode` 70, `neutral_container` 80, `structural` 80, `ascii_art` 90
 - `requests`: `answer_format` 0, `answer_language` 0, `asking` 0, `benign_role` 0, `continuation` 0, `distractor_prefix` 0, `distractor_suffix` 0, `fallacy` 0, `guardrail_address` 0, `impersonation` 0, `indirect` 0, `smalltalk_prefix` 0, `smalltalk_suffix` 0, `temporal` 0
 - `manipulation`: `dap` 0, `fake_turns` 0, `fsh` 0
@@ -105,6 +105,7 @@ Active and retired count by first family.
 | `framing` | hacking | 0 | role_framing | adv | 5 | 0 | 0 | 40 | 8 |  |  | `fsh`, `dap` | `ascii_art`, `dap`, `fake_turns`, `fsh` |  |
 | `persona` | hacking | 0 | role_framing | adv | 14 | 4 | 0 | 0 |  | check, generation | 3-9 (scenario) | `fsh`, `dap`, `impersonation` | `ascii_art`, `dap`, `fake_turns`, `fsh` |  |
 | `persona_template` | hacking | 0 | role_framing | adv | 23 | 0 | 0 | 6 | 6 |  |  | `fsh`, `dap`, `ascii_art`, `impersonation` | `fake_turns` |  |
+| `policy_framing` | hacking | 0 | role_framing | adv | 2 | 0 | 0 | 17 | 8 |  |  | `fsh`, `dap`, `fake_turns`, `impersonation` |  |  |
 | `translation` | obfuscation | 10 | language | adv nat | 24 | 0 | 0 | 0 |  | generation, translation | 2-12 (translate) | `ascii_art`, `encode`, `sensitive_words`, `tokenbreak`, `word_art`, `wording`, `typos`, `casual_writing`, `noise`, `payload_split` | `dialect`, `code_switching`, `transliteration`, `romanization`, `wording`, `ascii_art` | yes |
 | `dialect` | obfuscation | 11 | language | adv nat | 6 | 0 | 0 | 0 |  | generation, translation | 2-12 (translate) | `ascii_art`, `encode`, `sensitive_words`, `tokenbreak`, `word_art`, `wording`, `typos`, `casual_writing`, `noise`, `payload_split`, `translation`, `transliteration`, `code_switching`, `romanization` |  |  |
 | `code_switching` | obfuscation | 12 | language | adv nat | 10 | 0 | 0 | 0 |  | check, generation | 2-4 (meaning) | `ascii_art`, `encode`, `sensitive_words`, `tokenbreak`, `word_art`, `wording`, `typos`, `casual_writing`, `noise`, `payload_split`, `translation`, `transliteration` | `dialect`, `romanization` |  |
@@ -132,63 +133,64 @@ Active and retired count by first family.
 | `distractor_suffix` | requests | 0 | request_shape | adv | 3 | 0 | 0 | 24 | 8 |  |  |  | `model_distractors` |  |
 | `fallacy` | requests | 0 | request_shape | adv | 1 | 0 | 0 | 9 | 8 |  |  |  |  |  |
 | `guardrail_address` | requests | 0 | request_shape | adv | 3 | 0 | 0 | 24 | 8 |  |  |  |  |  |
-| `impersonation` | requests | 0 | role_framing | adv | 3 | 0 | 0 | 24 | 8 |  |  |  | `persuasion`, `cognitive`, `persona`, `persona_template` |  |
+| `impersonation` | requests | 0 | role_framing | adv | 3 | 0 | 0 | 24 | 8 |  |  |  | `persuasion`, `cognitive`, `persona`, `persona_template`, `policy_framing` |  |
 | `indirect` | requests | 0 | request_shape | adv nat | 6 | 0 | 0 | 48 | 8 |  |  | `fsh`, `dap` | `dap`, `fake_turns`, `fsh` |  |
 | `smalltalk_prefix` | requests | 0 | request_shape | nat | 1 | 0 | 0 | 20 | 20 |  |  |  |  |  |
 | `smalltalk_suffix` | requests | 0 | request_shape | nat | 1 | 0 | 0 | 20 | 20 |  |  |  |  |  |
 | `temporal` | requests | 0 | request_shape | adv | 3 | 0 | 0 | 24 | 8 |  |  |  | `tense_rewrite` |  |
-| `dap` | manipulation | 0 | example_priming | adv | 6 | 0 | 0 | 0 |  | benign pairs, generation |  | `continuation`, `indirect`, `framing`, `persona`, `cognitive` | `cognitive`, `framing`, `persona`, `persona_template`, `ascii_art`, `continuation`, `indirect` |  |
-| `fake_turns` | manipulation | 0 | example_priming | adv | 3 | 0 | 0 | 24 | 8 |  |  | `continuation`, `indirect`, `framing`, `persona`, `cognitive`, `persona_template`, `structural`, `neutral_container` | `word_art`, `payload_split` |  |
-| `fsh` | manipulation | 0 | example_priming | adv | 6 | 0 | 0 | 0 |  | benign pairs, generation |  | `continuation`, `indirect`, `framing`, `persona`, `cognitive` | `cognitive`, `framing`, `persona`, `persona_template`, `ascii_art`, `continuation`, `indirect` |  |
+| `dap` | manipulation | 0 | example_priming | adv | 6 | 0 | 0 | 0 |  | benign pairs, generation |  | `continuation`, `indirect`, `framing`, `persona`, `cognitive` | `cognitive`, `framing`, `persona`, `persona_template`, `policy_framing`, `ascii_art`, `continuation`, `indirect` |  |
+| `fake_turns` | manipulation | 0 | example_priming | adv | 3 | 0 | 0 | 24 | 8 |  |  | `continuation`, `indirect`, `framing`, `persona`, `cognitive`, `persona_template`, `structural`, `neutral_container` | `policy_framing`, `word_art`, `payload_split` |  |
+| `fsh` | manipulation | 0 | example_priming | adv | 6 | 0 | 0 | 0 |  | benign pairs, generation |  | `continuation`, `indirect`, `framing`, `persona`, `cognitive` | `cognitive`, `framing`, `persona`, `persona_template`, `policy_framing`, `ascii_art`, `continuation`, `indirect` |  |
 
 ## Family matrix
 
 Every pair of active members: ✓ always, ◐ sometimes, ✗ never, = same, · n/a.
 
-| # | Family | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | `model_distractors` | = | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 2 | `persuasion` | ✗ | = | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 3 | `tense_rewrite` | ✗ | ✗ | = | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ |
-| 4 | `cognitive` | ✓ | ✓ | ✓ | = | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
-| 5 | `framing` | ✓ | ✓ | ✓ | ✗ | = | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
-| 6 | `persona` | ✓ | ✓ | ✓ | ✗ | ✗ | = | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
-| 7 | `persona_template` | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | = | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
-| 8 | `translation` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
-| 9 | `dialect` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 10 | `code_switching` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 11 | `transliteration` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 12 | `romanization` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 13 | `typos` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ◐ |
-| 14 | `casual_writing` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | = | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 15 | `noise` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 16 | `sensitive_words` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | = | ✗ | ✗ | ✗ | ✓ | ◐ | ◐ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 17 | `wording` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ | = | ✗ | ✗ | ✓ | ✓ | ◐ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
-| 18 | `tokenbreak` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ | ✗ | = | ✗ | ✓ | ✓ | ◐ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 19 | `word_art` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | = | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
-| 20 | `suffixes` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | = | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 21 | `payload_split` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✗ | ✓ | = | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
-| 22 | `encode` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ◐ | ◐ | ◐ | ✗ | ✓ | ✗ | = | ✓ | ✓ | ◐ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ◐ | ◐ |
-| 23 | `neutral_container` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | = | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
-| 24 | `structural` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | = | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
-| 25 | `ascii_art` | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ◐ | ✓ | ✗ | ◐ | ✗ | ◐ | ✗ | ◐ | ✗ | ✗ | = | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
-| 26 | `answer_format` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
-| 27 | `answer_language` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
-| 28 | `asking` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
-| 29 | `benign_role` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
-| 30 | `continuation` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| 31 | `distractor_prefix` | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
-| 32 | `distractor_suffix` | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
-| 33 | `fallacy` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
-| 34 | `guardrail_address` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
-| 35 | `impersonation` | ✓ | ✗ | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
-| 36 | `indirect` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| 37 | `smalltalk_prefix` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✓ | ✓ | ✓ |
-| 38 | `smalltalk_suffix` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✓ | ✓ | ✓ |
-| 39 | `temporal` | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✓ | ✓ | ✓ |
-| 40 | `dap` | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ | ✓ | ✗ | ◐ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | = | ✗ | ✗ |
-| 41 | `fake_turns` | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ | ✓ | ✗ | ◐ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | = | ✗ |
-| 42 | `fsh` | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ | ✓ | ✗ | ◐ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✗ | = |
+| # | Family | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42 | 43 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | `model_distractors` | = | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 2 | `persuasion` | ✗ | = | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 3 | `tense_rewrite` | ✗ | ✗ | = | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ |
+| 4 | `cognitive` | ✓ | ✓ | ✓ | = | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
+| 5 | `framing` | ✓ | ✓ | ✓ | ✗ | = | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
+| 6 | `persona` | ✓ | ✓ | ✓ | ✗ | ✗ | = | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
+| 7 | `persona_template` | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | = | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
+| 8 | `policy_framing` | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | = | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
+| 9 | `translation` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
+| 10 | `dialect` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 11 | `code_switching` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 12 | `transliteration` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 13 | `romanization` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 14 | `typos` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ◐ |
+| 15 | `casual_writing` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | = | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 16 | `noise` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 17 | `sensitive_words` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | = | ✗ | ✗ | ✗ | ✓ | ◐ | ◐ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 18 | `wording` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ | = | ✗ | ✗ | ✓ | ✓ | ◐ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
+| 19 | `tokenbreak` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ | ✗ | = | ✗ | ✓ | ✓ | ◐ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 20 | `word_art` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | = | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
+| 21 | `suffixes` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | = | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 22 | `payload_split` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✗ | ✓ | = | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
+| 23 | `encode` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ◐ | ◐ | ◐ | ✗ | ✓ | ✗ | = | ✓ | ✓ | ◐ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ◐ | ◐ |
+| 24 | `neutral_container` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | = | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| 25 | `structural` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | = | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| 26 | `ascii_art` | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ◐ | ✓ | ✗ | ◐ | ✗ | ◐ | ✗ | ◐ | ✗ | ✗ | = | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
+| 27 | `answer_format` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| 28 | `answer_language` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| 29 | `asking` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| 30 | `benign_role` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| 31 | `continuation` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| 32 | `distractor_prefix` | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| 33 | `distractor_suffix` | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| 34 | `fallacy` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| 35 | `guardrail_address` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| 36 | `impersonation` | ✓ | ✗ | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| 37 | `indirect` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| 38 | `smalltalk_prefix` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✗ | ✓ | ✓ | ✓ |
+| 39 | `smalltalk_suffix` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✗ | ✓ | ✓ | ✓ |
+| 40 | `temporal` | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | = | ✓ | ✓ | ✓ |
+| 41 | `dap` | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ | ✓ | ✗ | ◐ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | = | ✗ | ✗ |
+| 42 | `fake_turns` | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ | ✓ | ✗ | ◐ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | = | ✗ |
+| 43 | `fsh` | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ | ✓ | ✗ | ◐ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✗ | = |
 
 ## Techniques
 
@@ -203,22 +205,22 @@ Never with: whole families; `some`: in part.
 
 | Technique | Families | Kinds | Cx | Calls | Tags | Variants | Prompts | Pools | Since | Combines with | Never with |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| `to_model_distractor_prefix` | `model_distractors` | adv | 2 | 1-3 |  |  | 1 | R | 1.3 | 293 | rest of `rewrite` (L), `ascii_art` (F), `distractor_prefix` (F), `distractor_suffix` (F) |
-| `to_model_distractor_suffix` | `model_distractors` | adv | 2 | 1-3 |  |  | 1 | R | 1.3 | 293 | rest of `rewrite` (L), `ascii_art` (F), `distractor_prefix` (F), `distractor_suffix` (F) |
-| `to_persuade_authority_endorsement` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 296 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
-| `to_persuade_commitment_consistency` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 296 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
-| `to_persuade_emotional_appeal` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 296 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
-| `to_persuade_evidence_based` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 296 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
-| `to_persuade_expert_endorsement` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 296 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
-| `to_persuade_framing` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 296 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
-| `to_persuade_logical_appeal` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 296 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
-| `to_persuade_priming` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 296 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
-| `to_persuade_reciprocity` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 296 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
-| `to_persuade_relationship_leverage` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 296 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
-| `to_persuade_scarcity` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 296 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
-| `to_persuade_social_proof` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 296 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
-| `to_rewrite_in_future_tense` | `tense_rewrite` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 297 | rest of `rewrite` (L), `temporal` (F) |
-| `to_rewrite_in_past_tense` | `tense_rewrite` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 297 | rest of `rewrite` (L), `temporal` (F) |
+| `to_model_distractor_prefix` | `model_distractors` | adv | 2 | 1-3 |  |  | 1 | R | 1.3 | 295 | rest of `rewrite` (L), `ascii_art` (F), `distractor_prefix` (F), `distractor_suffix` (F) |
+| `to_model_distractor_suffix` | `model_distractors` | adv | 2 | 1-3 |  |  | 1 | R | 1.3 | 295 | rest of `rewrite` (L), `ascii_art` (F), `distractor_prefix` (F), `distractor_suffix` (F) |
+| `to_persuade_authority_endorsement` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 298 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
+| `to_persuade_commitment_consistency` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 298 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
+| `to_persuade_emotional_appeal` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 298 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
+| `to_persuade_evidence_based` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 298 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
+| `to_persuade_expert_endorsement` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 298 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
+| `to_persuade_framing` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 298 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
+| `to_persuade_logical_appeal` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 298 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
+| `to_persuade_priming` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 298 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
+| `to_persuade_reciprocity` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 298 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
+| `to_persuade_relationship_leverage` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 298 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
+| `to_persuade_scarcity` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 298 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
+| `to_persuade_social_proof` | `persuasion` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 298 | rest of `rewrite` (L), `ascii_art` (F), `impersonation` (F) |
+| `to_rewrite_in_future_tense` | `tense_rewrite` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 299 | rest of `rewrite` (L), `temporal` (F) |
+| `to_rewrite_in_past_tense` | `tense_rewrite` | adv | 2 | 2-4 (preserve) |  |  | 2 | R | 1.3 | 299 | rest of `rewrite` (L), `temporal` (F) |
 
 Refused partners, where few:
 
@@ -294,180 +296,182 @@ Refused partners, where few:
 | `to_terminal_simulator_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 246 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
 | `to_unfiltered_oracle_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.3 | 246 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
 | `to_worried_parent_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 246 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_policy_puppetry` | `policy_framing` | adv | 2 |  |  | 9 |  | A | 1.5 | 251 | rest of `hacking` (L), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_skeleton_key` | `policy_framing` | adv | 2 |  |  | 8 |  | A | 1.5 | 251 | rest of `hacking` (L), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F) |
 
 ### Layer `obfuscation`
 
 | Technique | Families | Kinds | Cx | Calls | Tags | Variants | Prompts | Pools | Since | Combines with | Never with |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| `to_amharic` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.3 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_arabic` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_bengali` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_chinese` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.3 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_croatian` | `translation` | adv nat | 1 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_czech` | `translation` | adv nat | 1 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_french` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_german` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_greek` | `translation` | adv nat | 1 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_hindi` | `translation` | adv nat | 1 | 2-12 (translate) |  |  | 5 | A T | 1.3 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_hmong` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.3 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_japanese` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_javanese` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_khmer` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_nepali` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_russian` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_scots_gaelic` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_spanish` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_swahili` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_thai` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_turkish` | `translation` | adv nat | 1 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_vietnamese` | `translation` | adv nat | 1 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_yoruba` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_zulu` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 172 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
-| `to_dialect_brazilian_portuguese` | `dialect` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 187 | `translation` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_dialect_canadian_french` | `dialect` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 187 | `translation` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_dialect_egyptian_arabic` | `dialect` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 187 | `translation` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_dialect_german_switzerland` | `dialect` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 187 | `translation` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_dialect_mexican_spanish` | `dialect` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 187 | `translation` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_dialect_traditional_chinese` | `dialect` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 187 | `translation` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_code_switch_arabic` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_code_switch_chinese` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_code_switch_french` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_code_switch_german` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_code_switch_hindi` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_code_switch_japanese` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_code_switch_portuguese` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_code_switch_russian` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_code_switch_spanish` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_code_switch_swahili` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_arabic_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N E | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_cyrillic_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N E | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_devanagari_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N E | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_greek_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N E | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_romanize_arabic` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_romanize_bengali` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_romanize_gujarati` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_romanize_hindi` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_romanize_marathi` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_romanize_nepali` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_romanize_punjabi` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_romanize_tamil` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_romanize_telugu` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_romanize_urdu` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_rewrite_with_typos_high` | `typos` | adv | 3 | 2-4 (typos) |  |  | 2 | A | 1.0 | 242 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F), some `dap` (2 of 6, T), some `fsh` (2 of 6, T) |
-| `to_rewrite_with_typos_insane` | `typos` | adv | 3 | 2-4 (typos) |  |  | 2 | A | 1.0 | 242 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F), some `dap` (2 of 6, T), some `fsh` (2 of 6, T) |
-| `to_rewrite_with_typos_low` | `typos` | adv nat | 2 | 2-4 (typos) |  |  | 2 | A N | 1.0 | 242 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F), some `dap` (2 of 6, T), some `fsh` (2 of 6, T) |
-| `to_rewrite_with_typos_medium` | `typos` | adv nat | 2 | 2-4 (typos) |  |  | 2 | A N | 1.0 | 242 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F), some `dap` (2 of 6, T), some `fsh` (2 of 6, T) |
-| `to_abbreviations` | `casual_writing` | adv nat | 1 |  | applies |  |  | N | 1.0 | 241 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
-| `to_doubled_punctuation` | `casual_writing` | adv nat | 0 |  |  |  |  | N | 1.0 | 241 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
-| `to_doubled_spaces` | `casual_writing` | adv nat | 0 |  |  |  |  | N | 1.0 | 241 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
-| `to_dropped_punctuation` | `casual_writing` | adv nat | 0 |  |  |  |  | N | 1.0 | 241 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
-| `to_dropped_spaces` | `casual_writing` | adv nat | 1 |  |  |  |  | N | 1.0 | 241 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
-| `to_lowercase` | `casual_writing` | adv nat | 0 |  |  |  |  | N | 1.0 | 241 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
-| `to_no_sentence_capitals` | `casual_writing` | adv nat | 0 |  |  |  |  | N | 1.0 | 241 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
-| `to_stripped_accents` | `casual_writing` | adv nat | 0 |  | applies |  |  | N | 1.0 | 241 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
-| `to_uppercase` | `casual_writing` | adv nat | 0 |  |  |  |  | N | 1.0 | 241 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
-| `to_emoji_sprinkle_high` | `noise` | adv | 1 |  |  |  |  | A | 1.2 | 236 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `ascii_art` (T) |
-| `to_emoji_sprinkle_low` | `noise` | adv nat | 1 |  |  |  |  | A N | 1.2 | 236 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `ascii_art` (T) |
-| `to_emoji_sprinkle_medium` | `noise` | adv nat | 1 |  |  |  |  | A N | 1.2 | 236 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `ascii_art` (T) |
-| `to_keyboard_typos_high` | `noise` | adv | 1 |  | latin |  |  | A | 1.2 | 237 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
-| `to_keyboard_typos_low` | `noise` | adv nat | 1 |  | latin |  |  | A N | 1.2 | 237 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
-| `to_keyboard_typos_medium` | `noise` | adv nat | 1 |  | latin |  |  | A N | 1.2 | 237 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
-| `to_random_capitals_high` | `noise` | adv | 1 |  | latin |  |  | A | 1.2 | 237 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
-| `to_random_capitals_low` | `noise` | adv nat | 1 |  | latin |  |  | A N | 1.2 | 237 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
-| `to_random_capitals_medium` | `noise` | adv nat | 1 |  | latin |  |  | A N | 1.2 | 237 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
-| `to_scrambled_letters_high` | `noise` | adv | 1 |  | latin |  |  | A | 1.2 | 237 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
-| `to_scrambled_letters_low` | `noise` | adv nat | 1 |  | latin |  |  | A N | 1.2 | 237 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
-| `to_scrambled_letters_medium` | `noise` | adv nat | 1 |  | latin |  |  | A N | 1.2 | 237 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
-| `to_sensitive_words_encode_ascii` | `sensitive_words`, `encode` | adv | 3 | 1 (word_list) | heavy |  | 1 | A | 1.0 | 212 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
-| `to_sensitive_words_encode_base64` | `sensitive_words`, `encode` | adv | 3 | 1 (word_list) | heavy |  | 1 | A | 1.0 | 212 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
-| `to_sensitive_words_encode_leetspeak_advanced` | `sensitive_words`, `encode` | adv | 2 | 1 (word_list) | light latin |  | 1 | A | 1.0 | 212 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
-| `to_sensitive_words_encode_leetspeak_basic` | `sensitive_words`, `encode` | adv | 1 | 1 (word_list) | light latin |  | 1 | A | 1.0 | 212 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
-| `to_sensitive_words_encode_leetspeak_intermediate` | `sensitive_words`, `encode` | adv | 2 | 1 (word_list) | light latin |  | 1 | A | 1.0 | 212 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
-| `to_sensitive_words_encode_rot13` | `sensitive_words`, `encode` | adv | 2 | 1 (word_list) | light latin |  | 1 | A | 1.0 | 212 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
-| `to_sensitive_words_encode_rot18` | `sensitive_words`, `encode` | adv | 2 | 1 (word_list) | light latin |  | 1 | A | 1.0 | 212 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
-| `to_sensitive_words_encode_rot47` | `sensitive_words`, `encode` | adv | 2 | 1 (word_list) | light latin |  | 1 | A | 1.0 | 212 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
-| `to_sensitive_words_encode_separator` | `sensitive_words`, `encode` | adv | 2 | 1 (word_list) | light |  | 1 | A | 1.0 | 212 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
-| `to_sensitive_words_encode_unicode` | `sensitive_words`, `encode` | adv | 3 | 1 (word_list) | heavy |  | 1 | A | 1.0 | 212 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
-| `to_sensitive_words_hyphen` (retired 1.1) | `sensitive_words` | adv | 2 | 1 (word_list) |  |  | 1 |  | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), some `encode` (10 of 38, S) |
-| `to_sensitive_words_split` | `sensitive_words` | adv | 2 | 1 (word_list) |  |  | 1 | A | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), some `encode` (10 of 38, S) |
-| `to_sensitive_words_star` (retired 1.1) | `sensitive_words` | adv | 2 | 1 (word_list) |  |  | 1 |  | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), some `encode` (10 of 38, S) |
-| `to_sensitive_words_underscore` (retired 1.1) | `sensitive_words` | adv | 2 | 1 (word_list) |  |  | 1 |  | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), some `encode` (10 of 38, S) |
-| `to_sensitive_words_variables` | `sensitive_words` | adv | 3 | 1 (word_list) |  |  | 1 | A | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), some `encode` (10 of 38, S) |
-| `to_synonym_substitution` | `sensitive_words` | adv | 2 | 1-11 (word_list) |  |  | 2 | A | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), some `encode` (10 of 38, S) |
-| `to_pseudonym_substitution` | `wording` | adv | 2 | 1-21 (word_list) |  | 8 | 2 | A | 1.3 | 227 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `sensitive_words` (F), `tokenbreak` (F), `word_art` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), some `encode` (10 of 38, F) |
-| `to_word_game` | `wording` | adv | 2 | 1-21 (word_list) |  | 8 | 2 | A | 1.3 | 227 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `sensitive_words` (F), `tokenbreak` (F), `word_art` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), some `encode` (10 of 38, F) |
-| `to_tokenbreak_delimiter` | `tokenbreak` | adv | 2 | 1 (word_list) |  |  | 1 | A | 1.0 | 242 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `sensitive_words` (F), `wording` (F), `word_art` (F), some `encode` (11 of 38, FT) |
-| `to_tokenbreak_prepend` | `tokenbreak` | adv | 2 | 1 (word_list) |  |  | 1 | A | 1.0 | 242 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `sensitive_words` (F), `wording` (F), `word_art` (F), some `encode` (11 of 38, FT) |
-| `to_tokenbreak_split` | `tokenbreak` | adv | 2 | 1 (word_list) |  |  | 1 | A | 1.0 | 241 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `sensitive_words` (F), `wording` (F), `word_art` (F), `ascii_art` (T), some `encode` (11 of 38, FT) |
-| `to_word_art` | `word_art` | adv | 3 | 1 (word_list) |  | 8 | 1 | A | 1.3 | 188 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `payload_split` (F), `encode` (F), `neutral_container` (F), `structural` (F), `ascii_art` (F), `dap` (M), `fake_turns` (FM), `fsh` (M) |
-| `to_adversarial_suffix_emoji` | `suffixes` | adv nat | 1 |  |  |  |  | A N | 1.0 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_fragments` | `suffixes` | adv | 1 |  |  |  |  | A | 1.0 | 288 |  |
-| `to_adversarial_suffix_gcg_jbb_llama2_65` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_llama2_75` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_2` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_26` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_32` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_38` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_45` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_54` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_6` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_76` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_77` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_90` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_95` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_97` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_1` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_48` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_78` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_86` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_repo_demo_llama2` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_site_example` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_smoothllm_llama2_1` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_smoothllm_llama2_2` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_smoothllm_vicuna_1` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_smoothllm_vicuna_2` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 287 | `ascii_art` (T) |
-| `to_adversarial_suffix_punctuation` | `suffixes` | adv nat | 1 |  |  |  |  | A N | 1.0 | 288 |  |
-| `to_adversarial_suffix_unicode` | `suffixes` | adv | 1 |  |  |  |  | A | 1.0 | 287 | `ascii_art` (T) |
-| `to_payload_split` | `payload_split` | adv | 2 |  |  | 8 |  | A | 1.3 | 205 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (FM), `fsh` (M), some `sensitive_words` (10 of 13, F) |
-| `to_payload_split_semantic` | `payload_split` | adv | 2 | 1-3 |  | 8 | 1 | A | 1.3 | 205 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (FM), `fsh` (M), some `sensitive_words` (10 of 13, F) |
-| `to_ascii_ordinal` | `encode` | adv | 3 |  | heavy | 4 opt |  | A E | 1.0 | 204 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_atbash` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.2 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_base32` | `encode` | adv | 3 |  | heavy | 4 opt |  | A | 1.2 | 204 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_base64` | `encode` | adv | 3 |  | heavy | 4 opt |  | A E | 1.0 | 204 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_base85` | `encode` | adv | 3 |  | heavy | 4 opt |  | A | 1.2 | 204 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_binary` | `encode` | adv | 3 |  | heavy | 4 opt |  | A | 1.2 | 204 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_braille` | `encode` | adv | 3 |  | heavy latin | 4 opt |  | A E | 1.0 | 204 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_caesar_cipher` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.2 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_fullwidth` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.2 | 219 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_hex` | `encode` | adv | 3 |  | heavy | 4 opt |  | A | 1.2 | 204 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_html_entities` | `encode` | adv | 3 |  | heavy | 4 opt |  | A | 1.2 | 204 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_leetspeak_advanced` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.0 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_leetspeak_basic` | `encode` | adv nat | 1 |  | light latin |  |  | A N | 1.0 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_leetspeak_intermediate` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.0 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_letter_spacing` | `encode` | adv | 2 |  | light | 4 opt |  | A E | 1.4 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_lookalike_letters` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.2 | 219 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_math_styled` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.2 | 219 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_morse` | `encode` | adv | 3 |  | heavy latin | 4 opt |  | A E | 1.0 | 204 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_reversed_characters` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.2 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_reversed_word_order` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.2 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_reversed_words` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.2 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_rot13` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.0 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_rot18` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.0 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_rot47` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.0 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_separator` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.0 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_unicode_escape` | `encode` | adv | 3 |  | heavy | 4 opt |  | A E | 1.0 | 204 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_url_encoding` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.2 | 220 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_zero_width_noise` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.2 | 216 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `tokenbreak` (T), `word_art` (F), `payload_split` (F), `ascii_art` (T), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_code_comment` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 302 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_csv_row` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 302 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_email_message` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 302 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_log_entry` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 302 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_transcript_line` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 302 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_yaml_document` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 302 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_json` | `structural` | adv | 2 |  |  | 10 |  | A E | 1.0 | 302 | `word_art` (F), `neutral_container` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_markdown` | `structural` | adv | 2 |  |  | 9 |  | A E | 1.0 | 302 | `word_art` (F), `neutral_container` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_xml` | `structural` | adv | 2 |  |  | 9 |  | A E | 1.0 | 302 | `word_art` (F), `neutral_container` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_ascii_art` | `ascii_art` | adv | 2 |  |  |  |  | A E | 1.0 | 127 | `model_distractors` (F), `persuasion` (F), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `word_art` (F), `payload_split` (F), `neutral_container` (F), `structural` (F), `dap` (FM), `fake_turns` (M), `fsh` (FM), some `noise` (3 of 12, T), some `tokenbreak` (1 of 3, T), some `suffixes` (26 of 28, T), some `encode` (14 of 38, T) |
+| `to_amharic` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.3 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_arabic` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_bengali` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_chinese` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.3 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_croatian` | `translation` | adv nat | 1 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_czech` | `translation` | adv nat | 1 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_french` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_german` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_greek` | `translation` | adv nat | 1 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_hindi` | `translation` | adv nat | 1 | 2-12 (translate) |  |  | 5 | A T | 1.3 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_hmong` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.3 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_japanese` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_javanese` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_khmer` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_nepali` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_russian` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_scots_gaelic` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_spanish` | `translation` | adv nat | 0 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_swahili` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_thai` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_turkish` | `translation` | adv nat | 1 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_vietnamese` | `translation` | adv nat | 1 | 2-12 (translate) |  |  | 5 | A T | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_yoruba` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_zulu` | `translation` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T E | 1.0 | 174 | `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), as request obfuscation: `neutral_container`, `structural`, `suffixes` (R) |
+| `to_dialect_brazilian_portuguese` | `dialect` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 189 | `translation` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_dialect_canadian_french` | `dialect` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 189 | `translation` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_dialect_egyptian_arabic` | `dialect` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 189 | `translation` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_dialect_german_switzerland` | `dialect` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 189 | `translation` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_dialect_mexican_spanish` | `dialect` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 189 | `translation` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_dialect_traditional_chinese` | `dialect` | adv nat | 2 | 2-12 (translate) |  |  | 5 | A T | 1.4 | 189 | `translation` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_code_switch_arabic` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_code_switch_chinese` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_code_switch_french` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_code_switch_german` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_code_switch_hindi` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_code_switch_japanese` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_code_switch_portuguese` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_code_switch_russian` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_code_switch_spanish` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_code_switch_swahili` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_arabic_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N E | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_cyrillic_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N E | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_devanagari_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N E | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_greek_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N E | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_romanize_arabic` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_romanize_bengali` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_romanize_gujarati` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_romanize_hindi` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_romanize_marathi` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_romanize_nepali` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_romanize_punjabi` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_romanize_tamil` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_romanize_telugu` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_romanize_urdu` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 189 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_rewrite_with_typos_high` | `typos` | adv | 3 | 2-4 (typos) |  |  | 2 | A | 1.0 | 244 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F), some `dap` (2 of 6, T), some `fsh` (2 of 6, T) |
+| `to_rewrite_with_typos_insane` | `typos` | adv | 3 | 2-4 (typos) |  |  | 2 | A | 1.0 | 244 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F), some `dap` (2 of 6, T), some `fsh` (2 of 6, T) |
+| `to_rewrite_with_typos_low` | `typos` | adv nat | 2 | 2-4 (typos) |  |  | 2 | A N | 1.0 | 244 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F), some `dap` (2 of 6, T), some `fsh` (2 of 6, T) |
+| `to_rewrite_with_typos_medium` | `typos` | adv nat | 2 | 2-4 (typos) |  |  | 2 | A N | 1.0 | 244 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F), some `dap` (2 of 6, T), some `fsh` (2 of 6, T) |
+| `to_abbreviations` | `casual_writing` | adv nat | 1 |  | applies |  |  | N | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
+| `to_doubled_punctuation` | `casual_writing` | adv nat | 0 |  |  |  |  | N | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
+| `to_doubled_spaces` | `casual_writing` | adv nat | 0 |  |  |  |  | N | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
+| `to_dropped_punctuation` | `casual_writing` | adv nat | 0 |  |  |  |  | N | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
+| `to_dropped_spaces` | `casual_writing` | adv nat | 1 |  |  |  |  | N | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
+| `to_lowercase` | `casual_writing` | adv nat | 0 |  |  |  |  | N | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
+| `to_no_sentence_capitals` | `casual_writing` | adv nat | 0 |  |  |  |  | N | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
+| `to_stripped_accents` | `casual_writing` | adv nat | 0 |  | applies |  |  | N | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
+| `to_uppercase` | `casual_writing` | adv nat | 0 |  |  |  |  | N | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `noise` (F) |
+| `to_emoji_sprinkle_high` | `noise` | adv | 1 |  |  |  |  | A | 1.2 | 238 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `ascii_art` (T) |
+| `to_emoji_sprinkle_low` | `noise` | adv nat | 1 |  |  |  |  | A N | 1.2 | 238 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `ascii_art` (T) |
+| `to_emoji_sprinkle_medium` | `noise` | adv nat | 1 |  |  |  |  | A N | 1.2 | 238 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `ascii_art` (T) |
+| `to_keyboard_typos_high` | `noise` | adv | 1 |  | latin |  |  | A | 1.2 | 239 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
+| `to_keyboard_typos_low` | `noise` | adv nat | 1 |  | latin |  |  | A N | 1.2 | 239 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
+| `to_keyboard_typos_medium` | `noise` | adv nat | 1 |  | latin |  |  | A N | 1.2 | 239 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
+| `to_random_capitals_high` | `noise` | adv | 1 |  | latin |  |  | A | 1.2 | 239 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
+| `to_random_capitals_low` | `noise` | adv nat | 1 |  | latin |  |  | A N | 1.2 | 239 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
+| `to_random_capitals_medium` | `noise` | adv nat | 1 |  | latin |  |  | A N | 1.2 | 239 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
+| `to_scrambled_letters_high` | `noise` | adv | 1 |  | latin |  |  | A | 1.2 | 239 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
+| `to_scrambled_letters_low` | `noise` | adv nat | 1 |  | latin |  |  | A N | 1.2 | 239 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
+| `to_scrambled_letters_medium` | `noise` | adv nat | 1 |  | latin |  |  | A N | 1.2 | 239 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F) |
+| `to_sensitive_words_encode_ascii` | `sensitive_words`, `encode` | adv | 3 | 1 (word_list) | heavy |  | 1 | A | 1.0 | 214 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
+| `to_sensitive_words_encode_base64` | `sensitive_words`, `encode` | adv | 3 | 1 (word_list) | heavy |  | 1 | A | 1.0 | 214 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
+| `to_sensitive_words_encode_leetspeak_advanced` | `sensitive_words`, `encode` | adv | 2 | 1 (word_list) | light latin |  | 1 | A | 1.0 | 214 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
+| `to_sensitive_words_encode_leetspeak_basic` | `sensitive_words`, `encode` | adv | 1 | 1 (word_list) | light latin |  | 1 | A | 1.0 | 214 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
+| `to_sensitive_words_encode_leetspeak_intermediate` | `sensitive_words`, `encode` | adv | 2 | 1 (word_list) | light latin |  | 1 | A | 1.0 | 214 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
+| `to_sensitive_words_encode_rot13` | `sensitive_words`, `encode` | adv | 2 | 1 (word_list) | light latin |  | 1 | A | 1.0 | 214 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
+| `to_sensitive_words_encode_rot18` | `sensitive_words`, `encode` | adv | 2 | 1 (word_list) | light latin |  | 1 | A | 1.0 | 214 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
+| `to_sensitive_words_encode_rot47` | `sensitive_words`, `encode` | adv | 2 | 1 (word_list) | light latin |  | 1 | A | 1.0 | 214 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
+| `to_sensitive_words_encode_separator` | `sensitive_words`, `encode` | adv | 2 | 1 (word_list) | light |  | 1 | A | 1.0 | 214 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
+| `to_sensitive_words_encode_unicode` | `sensitive_words`, `encode` | adv | 3 | 1 (word_list) | heavy |  | 1 | A | 1.0 | 214 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), some `answer_format` (1 of 12, T) |
+| `to_sensitive_words_hyphen` (retired 1.1) | `sensitive_words` | adv | 2 | 1 (word_list) |  |  | 1 |  | 1.0 | 245 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), some `encode` (10 of 38, S) |
+| `to_sensitive_words_split` | `sensitive_words` | adv | 2 | 1 (word_list) |  |  | 1 | A | 1.0 | 245 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), some `encode` (10 of 38, S) |
+| `to_sensitive_words_star` (retired 1.1) | `sensitive_words` | adv | 2 | 1 (word_list) |  |  | 1 |  | 1.0 | 245 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), some `encode` (10 of 38, S) |
+| `to_sensitive_words_underscore` (retired 1.1) | `sensitive_words` | adv | 2 | 1 (word_list) |  |  | 1 |  | 1.0 | 245 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), some `encode` (10 of 38, S) |
+| `to_sensitive_words_variables` | `sensitive_words` | adv | 3 | 1 (word_list) |  |  | 1 | A | 1.0 | 245 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), some `encode` (10 of 38, S) |
+| `to_synonym_substitution` | `sensitive_words` | adv | 2 | 1-11 (word_list) |  |  | 2 | A | 1.0 | 245 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), some `encode` (10 of 38, S) |
+| `to_pseudonym_substitution` | `wording` | adv | 2 | 1-21 (word_list) |  | 8 | 2 | A | 1.3 | 229 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `sensitive_words` (F), `tokenbreak` (F), `word_art` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), some `encode` (10 of 38, F) |
+| `to_word_game` | `wording` | adv | 2 | 1-21 (word_list) |  | 8 | 2 | A | 1.3 | 229 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `sensitive_words` (F), `tokenbreak` (F), `word_art` (F), `ascii_art` (F), `dap` (M), `fake_turns` (M), `fsh` (M), some `encode` (10 of 38, F) |
+| `to_tokenbreak_delimiter` | `tokenbreak` | adv | 2 | 1 (word_list) |  |  | 1 | A | 1.0 | 244 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `sensitive_words` (F), `wording` (F), `word_art` (F), some `encode` (11 of 38, FT) |
+| `to_tokenbreak_prepend` | `tokenbreak` | adv | 2 | 1 (word_list) |  |  | 1 | A | 1.0 | 244 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `sensitive_words` (F), `wording` (F), `word_art` (F), some `encode` (11 of 38, FT) |
+| `to_tokenbreak_split` | `tokenbreak` | adv | 2 | 1 (word_list) |  |  | 1 | A | 1.0 | 243 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `sensitive_words` (F), `wording` (F), `word_art` (F), `ascii_art` (T), some `encode` (11 of 38, FT) |
+| `to_word_art` | `word_art` | adv | 3 | 1 (word_list) |  | 8 | 1 | A | 1.3 | 190 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `payload_split` (F), `encode` (F), `neutral_container` (F), `structural` (F), `ascii_art` (F), `dap` (M), `fake_turns` (FM), `fsh` (M) |
+| `to_adversarial_suffix_emoji` | `suffixes` | adv nat | 1 |  |  |  |  | A N | 1.0 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_fragments` | `suffixes` | adv | 1 |  |  |  |  | A | 1.0 | 290 |  |
+| `to_adversarial_suffix_gcg_jbb_llama2_65` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_llama2_75` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_2` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_26` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_32` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_38` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_45` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_54` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_6` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_76` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_77` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_90` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_95` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_97` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_1` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_48` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_78` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_86` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_repo_demo_llama2` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_site_example` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_smoothllm_llama2_1` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_smoothllm_llama2_2` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_smoothllm_vicuna_1` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_smoothllm_vicuna_2` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 289 | `ascii_art` (T) |
+| `to_adversarial_suffix_punctuation` | `suffixes` | adv nat | 1 |  |  |  |  | A N | 1.0 | 290 |  |
+| `to_adversarial_suffix_unicode` | `suffixes` | adv | 1 |  |  |  |  | A | 1.0 | 289 | `ascii_art` (T) |
+| `to_payload_split` | `payload_split` | adv | 2 |  |  | 8 |  | A | 1.3 | 207 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (FM), `fsh` (M), some `sensitive_words` (10 of 13, F) |
+| `to_payload_split_semantic` | `payload_split` | adv | 2 | 1-3 |  | 8 | 1 | A | 1.3 | 207 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (FM), `fsh` (M), some `sensitive_words` (10 of 13, F) |
+| `to_ascii_ordinal` | `encode` | adv | 3 |  | heavy | 4 opt |  | A E | 1.0 | 206 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_atbash` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.2 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_base32` | `encode` | adv | 3 |  | heavy | 4 opt |  | A | 1.2 | 206 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_base64` | `encode` | adv | 3 |  | heavy | 4 opt |  | A E | 1.0 | 206 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_base85` | `encode` | adv | 3 |  | heavy | 4 opt |  | A | 1.2 | 206 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_binary` | `encode` | adv | 3 |  | heavy | 4 opt |  | A | 1.2 | 206 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_braille` | `encode` | adv | 3 |  | heavy latin | 4 opt |  | A E | 1.0 | 206 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_caesar_cipher` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.2 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_fullwidth` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.2 | 221 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_hex` | `encode` | adv | 3 |  | heavy | 4 opt |  | A | 1.2 | 206 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_html_entities` | `encode` | adv | 3 |  | heavy | 4 opt |  | A | 1.2 | 206 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_leetspeak_advanced` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.0 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_leetspeak_basic` | `encode` | adv nat | 1 |  | light latin |  |  | A N | 1.0 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_leetspeak_intermediate` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.0 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_letter_spacing` | `encode` | adv | 2 |  | light | 4 opt |  | A E | 1.4 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_lookalike_letters` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.2 | 221 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_math_styled` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.2 | 221 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_morse` | `encode` | adv | 3 |  | heavy latin | 4 opt |  | A E | 1.0 | 206 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_reversed_characters` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.2 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_reversed_word_order` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.2 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_reversed_words` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.2 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_rot13` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.0 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_rot18` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.0 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_rot47` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.0 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_separator` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.0 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_unicode_escape` | `encode` | adv | 3 |  | heavy | 4 opt |  | A E | 1.0 | 206 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_url_encoding` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.2 | 222 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_zero_width_noise` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.2 | 218 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `tokenbreak` (T), `word_art` (F), `payload_split` (F), `ascii_art` (T), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_code_comment` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 304 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_csv_row` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 304 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_email_message` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 304 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_log_entry` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 304 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_transcript_line` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 304 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_yaml_document` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 304 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_json` | `structural` | adv | 2 |  |  | 10 |  | A E | 1.0 | 304 | `word_art` (F), `neutral_container` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_markdown` | `structural` | adv | 2 |  |  | 9 |  | A E | 1.0 | 304 | `word_art` (F), `neutral_container` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_xml` | `structural` | adv | 2 |  |  | 9 |  | A E | 1.0 | 304 | `word_art` (F), `neutral_container` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_ascii_art` | `ascii_art` | adv | 2 |  |  |  |  | A E | 1.0 | 129 | `model_distractors` (F), `persuasion` (F), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `wording` (F), `word_art` (F), `payload_split` (F), `neutral_container` (F), `structural` (F), `dap` (FM), `fake_turns` (M), `fsh` (FM), some `noise` (3 of 12, T), some `tokenbreak` (1 of 3, T), some `suffixes` (26 of 28, T), some `encode` (14 of 38, T) |
 
 Refused partners, where few:
 
@@ -485,111 +489,111 @@ Refused partners, where few:
 
 | Technique | Families | Kinds | Cx | Calls | Tags | Variants | Prompts | Pools | Since | Combines with | Never with |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| `to_answer_as_code` | `answer_format` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_answer_as_dialogue` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.0 | 244 | rest of `requests` (L) |
-| `to_answer_as_story` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.0 | 244 | rest of `requests` (L) |
-| `to_answer_as_structured_data` | `answer_format` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_answer_as_tutorial` | `answer_format` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_answer_in_encoding` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.3 | 206 | rest of `requests` (L), `encode` (T), some `sensitive_words` (10 of 13, T) |
-| `to_answer_in_markdown` | `answer_format` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_apology_prevention` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.0 | 244 | rest of `requests` (L) |
-| `to_dual_answer` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.3 | 221 | rest of `requests` (L), `persona_template` (T) |
-| `to_prefix_injection` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.0 | 221 | rest of `requests` (L), `persona_template` (T) |
-| `to_refusal_then_comply` | `answer_format` | adv | 3 |  |  | 8 |  | A E | 1.0 | 221 | rest of `requests` (L), `persona_template` (T) |
-| `to_tagged_prefix` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.3 | 221 | rest of `requests` (L), `persona_template` (T) |
-| `to_ask_answer_in_amharic` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.2 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_arabic` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_bengali` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_chinese` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.2 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_croatian` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_czech` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_french` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_german` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_greek` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_guarani` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.2 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_hindi` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.2 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_hmong` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.2 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_japanese` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_javanese` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_khmer` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_maori` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_nepali` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_russian` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_scots_gaelic` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_spanish` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_swahili` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_thai` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_turkish` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_vietnamese` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_yoruba` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.2 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_zulu` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_for_details` | `asking` | adv nat | 1 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_with_urgency` | `asking` | adv nat | 1 |  |  | 8 |  | A N E | 1.3 | 244 | rest of `requests` (L) |
-| `to_innocuous_question` | `asking` | adv nat | 0 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
-| `to_benign_role_subject_helper` | `benign_role` | nat | 1 |  | applies | 12 |  | N | 1.2 | 244 | rest of `requests` (L) |
-| `to_benign_role_task_assistant` | `benign_role` | nat | 1 |  | applies | 12 |  | N | 1.2 | 244 | rest of `requests` (L) |
-| `to_benign_role_tutor` | `benign_role` | nat | 1 |  | applies | 12 |  | N | 1.2 | 244 | rest of `requests` (L) |
-| `to_complete_story` | `continuation` | adv | 3 |  |  | 8 |  | A E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_continue_instructions` | `continuation` | adv | 3 |  |  | 8 |  | A E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_continue_passage` | `continuation` | adv | 3 |  |  | 8 |  | A E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_fill_in_blank` | `continuation` | adv | 3 |  |  | 8 |  | A E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_distractor_prefix_related` | `distractor_prefix` | adv | 2 |  |  | 8 |  | A E | 1.0 | 242 | rest of `requests` (L), `model_distractors` (F) |
-| `to_distractor_prefix_task` | `distractor_prefix` | adv | 2 |  |  | 8 |  | A E | 1.3 | 242 | rest of `requests` (L), `model_distractors` (F) |
-| `to_distractor_prefix_unrelated` | `distractor_prefix` | adv | 2 |  |  | 8 |  | A E | 1.0 | 242 | rest of `requests` (L), `model_distractors` (F) |
-| `to_distractor_suffix_related` | `distractor_suffix` | adv | 2 |  |  | 8 |  | A E | 1.0 | 242 | rest of `requests` (L), `model_distractors` (F) |
-| `to_distractor_suffix_task` | `distractor_suffix` | adv | 2 |  |  | 8 |  | A E | 1.3 | 242 | rest of `requests` (L), `model_distractors` (F) |
-| `to_distractor_suffix_unrelated` | `distractor_suffix` | adv | 2 |  |  | 8 |  | A E | 1.0 | 242 | rest of `requests` (L), `model_distractors` (F) |
-| `to_fallacy_failure` | `fallacy` | adv | 2 |  |  | 9 |  | A | 1.5 | 244 | rest of `requests` (L) |
-| `to_guardrail_block_question` | `guardrail_address` | adv | 1 |  | applies | 8 |  | A E | 1.4 | 244 | rest of `requests` (L) |
-| `to_guardrail_classify_benign` | `guardrail_address` | adv | 1 |  | applies | 8 |  | A E | 1.4 | 244 | rest of `requests` (L) |
-| `to_guardrail_security_override` | `guardrail_address` | adv | 1 |  | applies | 8 |  | A E | 1.4 | 244 | rest of `requests` (L) |
-| `to_impersonate_authority` | `impersonation` | adv | 1 |  |  | 8 |  | A E | 1.3 | 190 | rest of `requests` (L), `persuasion` (F), `cognitive` (F), `persona` (F), `persona_template` (F) |
-| `to_impersonate_developer` | `impersonation` | adv | 1 |  |  | 8 |  | A E | 1.3 | 190 | rest of `requests` (L), `persuasion` (F), `cognitive` (F), `persona` (F), `persona_template` (F) |
-| `to_impersonate_good_person` | `impersonation` | adv | 1 |  |  | 8 |  | A E | 1.0 | 190 | rest of `requests` (L), `persuasion` (F), `cognitive` (F), `persona` (F), `persona_template` (F) |
-| `to_critique` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_explain_to_child` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_proofread` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_rewrite` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_summarize` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_translate_task` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_smalltalk_prefix` | `smalltalk_prefix` | nat | 0 |  |  | 20 |  | N | 1.2 | 244 | rest of `requests` (L) |
-| `to_smalltalk_suffix` | `smalltalk_suffix` | nat | 0 |  |  | 20 |  | N | 1.2 | 244 | rest of `requests` (L) |
-| `to_use_future_tense` | `temporal` | adv | 3 |  |  | 8 |  | A | 1.3 | 242 | rest of `requests` (L), `tense_rewrite` (F) |
-| `to_use_historical_era` | `temporal` | adv | 3 |  |  | 8 |  | A | 1.3 | 242 | rest of `requests` (L), `tense_rewrite` (F) |
-| `to_use_past_tense` | `temporal` | adv | 3 |  |  | 8 |  | A E | 1.0 | 242 | rest of `requests` (L), `tense_rewrite` (F) |
+| `to_answer_as_code` | `answer_format` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_answer_as_dialogue` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.0 | 246 | rest of `requests` (L) |
+| `to_answer_as_story` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.0 | 246 | rest of `requests` (L) |
+| `to_answer_as_structured_data` | `answer_format` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_answer_as_tutorial` | `answer_format` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_answer_in_encoding` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.3 | 208 | rest of `requests` (L), `encode` (T), some `sensitive_words` (10 of 13, T) |
+| `to_answer_in_markdown` | `answer_format` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_apology_prevention` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.0 | 246 | rest of `requests` (L) |
+| `to_dual_answer` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.3 | 223 | rest of `requests` (L), `persona_template` (T) |
+| `to_prefix_injection` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.0 | 223 | rest of `requests` (L), `persona_template` (T) |
+| `to_refusal_then_comply` | `answer_format` | adv | 3 |  |  | 8 |  | A E | 1.0 | 223 | rest of `requests` (L), `persona_template` (T) |
+| `to_tagged_prefix` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.3 | 223 | rest of `requests` (L), `persona_template` (T) |
+| `to_ask_answer_in_amharic` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.2 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_arabic` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_bengali` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_chinese` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.2 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_croatian` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_czech` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_french` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_german` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_greek` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_guarani` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.2 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_hindi` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.2 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_hmong` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.2 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_japanese` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_javanese` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_khmer` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_maori` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_nepali` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_russian` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_scots_gaelic` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_spanish` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_swahili` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_thai` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_turkish` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_vietnamese` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_yoruba` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.2 | 246 | rest of `requests` (L) |
+| `to_ask_answer_in_zulu` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_for_details` | `asking` | adv nat | 1 |  |  | 8 |  | A N E | 1.0 | 246 | rest of `requests` (L) |
+| `to_ask_with_urgency` | `asking` | adv nat | 1 |  |  | 8 |  | A N E | 1.3 | 246 | rest of `requests` (L) |
+| `to_innocuous_question` | `asking` | adv nat | 0 |  |  | 8 |  | A N E | 1.0 | 246 | rest of `requests` (L) |
+| `to_benign_role_subject_helper` | `benign_role` | nat | 1 |  | applies | 12 |  | N | 1.2 | 246 | rest of `requests` (L) |
+| `to_benign_role_task_assistant` | `benign_role` | nat | 1 |  | applies | 12 |  | N | 1.2 | 246 | rest of `requests` (L) |
+| `to_benign_role_tutor` | `benign_role` | nat | 1 |  | applies | 12 |  | N | 1.2 | 246 | rest of `requests` (L) |
+| `to_complete_story` | `continuation` | adv | 3 |  |  | 8 |  | A E | 1.0 | 231 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_continue_instructions` | `continuation` | adv | 3 |  |  | 8 |  | A E | 1.0 | 231 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_continue_passage` | `continuation` | adv | 3 |  |  | 8 |  | A E | 1.0 | 231 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_fill_in_blank` | `continuation` | adv | 3 |  |  | 8 |  | A E | 1.0 | 231 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_distractor_prefix_related` | `distractor_prefix` | adv | 2 |  |  | 8 |  | A E | 1.0 | 244 | rest of `requests` (L), `model_distractors` (F) |
+| `to_distractor_prefix_task` | `distractor_prefix` | adv | 2 |  |  | 8 |  | A E | 1.3 | 244 | rest of `requests` (L), `model_distractors` (F) |
+| `to_distractor_prefix_unrelated` | `distractor_prefix` | adv | 2 |  |  | 8 |  | A E | 1.0 | 244 | rest of `requests` (L), `model_distractors` (F) |
+| `to_distractor_suffix_related` | `distractor_suffix` | adv | 2 |  |  | 8 |  | A E | 1.0 | 244 | rest of `requests` (L), `model_distractors` (F) |
+| `to_distractor_suffix_task` | `distractor_suffix` | adv | 2 |  |  | 8 |  | A E | 1.3 | 244 | rest of `requests` (L), `model_distractors` (F) |
+| `to_distractor_suffix_unrelated` | `distractor_suffix` | adv | 2 |  |  | 8 |  | A E | 1.0 | 244 | rest of `requests` (L), `model_distractors` (F) |
+| `to_fallacy_failure` | `fallacy` | adv | 2 |  |  | 9 |  | A | 1.5 | 246 | rest of `requests` (L) |
+| `to_guardrail_block_question` | `guardrail_address` | adv | 1 |  | applies | 8 |  | A E | 1.4 | 246 | rest of `requests` (L) |
+| `to_guardrail_classify_benign` | `guardrail_address` | adv | 1 |  | applies | 8 |  | A E | 1.4 | 246 | rest of `requests` (L) |
+| `to_guardrail_security_override` | `guardrail_address` | adv | 1 |  | applies | 8 |  | A E | 1.4 | 246 | rest of `requests` (L) |
+| `to_impersonate_authority` | `impersonation` | adv | 1 |  |  | 8 |  | A E | 1.3 | 190 | rest of `requests` (L), `persuasion` (F), `cognitive` (F), `persona` (F), `persona_template` (F), `policy_framing` (F) |
+| `to_impersonate_developer` | `impersonation` | adv | 1 |  |  | 8 |  | A E | 1.3 | 190 | rest of `requests` (L), `persuasion` (F), `cognitive` (F), `persona` (F), `persona_template` (F), `policy_framing` (F) |
+| `to_impersonate_good_person` | `impersonation` | adv | 1 |  |  | 8 |  | A E | 1.0 | 190 | rest of `requests` (L), `persuasion` (F), `cognitive` (F), `persona` (F), `persona_template` (F), `policy_framing` (F) |
+| `to_critique` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 231 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_explain_to_child` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 231 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_proofread` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 231 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_rewrite` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 231 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_summarize` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 231 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_translate_task` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 231 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_smalltalk_prefix` | `smalltalk_prefix` | nat | 0 |  |  | 20 |  | N | 1.2 | 246 | rest of `requests` (L) |
+| `to_smalltalk_suffix` | `smalltalk_suffix` | nat | 0 |  |  | 20 |  | N | 1.2 | 246 | rest of `requests` (L) |
+| `to_use_future_tense` | `temporal` | adv | 3 |  |  | 8 |  | A | 1.3 | 244 | rest of `requests` (L), `tense_rewrite` (F) |
+| `to_use_historical_era` | `temporal` | adv | 3 |  |  | 8 |  | A | 1.3 | 244 | rest of `requests` (L), `tense_rewrite` (F) |
+| `to_use_past_tense` | `temporal` | adv | 3 |  |  | 8 |  | A E | 1.0 | 244 | rest of `requests` (L), `tense_rewrite` (F) |
 
 ### Layer `manipulation`
 
 | Technique | Families | Kinds | Cx | Calls | Tags | Variants | Prompts | Pools | Since | Combines with | Never with |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| `to_dap_random_long` | `dap` | adv | 2 |  | benign |  |  | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_dap_random_many` | `dap` | adv | 3 |  | benign |  |  | A | 1.2 | 200 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `typos` (T), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_dap_random_short` | `dap` | adv | 2 |  | benign |  |  | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_dap_selected_long` | `dap` | adv | 3 | 1 | benign |  | 1 | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_dap_selected_many` | `dap` | adv | 3 | 1 | benign |  | 1 | A | 1.2 | 200 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `typos` (T), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_dap_selected_short` | `dap` | adv | 3 | 1 | benign |  | 1 | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_fake_assistant_turn` | `fake_turns` | adv | 2 |  |  | 8 |  | A E | 1.3 | 195 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (FM), `payload_split` (FM), `neutral_container` (F), `structural` (F), `ascii_art` (M), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_fake_history` | `fake_turns` | adv | 2 |  |  | 8 |  | A E | 1.3 | 195 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (FM), `payload_split` (FM), `neutral_container` (F), `structural` (F), `ascii_art` (M), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_fake_system_turn` | `fake_turns` | adv | 2 |  |  | 8 |  | A E | 1.3 | 195 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (FM), `payload_split` (FM), `neutral_container` (F), `structural` (F), `ascii_art` (M), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_fsh_random_long` | `fsh` | adv | 2 |  | benign |  |  | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_fsh_random_many` | `fsh` | adv | 3 |  | benign |  |  | A | 1.2 | 200 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `typos` (T), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_fsh_random_short` | `fsh` | adv | 2 |  | benign |  |  | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_fsh_selected_long` | `fsh` | adv | 3 | 1 | benign |  | 1 | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_fsh_selected_many` | `fsh` | adv | 3 | 1 | benign |  | 1 | A | 1.2 | 200 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `typos` (T), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_fsh_selected_short` | `fsh` | adv | 3 | 1 | benign |  | 1 | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_dap_random_long` | `dap` | adv | 2 |  | benign |  |  | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_dap_random_many` | `dap` | adv | 3 |  | benign |  |  | A | 1.2 | 200 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `typos` (T), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_dap_random_short` | `dap` | adv | 2 |  | benign |  |  | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_dap_selected_long` | `dap` | adv | 3 | 1 | benign |  | 1 | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_dap_selected_many` | `dap` | adv | 3 | 1 | benign |  | 1 | A | 1.2 | 200 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `typos` (T), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_dap_selected_short` | `dap` | adv | 3 | 1 | benign |  | 1 | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_fake_assistant_turn` | `fake_turns` | adv | 2 |  |  | 8 |  | A E | 1.3 | 195 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `wording` (M), `word_art` (FM), `payload_split` (FM), `neutral_container` (F), `structural` (F), `ascii_art` (M), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_fake_history` | `fake_turns` | adv | 2 |  |  | 8 |  | A E | 1.3 | 195 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `wording` (M), `word_art` (FM), `payload_split` (FM), `neutral_container` (F), `structural` (F), `ascii_art` (M), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_fake_system_turn` | `fake_turns` | adv | 2 |  |  | 8 |  | A E | 1.3 | 195 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `wording` (M), `word_art` (FM), `payload_split` (FM), `neutral_container` (F), `structural` (F), `ascii_art` (M), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_fsh_random_long` | `fsh` | adv | 2 |  | benign |  |  | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_fsh_random_many` | `fsh` | adv | 3 |  | benign |  |  | A | 1.2 | 200 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `typos` (T), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_fsh_random_short` | `fsh` | adv | 2 |  | benign |  |  | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_fsh_selected_long` | `fsh` | adv | 3 | 1 | benign |  | 1 | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_fsh_selected_many` | `fsh` | adv | 3 | 1 | benign |  | 1 | A | 1.2 | 200 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `typos` (T), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_fsh_selected_short` | `fsh` | adv | 3 | 1 | benign |  | 1 | A E | 1.0 | 204 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `policy_framing` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
 
 ## Pools
 
 | Pool | Kind | Dataset type | Section | On | Size | Families |
 |---|---|---|---|---|---|---|
-| `adversarial` | adversarial |  |  | yes | 286 | 35 |
-| `adversarial_rewrite` | adversarial |  | `{"layers": {"allow": ["rewrite"]}}` | yes | 302 | 38 |
-| `adversarial_no_translation` | adversarial |  | `{"translation": false}` | yes | 256 | 33 |
+| `adversarial` | adversarial |  |  | yes | 288 | 36 |
+| `adversarial_rewrite` | adversarial |  | `{"layers": {"allow": ["rewrite"]}}` | yes | 304 | 39 |
+| `adversarial_no_translation` | adversarial |  | `{"translation": false}` | yes | 258 | 34 |
 | `natural` | natural |  |  | yes | 96 | 16 |
 | `natural_translation` | natural |  | `{"translation": true}` | yes | 126 | 18 |
 | `eval.adversarial` | adversarial | eval | `eval.json` | yes | 126 | 22 |
 | `eval.natural` | natural | eval | `eval.json` | no | 0 | 0 |
-| `training.adversarial` | adversarial | training | `training.json` | yes | 286 | 35 |
+| `training.adversarial` | adversarial | training | `training.json` | yes | 288 | 36 |
 | `training.natural` | natural | training | `training.json` | yes | 96 | 16 |
 
 ### Pool `adversarial`
@@ -598,6 +602,7 @@ Refused partners, where few:
 - `framing` (5): `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints`
 - `persona` (14): `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona`, `to_mercenary_persona`, `to_underground_hacker_persona`, `to_anarchist_philosopher_persona`
 - `persona_template` (23): `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template`, `to_caring_grandma_persona_template`, `to_worried_parent_persona_template`, `to_loyal_friend_persona_template`, `to_licensed_professional_persona_template`, `to_official_investigator_persona_template`, `to_research_scientist_persona_template`, `to_game_engine_persona_template`, `to_terminal_simulator_persona_template`, `to_simulation_rules_persona_template`, `to_penalty_game_persona_template`, `to_tagged_speaker_persona_template`, `to_character_reset_persona_template`
+- `policy_framing` (2): `to_policy_puppetry`, `to_skeleton_key`
 - `translation` (24): `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_chinese`, `to_hindi`, `to_yoruba`, `to_amharic`
 - `dialect` (6): `to_dialect_brazilian_portuguese`, `to_dialect_mexican_spanish`, `to_dialect_canadian_french`, `to_dialect_egyptian_arabic`, `to_dialect_german_switzerland`, `to_dialect_traditional_chinese`
 - `code_switching` (10): `to_code_switch_spanish`, `to_code_switch_french`, `to_code_switch_german`, `to_code_switch_portuguese`, `to_code_switch_swahili`, `to_code_switch_russian`, `to_code_switch_arabic`, `to_code_switch_hindi`, `to_code_switch_chinese`, `to_code_switch_japanese`
@@ -643,6 +648,7 @@ Rounds:
 - `framing` (5): `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints`
 - `persona` (14): `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona`, `to_mercenary_persona`, `to_underground_hacker_persona`, `to_anarchist_philosopher_persona`
 - `persona_template` (23): `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template`, `to_caring_grandma_persona_template`, `to_worried_parent_persona_template`, `to_loyal_friend_persona_template`, `to_licensed_professional_persona_template`, `to_official_investigator_persona_template`, `to_research_scientist_persona_template`, `to_game_engine_persona_template`, `to_terminal_simulator_persona_template`, `to_simulation_rules_persona_template`, `to_penalty_game_persona_template`, `to_tagged_speaker_persona_template`, `to_character_reset_persona_template`
+- `policy_framing` (2): `to_policy_puppetry`, `to_skeleton_key`
 - `translation` (24): `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_chinese`, `to_hindi`, `to_yoruba`, `to_amharic`
 - `dialect` (6): `to_dialect_brazilian_portuguese`, `to_dialect_mexican_spanish`, `to_dialect_canadian_french`, `to_dialect_egyptian_arabic`, `to_dialect_german_switzerland`, `to_dialect_traditional_chinese`
 - `code_switching` (10): `to_code_switch_spanish`, `to_code_switch_french`, `to_code_switch_german`, `to_code_switch_portuguese`, `to_code_switch_swahili`, `to_code_switch_russian`, `to_code_switch_arabic`, `to_code_switch_hindi`, `to_code_switch_chinese`, `to_code_switch_japanese`
@@ -685,6 +691,7 @@ Rounds:
 - `framing` (5): `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints`
 - `persona` (14): `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona`, `to_mercenary_persona`, `to_underground_hacker_persona`, `to_anarchist_philosopher_persona`
 - `persona_template` (23): `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template`, `to_caring_grandma_persona_template`, `to_worried_parent_persona_template`, `to_loyal_friend_persona_template`, `to_licensed_professional_persona_template`, `to_official_investigator_persona_template`, `to_research_scientist_persona_template`, `to_game_engine_persona_template`, `to_terminal_simulator_persona_template`, `to_simulation_rules_persona_template`, `to_penalty_game_persona_template`, `to_tagged_speaker_persona_template`, `to_character_reset_persona_template`
+- `policy_framing` (2): `to_policy_puppetry`, `to_skeleton_key`
 - `code_switching` (10): `to_code_switch_spanish`, `to_code_switch_french`, `to_code_switch_german`, `to_code_switch_portuguese`, `to_code_switch_swahili`, `to_code_switch_russian`, `to_code_switch_arabic`, `to_code_switch_hindi`, `to_code_switch_chinese`, `to_code_switch_japanese`
 - `transliteration` (4): `to_cyrillic_transliteration`, `to_greek_transliteration`, `to_devanagari_transliteration`, `to_arabic_transliteration`
 - `romanization` (10): `to_romanize_hindi`, `to_romanize_urdu`, `to_romanize_bengali`, `to_romanize_marathi`, `to_romanize_tamil`, `to_romanize_telugu`, `to_romanize_gujarati`, `to_romanize_punjabi`, `to_romanize_nepali`, `to_romanize_arabic`
@@ -812,11 +819,11 @@ Same techniques as `natural`.
 | Layer | Variant pools | Variants |
 |---|---|---|
 | `rewrite` | 0 | 0 |
-| `hacking` | 6 | 46 |
+| `hacking` | 8 | 63 |
 | `obfuscation` | 40 | 216 |
 | `requests` | 47 | 413 |
 | `manipulation` | 3 | 24 |
-| all | 96 | 699 |
+| all | 98 | 716 |
 
 ### Variant pools
 
@@ -828,6 +835,8 @@ Same techniques as `natural`.
 | `hacking/framing_templates.json:no_moral_constraints` | `framing` | `to_no_moral_constraints` | 8 | 8 |
 | `hacking/framing_templates.json:noble_goal` | `framing` | `to_noble_goal` | 8 | 8 |
 | `hacking/persona_templates.json:mechanics` | `persona_template` | 23 techniques | 6 | 6 |
+| `hacking/policy_framing_templates.json:policy_puppetry` | `policy_framing` | `to_policy_puppetry` | 9 | 8 |
+| `hacking/policy_framing_templates.json:skeleton_key` | `policy_framing` | `to_skeleton_key` | 8 | 8 |
 | `manipulation/fake_turns_templates.json:fake_assistant_turn` | `fake_turns` | `to_fake_assistant_turn` | 8 | 8 |
 | `manipulation/fake_turns_templates.json:fake_history` | `fake_turns` | `to_fake_history` | 8 | 8 |
 | `manipulation/fake_turns_templates.json:fake_system_turn` | `fake_turns` | `to_fake_system_turn` | 8 | 8 |
@@ -1070,48 +1079,48 @@ Answer modes: `harmful`, `helpful`.
 | Groups | 12 |
 | Entry types | `harmful`, `dual_use_harmful`, `dual_use_benign`, `benign` |
 | Seed | 42 |
-| Pool size | 286 |
-| Techniques drawn | 286 |
+| Pool size | 288 |
+| Techniques drawn | 288 |
 | Never drawn |  |
-| Mean techniques per unit | 3.008 |
+| Mean techniques per unit | 3.007 |
 
 | Techniques | Units |
 |---|---|
-| 2 | 334 |
-| 3 | 2308 |
-| 4 | 358 |
+| 2 | 345 |
+| 3 | 2289 |
+| 4 | 366 |
 
 | Layers touched | Units |
 |---|---|
 | 1 | 160 |
-| 2 | 1130 |
-| 3 | 1710 |
+| 2 | 1134 |
+| 3 | 1706 |
 
 | Layer | Units |
 |---|---|
 | `rewrite` | 0 |
 | `hacking` | 1500 |
-| `obfuscation` | 2964 |
+| `obfuscation` | 2960 |
 | `requests` | 2100 |
 | `manipulation` | 986 |
 
 | Family pair | Units |
 |---|---|
-| `persona` + `translation` | 129 |
-| `persona_template` + `translation` | 128 |
-| `framing` + `translation` | 127 |
-| `encode` + `fsh` | 118 |
-| `dap` + `encode` | 116 |
-| `cognitive` + `translation` | 112 |
-| `fake_turns` + `suffixes` | 107 |
-| `fake_turns` + `sensitive_words` | 106 |
-| `encode` + `fake_turns` | 104 |
-| `dap` + `sensitive_words` | 96 |
-| `fsh` + `sensitive_words` | 94 |
+| `persona_template` + `translation` | 119 |
+| `fake_turns` + `sensitive_words` | 114 |
+| `dap` + `encode` | 112 |
+| `encode` + `fsh` | 111 |
+| `fake_turns` + `suffixes` | 111 |
+| `fsh` + `sensitive_words` | 103 |
+| `framing` + `translation` | 99 |
+| `persona` + `translation` | 99 |
+| `encode` + `fake_turns` | 94 |
 | `continuation` + `translation` | 93 |
-| `noise` + `word_art` | 79 |
-| `encode` + `noise` | 75 |
-| `noise` + `sensitive_words` | 75 |
+| `dap` + `sensitive_words` | 93 |
+| `cognitive` + `translation` | 91 |
+| `policy_framing` + `translation` | 86 |
+| `noise` + `sensitive_words` | 84 |
+| `noise` + `word_art` | 80 |
 
 ### Kind `natural`
 
@@ -1237,6 +1246,7 @@ No unit draws two families.
 - `framing`: Scenario/context modifiers: fictional world, noble/nefarious goal, urgency, constraint removal
 - `persona`: Named or invented persona roleplay archetypes
 - `persona_template`: A fixed persona frame around the prompt, with one of six mechanics drawn into it (pure templates)
+- `policy_framing`: The prompt set inside a fake policy/config file with role-play, or wrapped in a request to augment the rules and warn not refuse (Policy Puppetry, Skeleton Key)
 - `translation`: Full-text translation to a low/mid/high-resource language
 - `dialect`: The prompt translated into a regional language variant (Brazilian Portuguese, Mexican Spanish, Canadian French, Egyptian Arabic, German (Switzerland), Traditional Chinese) on the machine-translation model, which takes a region/script code. One technique per row of dialect_variants.json; it reuses the translation machinery (the piece-by-piece machine-translation path, or the chat path by name). Gated by its base language's GlotLID labels and length band (GlotLID tells the base language, not the region), for Traditional Chinese a Traditional-character share and for German (Switzerland) no sharp s; region adherence itself is not verified (GlotLID cannot tell it, and no native speaker checked any variant). Like translation it runs on the translation model and is gated by a kind's translation switch. It refuses the same obfuscation families a translation does, translation itself and the other language-mix families. Also drawn by the natural kind, but only under the translation switch (it needs the translation model)
 - `code_switching`: A model rewrites the prompt with some phrases in a second language and the rest in English, keeping the meaning (one technique per language of code_switch_languages.json). A whole-text language rewrite at the front of the obfuscations; a code gate checks the mix (the second language's share of the letters for a non-Latin script, GlotLID over word windows for a Latin one) before the check model reads it for meaning. It refuses the same obfuscation families a translation does, translation itself and the other language-mix families, since a second language rewrite over any of them is incoherent. Also drawn by the natural kind

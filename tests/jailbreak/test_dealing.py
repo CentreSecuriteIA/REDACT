@@ -572,7 +572,7 @@ _BUDGETS = [
 # group's family counts and tie-break names change and the undealt draws gain
 # the new techniques; re-pinned as each family (fallacy, then policy_framing,
 # code_framing, reasoning_injection, bijection) was added.
-_PINNED_DRAWS = "59b621fa1f3e674970411a3579e5655a552870719dab0a9ce35773c788710bd4"
+_PINNED_DRAWS = "cd650ef7feab4c59c35d620f60bc60596fece352b25929fe2ea9b02c1fb3f653"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

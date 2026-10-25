@@ -114,13 +114,13 @@ def test_a_persona_template_is_the_one_hacking_technique_of_its_combination():
 #: rule added by mistake shows as a pair that no longer joins.
 _REFUSED_BY = {
     "to_dan_persona_template": {
-        "persona_template", "persona", "cognitive", "framing",
+        "persona_template", "persona", "cognitive", "framing", "policy_framing",
         "fsh", "dap", "fake_turns", "ascii_art", "impersonation"},
     "to_fake_history": {
         "fake_turns", "fsh", "dap", "framing", "persona", "cognitive",
-        "persona_template", "continuation", "indirect", "structural",
-        "neutral_container", "ascii_art", "translation", "payload_split",
-        "word_art", "wording"},
+        "persona_template", "policy_framing", "continuation", "indirect",
+        "structural", "neutral_container", "ascii_art", "translation",
+        "payload_split", "word_art", "wording"},
 }
 #: The four answer formats a persona template's own rules refuse; no other
 #: technique of their family is refused.

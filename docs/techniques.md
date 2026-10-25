@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 316 active techniques in 5 layers and 42
+The jailbreak stage draws from 318 active techniques in 5 layers and 43
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -76,11 +76,11 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 | Layer | Families | Techniques | Picks per combination |
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
-| `hacking` | 4 | 47 | at most 1 |
+| `hacking` | 5 | 49 | at most 1 |
 | `obfuscation` | 18 | 166 | no cap |
 | `requests` | 14 | 72 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| all | 42 | 316 | |
+| all | 43 | 318 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -103,6 +103,7 @@ that call a model call the generation model.
 | hacking | `framing` | `role_framing` |  | 5 | no | no | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` |
 | hacking | `persona` | `role_framing` |  | 14 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona`, `to_mercenary_persona`, `to_underground_hacker_persona`, `to_anarchist_philosopher_persona` |
 | hacking | `persona_template` | `role_framing` |  | 23 | no | no | `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template`, `to_caring_grandma_persona_template`, `to_worried_parent_persona_template`, `to_loyal_friend_persona_template`, `to_licensed_professional_persona_template`, `to_official_investigator_persona_template`, `to_research_scientist_persona_template`, `to_game_engine_persona_template`, `to_terminal_simulator_persona_template`, `to_simulation_rules_persona_template`, `to_penalty_game_persona_template`, `to_tagged_speaker_persona_template`, `to_character_reset_persona_template` |
+| hacking | `policy_framing` | `role_framing` |  | 2 | no | no | `to_policy_puppetry`, `to_skeleton_key` |
 | obfuscation | `translation` | `language` | 10 | 24 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_chinese`, `to_hindi`, `to_yoruba`, `to_amharic` |
 | obfuscation | `dialect` | `language` | 11 | 6 | yes | no | `to_dialect_brazilian_portuguese`, `to_dialect_mexican_spanish`, `to_dialect_canadian_french`, `to_dialect_egyptian_arabic`, `to_dialect_german_switzerland`, `to_dialect_traditional_chinese` |
 | obfuscation | `code_switching` | `language` | 12 | 10 | yes | no | `to_code_switch_spanish`, `to_code_switch_french`, `to_code_switch_german`, `to_code_switch_portuguese`, `to_code_switch_swahili`, `to_code_switch_russian`, `to_code_switch_arabic`, `to_code_switch_hindi`, `to_code_switch_chinese`, `to_code_switch_japanese` |
@@ -697,6 +698,21 @@ generation model.
   technique's own text, so the variant floor counts the six mechanics
   alone. The family is attack-only, and the eval type draws all 23 since
   eval pool v2.
+- `policy_framing` (spec version 1.5) has two pure techniques.
+  `to_policy_puppetry` (HiddenLayer 2025) sets the prompt inside a fake policy
+  or configuration file (XML, INI, JSON, YAML, TOML or a role-play rulebook)
+  that redefines the assistant's output rules, the request its active task;
+  `to_skeleton_key` (Microsoft 2024, single-turn form) wraps the prompt in a
+  request to augment the guidelines and add a warning instead of refusing.
+  Each draws one of its pool's variants in
+  `configs/jailbreak/hacking/policy_framing_templates.json` (policy_puppetry
+  nine, skeleton_key eight; floor 8) and keeps the prompt as it is; the info
+  is `directive=<name>;variant=<variant>`. Its dimension is `role_framing`,
+  as `persona`/`framing`/`cognitive`: it sets up a role and a rule-set. Being
+  a hacking family it is drawn once per combination (the layer cap), and it
+  refuses `fsh`, `dap`, `fake_turns` and `impersonation` (the same reason as
+  `persona`/`cognitive`: one social-engineering or identity frame per prompt).
+  It is not in the eval pool (a new family, which `eval.json` does not allow).
 
 **Manipulation.** `fsh` and `dap` build on benign question-and-answer pairs
 of the subcategories of the benign taxonomy. The `random` variants pick a
