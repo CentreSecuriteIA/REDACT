@@ -579,9 +579,9 @@ def test_allowing_only_translation_with_the_switch_off_raises():
 
 
 def test_a_layer_the_kind_denies_drops_what_its_allow_lists_name_of_it(caplog):
-    """The eval type's lists name framing, a hacking family: a run that
-    denies the layer over the type leaves framing out, says so, and keeps
-    the rest of the eval pool."""
+    """The eval type's lists name framing and persona_template, hacking
+    families: a run that denies the layer over the type leaves them out,
+    says so, and keeps the rest of the eval pool."""
     from redact.recipe import load_dataset_type
 
     base = load_dataset_type("eval")["augmentations"]
@@ -589,10 +589,12 @@ def test_a_layer_the_kind_denies_drops_what_its_allow_lists_name_of_it(caplog):
         kind = resolve({"adversarial": {"layers": {"deny": ["hacking"]}}},
                        "adversarial", base=base)
     (record,) = caplog.records
-    assert "the allow lists name framing (hacking)" in record.getMessage()
+    assert ("the allow lists name framing (hacking), persona_template (hacking)"
+            in record.getMessage())
     pool = technique_pool(kind)
     assert not [fn for fn in pool if fn.layer == "hacking"]
-    assert len(pool) == 31      # the 36 less framing's five  # noqa: PLR2004
+    # The 126 less framing's five and the 23 persona templates.
+    assert len(pool) == 98      # noqa: PLR2004
 
 
 def test_a_family_weight_of_a_layer_the_kind_denies_raises():
@@ -615,15 +617,19 @@ def test_switching_translation_off_over_the_eval_type_is_one_key(caplog):
     assert len(caplog.records) == 1
     assert kind["family_weights"] == {}
     assert kind["techniques"]["allow"] == [
-        "to_refusal_then_comply", "to_use_past_tense"]
+        "to_refusal_then_comply", "to_use_past_tense",
+        *(f"to_ask_answer_in_{slug}" for slug in (
+            "swahili", "thai", "khmer", "nepali", "zulu", "scots_gaelic",
+            "bengali", "javanese"))]
     pool = technique_pool(kind)
     from redact.jailbreak.pool import languages
     from tests.jailbreak.test_pool import EVAL_POOL
 
-    # The pinned eval pool less its nine languages.
+    # The pinned eval pool less its eight translations; the answer languages,
+    # which ask for the answer in a language, stay.
     assert sorted(fn.__name__ for fn in pool) == [
         name for name in EVAL_POOL if name not in languages()]
-    assert len(pool) == 28      # noqa: PLR2004
+    assert len(pool) == 118      # noqa: PLR2004
     assert not _translates({"adversarial": kind}, "adversarial")
 
 

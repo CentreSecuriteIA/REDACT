@@ -453,25 +453,73 @@ def test_the_switch_admits_the_whole_family_when_no_list_names_one_of_it():
     assert _languages(pool) == every
 
 
-def test_the_eval_pool_is_the_36_pinned_techniques_in_10_families():
+#: The eight low-resource languages the eval type translates into, by slug.
+EVAL_LANGUAGES = ("swahili", "thai", "khmer", "nepali", "zulu", "scots_gaelic",
+                  "bengali", "javanese")
+
+#: The families eval pool v2 admitted to the first pool's ten: the first
+#: family of each technique it added (the eight answer languages by name).
+EVAL_V2_FAMILIES = {
+    "persona_template", "indirect", "distractor_prefix", "distractor_suffix",
+    "impersonation", "asking", "guardrail_address", "neutral_container",
+    "transliteration", "fake_turns", "suffixes", "answer_language"}
+
+
+def _eval_pool():
+    from redact.recipe import load_dataset_type
+
+    return technique_pool(resolve(load_dataset_type("eval")["augmentations"],
+                                  "adversarial"))
+
+
+def test_the_eval_pool_is_the_126_pinned_techniques_in_22_families():
     """``eval.json`` allows whole families, so a technique added to one of
     them joins the eval pool unless ``eval.json`` denies it. This fails until
     it is decided, in ``eval.json`` and ``fixtures/eval_pool.json``."""
-    from redact.recipe import load_dataset_type
-
-    section = load_dataset_type("eval")["augmentations"]
-    pool = technique_pool(resolve(section, "adversarial"))
+    pool = _eval_pool()
     assert sorted(fn.__name__ for fn in pool) == EVAL_POOL
-    assert len(pool) == 36      # noqa: PLR2004
+    assert len(pool) == 126      # noqa: PLR2004
     assert {fn.families[0] for fn in pool} == {
         "translation", "encode", "fsh", "dap", "framing", "structural",
-        "ascii_art", "continuation", "temporal", "answer_format"}
-    assert sorted(_languages(pool)) == sorted([
-        "to_swahili", "to_thai", "to_khmer", "to_nepali", "to_zulu",
-        "to_scots_gaelic", "to_bengali", "to_javanese"])
+        "ascii_art", "continuation", "temporal", "answer_format", *EVAL_V2_FAMILIES}
+    assert sorted(_languages(pool)) == sorted(f"to_{slug}" for slug in EVAL_LANGUAGES)
     assert sorted(fn.__name__ for fn in _in("encode", pool)) == sorted([
         "to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
-        "to_braille"])
+        "to_braille", "to_letter_spacing"])
+
+
+def test_eval_pool_v2_admits_whole_families_but_the_noise_suffixes_and_the_languages():
+    """Each family v2 admitted is in the pool whole, but ``suffixes``, whose
+    four noise suffixes ``eval.json`` denies by name (the 24 published
+    strings stay), and ``answer_language``, of which it names the eight
+    languages it translates into: the answer may be asked for in the
+    language of the eval's translations, and in no other."""
+    pool = _eval_pool()
+    every = all_techniques()
+    for family in EVAL_V2_FAMILIES - {"suffixes", "answer_language"}:
+        assert _in(family, pool) == _in(family, every), family
+    suffixes = [fn.__name__ for fn in _in("suffixes", pool)]
+    assert len(suffixes) == 24 and not {      # noqa: PLR2004
+        "to_adversarial_suffix_punctuation", "to_adversarial_suffix_fragments",
+        "to_adversarial_suffix_unicode", "to_adversarial_suffix_emoji"} & set(suffixes)
+    assert sorted(fn.__name__ for fn in _in("answer_language", pool)) == sorted(
+        f"to_ask_answer_in_{slug}" for slug in EVAL_LANGUAGES)
+
+
+def test_every_technique_eval_pool_v2_admitted_is_pure():
+    """No technique v2 added calls a model or needs the benign pairs: the
+    techniques of the pool that do are the first pool's (its eight
+    translations and its four selected ``fsh`` and ``dap`` variants)."""
+    from tests.jailbreak.test_eval_pairs import FIRST_POOL
+
+    calling = [fn.__name__ for fn in _eval_pool()
+               if fn.requires_llm or fn.requires_benign]
+    assert calling and set(calling) <= set(FIRST_POOL)
+    assert sorted(name for name in calling
+                  if registry(all_techniques())[name].requires_llm) == sorted([
+        *(f"to_{slug}" for slug in EVAL_LANGUAGES),
+        *(f"to_{family}_selected_{size}" for family in ("fsh", "dap")
+          for size in ("short", "long"))])
 
 
 #: The eval techniques that call a model with no check: they ask it only

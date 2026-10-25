@@ -731,12 +731,19 @@ def test_a_resume_of_a_spec_1_3_plan_warns_that_the_library_added_yoruba(
     assert Manifest.sidecar(out).load() == plan
 
 
-def test_an_eval_plan_of_spec_1_3_finds_no_growth():
-    """The eval type's pool is pinned: nothing spec 1.4 added joins it."""
+def test_an_eval_plan_of_spec_1_3_is_refused_since_eval_pool_v2_changed_the_section():
+    """Eval pool v2 admitted families older than the plan (``indirect`` is
+    of spec 1.0) to the eval type's section: the pool differs by more than
+    the library's growth, so a kept eval plan of the first pool raises on
+    resume, naming ``pool`` (run it again with ``resume=False``)."""
     from redact.recipe import load_dataset_type
 
     section = resolve(load_dataset_type("eval")["augmentations"], "adversarial")
-    assert _growth_since_1_3("eval:adversarial", technique_pool(section)) == ([], [])
+    assert _growth_since_1_3("eval:adversarial", technique_pool(section)) is None
+    # The first pool alone, as a plan of 1.3 recorded it, is no change at all.
+    first = [fn for fn in technique_pool(section)
+             if fn.__name__ in _SPEC_1_3["eval:adversarial"]]
+    assert _growth_since_1_3("eval:adversarial", first) == ([], [])
 
 
 def test_a_natural_plan_of_spec_1_3_finds_the_language_mix_as_growth():
@@ -750,17 +757,19 @@ def test_a_natural_plan_of_spec_1_3_finds_the_language_mix_as_growth():
         "transliteration": 4, "code_switching": 10, "romanization": 10}
 
 
-def test_an_eval_plan_of_spec_1_2_finds_no_growth():
-    """The eval type's attack pool is pinned: the 36 techniques of 1.2 are the
-    36 of today's, so a 1.2 eval plan resumes without a pool warning."""
+def test_an_eval_plan_of_spec_1_2_is_refused_since_eval_pool_v2_changed_the_section():
+    """The 36 techniques of a 1.2 eval plan were the eval pool until eval
+    pool v2, which holds them all and 90 more, some older than the plan: a
+    1.2 eval plan raises on resume, naming ``pool``."""
     from redact.recipe import load_dataset_type
 
     pool = technique_pool(resolve(
         load_dataset_type("eval")["augmentations"], "adversarial"))
-    assert _growth_since_1_2("eval:adversarial", pool) == ([], [])
+    assert _growth_since_1_2("eval:adversarial", pool) is None
     eval_pool = json.loads((Path(__file__).parents[1] / "fixtures" / "eval_pool.json")
                            .read_text(encoding="utf-8"))
-    assert _SPEC_1_2["eval:adversarial"] == sorted(eval_pool)
+    assert set(_SPEC_1_2["eval:adversarial"]) < set(eval_pool)
+    assert len(eval_pool) - len(_SPEC_1_2["eval:adversarial"]) == 90    # noqa: PLR2004
 
 
 # --- the techniques the library retired ----------------------------------------
