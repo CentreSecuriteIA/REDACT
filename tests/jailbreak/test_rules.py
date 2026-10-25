@@ -117,10 +117,10 @@ _REFUSED_BY = {
         "persona_template", "persona", "cognitive", "framing", "policy_framing",
         "fsh", "dap", "fake_turns", "ascii_art", "impersonation"},
     "to_fake_history": {
-        "fake_turns", "fsh", "dap", "framing", "persona", "cognitive",
-        "persona_template", "policy_framing", "continuation", "indirect",
-        "structural", "neutral_container", "ascii_art", "translation",
-        "payload_split", "word_art", "wording"},
+        "fake_turns", "reasoning_injection", "fsh", "dap", "framing", "persona",
+        "cognitive", "persona_template", "policy_framing", "continuation",
+        "indirect", "structural", "neutral_container", "ascii_art",
+        "translation", "payload_split", "word_art", "wording"},
 }
 #: The four answer formats a persona template's own rules refuse; no other
 #: technique of their family is refused.

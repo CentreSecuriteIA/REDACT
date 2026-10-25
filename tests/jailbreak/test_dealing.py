@@ -297,8 +297,12 @@ def test_the_default_attacks_draw_every_technique_of_their_pool(section):
     holds them all. The first eval release's rules left the ten heavy full-text
     encodings 5 draws in all under the unit budget and 10 under the group
     budget, five and two of them never, until they got a dealing slot of
-    their own (``sampling.HEAVY_ENCODINGS``)."""
-    units = 4000
+    their own (``sampling.HEAVY_ENCODINGS``). Spec 1.5's four literature-gap
+    families shifted the seed-42 dealing, so the rarest members (the three
+    heavy ``sensitive_words`` encodings, complexity 3, which need a marked word
+    and three budget points) now need 5,000 units to all come out under the
+    group budget."""
+    units = 5000
     drawn, pool = simulate.deal_kind(section, units, groups=3, seed=42)
     table = simulate.shares(drawn, pool)
     texts = simulate.inputs(units, groups=3)["prompt"]
@@ -572,7 +576,7 @@ _BUDGETS = [
 # group's family counts and tie-break names change and the undealt draws gain
 # the new techniques; re-pinned as each family (fallacy, then policy_framing,
 # code_framing, reasoning_injection, bijection) was added.
-_PINNED_DRAWS = "cd650ef7feab4c59c35d620f60bc60596fece352b25929fe2ea9b02c1fb3f653"
+_PINNED_DRAWS = "2fb44d63a2447fd14804ac57e410753380eb6fd1f9abd03fe706ffb6478fe329"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

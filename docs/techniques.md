@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 318 active techniques in 5 layers and 43
+The jailbreak stage draws from 319 active techniques in 5 layers and 44
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -79,8 +79,8 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 | `hacking` | 5 | 49 | at most 1 |
 | `obfuscation` | 18 | 166 | no cap |
 | `requests` | 14 | 72 | at most 1 |
-| `manipulation` | 3 | 15 | at most 1 |
-| all | 43 | 318 | |
+| `manipulation` | 4 | 16 | at most 1 |
+| all | 44 | 319 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -139,6 +139,7 @@ that call a model call the generation model.
 | manipulation | `dap` | `example_priming` |  | 6 | `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_selected_many` | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_random_many`, `to_dap_selected_many` |
 | manipulation | `fake_turns` | `example_priming` |  | 3 | no | no | `to_fake_system_turn`, `to_fake_assistant_turn`, `to_fake_history` |
 | manipulation | `fsh` | `example_priming` |  | 6 | `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_selected_many` | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_random_many`, `to_fsh_selected_many` |
+| manipulation | `reasoning_injection` | `example_priming` |  | 1 | no | no | `to_fake_reasoning` |
 <!-- END families -->
 
 Each family's dimension is a tag of `configs/dimensions.json`: what the
@@ -777,6 +778,22 @@ their obfuscation block, and refuse the same hacking and request families,
 the persona templates, and the `structural` and `neutral_container`
 wrappers. The family is attack-only, and the eval type draws all three since
 eval pool v2.
+
+`reasoning_injection` (spec version 1.5) has one pure technique,
+`to_fake_reasoning` (H-CoT, Kuo 2502.12893): a fabricated chain-of-thought or
+deliberation block, written as if it were the assistant's own, that concludes
+the request is acceptable and should be answered, placed before the prompt
+(the finished question). It draws one of eight variants of its pool in
+`configs/jailbreak/manipulation/reasoning_injection_templates.json` (floor 8);
+the info names the variant (`variant=<name>`). Being of the manipulation
+layer it applies last and takes `fsh`, `dap` and `fake_turns`' place (one
+manipulation at most) and their obfuscation block (no heavy encoding,
+translation, `ascii_art`, `payload_split`, `word_art` or `wording` around it),
+inherited by being of the layer. Its dimension is `example_priming`, as the
+other manipulation families: it primes the assistant's own prior reasoning.
+It carries no cross rule of its own, so an approving reasoning preamble sits
+with a hacking frame or a request frame. The family is attack-only; a new
+family, not in the eval pool.
 
 **Obfuscation.**
 
