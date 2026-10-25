@@ -626,8 +626,10 @@ SPEC_1_4_ADDED = {"persona_template": 12, "suffixes": 24, "translation": 1,
 
 #: What spec 1.5 added to the attack pool: the semantic-reencoding family's
 #: four techniques (to_mathprompt, to_adversarial_poetry, to_stego_paragraph,
-#: to_infoflood). Translationese and sociolect join in their own commits.
-SPEC_1_5_ADDED = {"semantic_reencoding": 4}
+#: to_infoflood) and translationese (one technique, on the translation model
+#: under the switch, which the default attacks have on). Sociolect joins in
+#: its own commit.
+SPEC_1_5_ADDED = {"semantic_reencoding": 4, "translationese": 1}
 
 
 def _by_family(names: list[str]) -> dict[str, int]:
@@ -643,9 +645,9 @@ def _growth_since_1_2(key: str, pool: list) -> tuple[list[str], list[str]] | Non
 
 
 def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
-    """The attack pool of a plan made at 1.2 differs from today's by 111
+    """The attack pool of a plan made at 1.2 differs from today's by 112
     names, none retired: 36 dated 1.3 (the four translations switched on
-    among them), the 71 dated 1.4 (:data:`SPEC_1_4_ADDED`) and the 4 dated
+    among them), the 71 dated 1.4 (:data:`SPEC_1_4_ADDED`) and the 5 dated
     1.5 (:data:`SPEC_1_5_ADDED`). The library added them after the plan, so
     the plan is kept and the run warns."""
     added, retired = _growth_since_1_2(
@@ -656,7 +658,7 @@ def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
         for version in {by_name[name].since for name in added}}
     assert retired == []
     assert {version: len(names) for version, names in by_version.items()} == {
-        "1.3": 36, "1.4": 71, "1.5": 4}
+        "1.3": 36, "1.4": 71, "1.5": 5}
     assert set(_FOUR_TRANSLATIONS) <= set(by_version["1.3"])
     assert _by_family(by_version["1.4"]) == SPEC_1_4_ADDED
     assert "to_letter_spacing" in by_version["1.4"]

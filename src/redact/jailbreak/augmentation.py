@@ -31,10 +31,12 @@ from .plan import UNIT_HEADROOM, default_escalation_schedule
 from .pool import (
     DIALECT,
     TRANSLATION,
+    TRANSLATIONESE,
     all_techniques,
     dialects,
     languages,
     technique_pool,
+    translationese_names,
 )
 from .technique import DEFAULT_KINDS, KINDS, family_kinds, load_spec
 
@@ -688,10 +690,10 @@ def _check_denied_layers(where: str, resolved: dict) -> None:
 
 
 def _switch_off_translation(where: str, resolved: dict) -> None:
-    """With ``translation`` false, leave out of ``resolved`` the translation
-    and dialect families (both run on the translation model) and the
-    techniques its allow lists name and their ``family_weights`` entries, and
-    log a WARNING naming them.
+    """With ``translation`` false, leave out of ``resolved`` the translation,
+    dialect and translationese families (all run on the translation model) and
+    the techniques its allow lists name and their ``family_weights`` entries,
+    and log a WARNING naming them.
 
     An allow list left empty becomes ``None`` beside the other, which still
     names something, so the pool draws what that one names.
@@ -706,8 +708,9 @@ def _switch_off_translation(where: str, resolved: dict) -> None:
             f"{resolved['translation']!r}.")
     if resolved["translation"]:
         return
-    gated_families = (TRANSLATION, DIALECT)
-    gated = {TRANSLATION, DIALECT, *languages(), *dialects()}
+    gated_families = (TRANSLATION, DIALECT, TRANSLATIONESE)
+    gated = {TRANSLATION, DIALECT, TRANSLATIONESE,
+             *languages(), *dialects(), *translationese_names()}
     lists = [resolved["families"], resolved["techniques"]]
     named = [name for given in lists for name in given["allow"] or ()
              if name in gated]
@@ -721,15 +724,15 @@ def _switch_off_translation(where: str, resolved: dict) -> None:
                               if name not in gated] or None
     if named and all(given["allow"] is None for given in lists):
         raise ValueError(
-            f"{where} allows only translation or dialect ({named}) and "
-            f'{where}.translation is false; set "translation": true, or allow '
-            "something else.")
+            f"{where} allows only translation, dialect or translationese "
+            f'({named}) and {where}.translation is false; set "translation": '
+            "true, or allow something else.")
     resolved["family_weights"] = {
         family: weight for family, weight in resolved["family_weights"].items()
         if family not in gated_families}
     logger.warning(
-        "%s.translation is false, so the translation or dialect it names is "
-        "left out: %s.", where, named + weighted)
+        "%s.translation is false, so the translation, dialect or translationese "
+        "it names is left out: %s.", where, named + weighted)
 
 
 def _check_count(where: str, key: str, value, *, least: int) -> None:

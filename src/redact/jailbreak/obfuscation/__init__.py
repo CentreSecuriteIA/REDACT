@@ -17,6 +17,7 @@ from .structural import get_structural_functions
 from .suffixes import get_suffix_functions
 from .tokenbreak import get_tokenbreak_functions
 from .translation import get_translation_functions
+from .translationese import get_translationese_functions
 from .transliteration import get_transliteration_functions
 from .typos import get_typos_functions
 from .word_art import get_word_art_functions
@@ -45,4 +46,5 @@ def get_all_obfuscation_functions() -> list[Callable]:
         + get_romanization_functions()
         + get_dialect_functions()
         + get_semantic_reencoding_functions()
+        + get_translationese_functions()
     )

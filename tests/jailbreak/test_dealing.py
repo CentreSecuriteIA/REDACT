@@ -327,10 +327,16 @@ def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares
     were 28 to 42 then); spec 1.4 retuned the weight to 0.25 for about 40,
     and the bounds are those of spec 1.3 again. Dealt as encode's members the
     ten got 12, two of them never; dealt as a family of their own (weight 1),
-    ~200."""
+    ~200. Spec 1.5's two new obfuscation families (semantic_reencoding and
+    translationese) share the layer's family-first picks in turn, so at the
+    same weight of 0.25 the slot's count fell from 39 to 33 at seed 42 in
+    three groups; the lower bound moves to 30. The weight was not retuned for
+    them (that is a tuning decision of its own, and the other literature
+    families still to land will dilute the share again): see the literature
+    blockers."""
     counts = [default_shares[name]["count"] for name in _HEAVY]
-    assert 36 <= sum(counts) <= 60  # noqa: PLR2004
-    assert min(counts) >= 3  # noqa: PLR2004
+    assert 30 <= sum(counts) <= 60  # noqa: PLR2004
+    assert min(counts) >= 2  # noqa: PLR2004
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3, 7, 42, 43, 44, 45, 46, 123])
@@ -573,7 +579,11 @@ _BUDGETS = [
 # family) moved it: they join the obfuscation family-first picks, so the
 # group's family counts and tie-break names change from the first obfuscation
 # pick on, and 12 of the 200 undealt draws now hold one.
-_PINNED_DRAWS = "74c3608cf9c373ad3573f73f6580f0661dd835fe074e3cb4042d7bcd700cf612"
+# Spec 1.5's translationese (to_translationese, a second obfuscation family on
+# the translation model under the switch, which these draws have on) moved it
+# again: it joins the obfuscation family-first picks, and 6 of the 200 undealt
+# draws now hold it.
+_PINNED_DRAWS = "143759b9805301cd55b07e256613eeb9937699f35e2c0a467d2c14152ac4bf0d"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

@@ -247,10 +247,13 @@ def _heavy_draws(n: int) -> int:
 def test_the_weight_sets_how_often_the_heavy_encodings_are_drawn(monkeypatch):
     """About the weight times a family's draws: of 1,000 units in one group,
     15 at 0.2 and 29 at 0.4, where dealt as encode's members they were 4
-    (2 at seed 7). The ratio holds the weight, not the count."""
+    (2 at seed 7). The ratio holds the weight, not the count. Spec 1.5's two
+    new obfuscation families (semantic_reencoding and translationese) share the
+    layer's picks, so the count at 0.2 fell to 9; the floor moves to 8 and the
+    ratio bound is unchanged (it is a ratio)."""
     _at_weight(monkeypatch, 0.2)
     fifth = _heavy_draws(1000)
     _at_weight(monkeypatch, 0.4)
     double = _heavy_draws(1000)
-    assert fifth >= 10  # noqa: PLR2004
+    assert fifth >= 8  # noqa: PLR2004
     assert 1.6 <= double / fifth <= 2.4  # noqa: PLR2004
