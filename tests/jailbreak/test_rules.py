@@ -989,3 +989,40 @@ def test_a_translation_drawn_in_phase_4_still_joins_a_suffix_wrapper_container()
             if "to_french" in {t.__name__ for t in fn.techniques}
             for t in fn.techniques}
     assert {"to_adversarial_suffix_punctuation", "to_json", "to_csv_row"} <= held
+
+
+_TRANSLITERATIONS = ["to_cyrillic_transliteration", "to_greek_transliteration",
+                     "to_devanagari_transliteration", "to_arabic_transliteration"]
+
+
+@pytest.mark.parametrize("translit", _TRANSLITERATIONS)
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_base64", "to_rot13", "to_french", "to_russian",
+    "to_rewrite_with_typos_low", "to_lowercase",
+    "to_emoji_sprinkle_low", "to_payload_split"])
+def test_a_transliteration_refuses_the_whole_text_obfuscations_either_way(
+        translit, other):
+    """A transliteration is a whole-text script rewrite at the front: it
+    refuses the same obfuscation families a translation does (and translation
+    itself), each way."""
+    assert not _joins(translit, other)
+    assert not _joins(other, translit)
+
+
+@pytest.mark.parametrize("first", _TRANSLITERATIONS)
+@pytest.mark.parametrize("second", _TRANSLITERATIONS)
+def test_a_combination_holds_one_transliteration(first, second):
+    """One per family, so two transliterations never co-occur."""
+    assert not _joins(first, second)
+
+
+@pytest.mark.parametrize("translit", _TRANSLITERATIONS)
+@pytest.mark.parametrize("other", [
+    "to_json", "to_summarize", "to_fsh_random_short", "to_fictional_world"])
+def test_a_transliteration_joins_a_wrapper_a_request_or_the_hacking_layers(
+        translit, other):
+    """It changes the letters, not the frame, so a structural wrapper, a
+    request template, a hacking frame or a few-shot example may sit with it
+    (it is not in the manipulation block)."""
+    assert _joins(translit, other)
+    assert _joins(other, translit)

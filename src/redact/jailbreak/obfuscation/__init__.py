@@ -13,6 +13,7 @@ from .structural import get_structural_functions
 from .suffixes import get_suffix_functions
 from .tokenbreak import get_tokenbreak_functions
 from .translation import get_translation_functions
+from .transliteration import get_transliteration_functions
 from .typos import get_typos_functions
 from .word_art import get_word_art_functions
 from .wording import get_wording_functions
@@ -35,4 +36,5 @@ def get_all_obfuscation_functions() -> list[Callable]:
         + get_neutral_container_functions()
         + get_payload_split_functions()
         + get_word_art_functions()
+        + get_transliteration_functions()
     )

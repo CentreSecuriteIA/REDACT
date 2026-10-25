@@ -517,7 +517,12 @@ _BUDGETS = [
 # group's family counts and the names the dealer breaks a tie among change
 # from the first obfuscation pick on (219 of the 240 dealt units; the 200
 # undealt draws ask no dealer and do not move).
-_PINNED_DRAWS = "93982088b48668f879bb867db3cdaf1665975b1561731774159496f26b5f01ed"
+# Spec 1.4 added the four pure transliteration techniques (a new obfuscation
+# family at within_layer_order 13, complexity 2, drawn by the attacks): they
+# join the obfuscation family-first picks, so the group's family counts and
+# the names the dealer breaks a tie among change from the first obfuscation
+# pick on, and the undealt draws gain a new family to choose.
+_PINNED_DRAWS = "b620aff62b3fea60ccba6ae8f40813db83b9e5c725340b1d7e0176d74fb12c84"
 
 
 def test_the_budget_draws_are_the_pinned_ones():
