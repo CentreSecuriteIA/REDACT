@@ -263,7 +263,7 @@ def test_the_rules_id_moves_with_a_rule_not_with_the_pool_order_or_a_comment(
 
 
 @pytest.mark.parametrize(("name", "tag", "value"), [
-    ("to_morse", "needs_latin", True),
+    ("to_base64", "needs_latin", True),
     ("to_thai", "script", T.LATIN),
 ], ids=["needs_latin", "script"])
 def test_the_rules_id_leaves_out_the_tags_no_rule_reads(monkeypatch, name, tag, value):
@@ -273,7 +273,7 @@ def test_the_rules_id_leaves_out_the_tags_no_rule_reads(monkeypatch, name, tag, 
     import redact.jailbreak.plan as JP
 
     every = registry(all_techniques())
-    pool = [every["to_morse"], every["to_thai"]]
+    pool = [every["to_base64"], every["to_thai"]]
     before = JP.rules_id(pool, rounds=_BUDGET)
     assert getattr(every[name], tag) != value
     monkeypatch.setattr(every[name], tag, value)

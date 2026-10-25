@@ -160,20 +160,26 @@ The slot is a quota in every budget round, not a floor: about 40 draws in
 from 6 to 42 and round 4, whose budget of 9 dealt them about 121 times, falls
 to about 45. A count round deals them as `encode`'s members.
 
-Seventeen of them are tagged `needs_latin`: the ciphers `to_rot13`,
+Nineteen of them are tagged `needs_latin`: the ciphers `to_rot13`,
 `to_rot18`, `to_rot47`, `to_caesar_cipher`, `to_atbash`, the three
-`to_leetspeak_*` and their six `to_sensitive_words_encode_*` forms, and the
+`to_leetspeak_*` and their six `to_sensitive_words_encode_*` forms, the
 Latin-only transforms `to_lookalike_letters`, `to_fullwidth` and
-`to_math_styled`. They change only ASCII characters, the letters (ROT18
+`to_math_styled`, and `to_morse` and `to_braille`. They change only ASCII characters, the letters (ROT18
 also the digits, ROT47 every printable ASCII character, fullwidth also the
 digits), so they leave a text in another script as it was when it holds none
 of those, as a test checks on six samples of other scripts; ROT47 changes the
 ASCII punctuation or digits of such a text, and in a Latin-script text with
 accents (Vietnamese, Yoruba, Czech) the accented letters stay in clear under
 the letter ciphers.
-`to_morse` and `to_braille` pass such a text through as well (Morse only
-spaces its characters out) but are not tagged: both are in the eval pool,
-which is [pinned](#the-eval-pool), and completing them would change its text.
+`to_morse` and `to_braille` encode the Latin letters (Morse also the ASCII
+digits and the space, as `/`) and leave every other character as it is:
+braille gives a text in another script back unchanged, and Morse gives its
+characters back unencoded, spaced out as it spaces its codes. Both are in the
+eval pool, which is [pinned](#the-eval-pool); since no rule reads the tag,
+tagging them changed none of its draws or pairs, and their text is as it
+was. A test checks that each tagged technique gives back every non-ASCII
+character of the samples, in order, and that each but Morse leaves them
+unchanged.
 `to_reversed_*`, `to_zero_width_noise` and the byte codecs (`to_hex`,
 `to_binary`, `to_url_encoding`, `to_html_entities`, `to_base32`,
 `to_base85`) are not Latin-only: they change a text in any script.
