@@ -208,6 +208,7 @@ names of the last two, are read for this release with a
 | `variations_path` | beside `output_path`, else `Datasets/variations.csv` | The natural kind's file |
 | `manifest_path` | `jailbreaks.manifest.jsonl` beside the output | The adversarial kind's plan, with its plan file `<stem>.plan.json`, coverage table and variants table beside it |
 | `benign_path` | `Data_cache/benign/benign_samples.csv` | The benign data, with its manifest and ledger beside it |
+| `scenarios` | `false` | Keep the scene each cognitive or persona technique built its prompt on in `<stem>.scenarios.csv` beside each kind's manifest ([the scenarios table](stages/jailbreaks.md#the-scenarios-table)) |
 
 The run passes the recipe's `gen`, `check` and `translation` models as
 `model`, `check_model` and `translation_model`: the `check` model checks
@@ -1720,6 +1721,17 @@ columns by position, or compares two eval releases' headers, sees them. The
 stage files keep their columns, and nothing needs to run again: build again
 to get the columns. The build's run record now holds `spec_version`, the
 spec they were read off.
+
+**Release note: the scenarios table.** The jailbreak stage takes
+`scenarios` (a params key under `jailbreaks`; off by default): on, each kind
+keeps the scene each cognitive or persona technique built its prompt on in
+`<stem>.scenarios.csv` beside its manifest (`input_id`, `iteration`,
+`sample_id`, `technique`, `scenario`), so the model-written scenarios can
+be read beside the rows without growing `technique_info`, which still names
+the category only ([the scenarios table](stages/jailbreaks.md#the-scenarios-table)).
+Turning it on changes no row and no plan: a kept plan resumes with it, and
+the table holds the scenes of the units that run from then on. A fresh run
+removes the table with the kind's other files.
 
 ## The model registry
 

@@ -61,7 +61,13 @@ from redact.dataset import (
     take_per_group,
     write_concat,
 )
-from redact.dataset.planfile import coverage_path, plan_path, read_plan, variants_path
+from redact.dataset.planfile import (
+    coverage_path,
+    plan_path,
+    read_plan,
+    scenarios_path,
+    variants_path,
+)
 from redact.jailbreak import augmentation as augmentation_kinds
 from redact.jailbreak import pool as jailbreak_pool
 from redact.jailbreak.obfuscation import langid
@@ -553,6 +559,7 @@ def generate_jailbreaks(
     augmentation: dict | None = None,
     variations_path: str | Path | None = None,
     config_dir: str | Path | None = None,
+    scenarios: bool = False,
 ) -> pd.DataFrame:
     """Augment input prompts with jailbreak technique combinations and natural
     variations (batched).
@@ -612,6 +619,12 @@ def generate_jailbreaks(
             and ``taxonomy/`` files are read in place of the packaged ones
             (``taxonomy_dir``, given, wins for the benign taxonomy;
             :mod:`redact.config_overlay`). ``None``: the packaged only.
+        scenarios: Record the scene each cognitive or persona technique
+            builds its prompt on in ``<stem>.scenarios.csv`` beside each
+            kind's manifest (``input_id``, ``iteration``, ``sample_id``,
+            ``technique``, ``scenario``; :mod:`redact.jailbreak.scenarios`).
+            Off by default: the scenes are kept nowhere else, the row holds
+            the prompt built on them.
 
     Deprecated aliases:
         ``max_complexity``, ``max_obfuscations``, ``pure_only``,
@@ -721,7 +734,8 @@ def generate_jailbreaks(
             rounds=augmentation_kinds.rounds_of(kind),
             family_weights=kind["family_weights"] or None,
             auto_generate_benign=auto_generate_benign, batch_size=batch_size,
-            resume=resume, verbose=verbose, manifest_path=manifest_path, **kwargs,
+            resume=resume, verbose=verbose, manifest_path=manifest_path,
+            scenarios=scenarios, **kwargs,
         )
 
     rows = pd.DataFrame()
@@ -754,12 +768,12 @@ def _check_machine_translation(translation_model: str | None, prompt_dir) -> Non
 
 def _kind_files(out_path: Path, manifest_path: Path | None) -> dict:
     """:func:`redact.dataset.clear_stage`'s kwargs for the files of one kind
-    of the jailbreak stage: its CSV, manifest, coverage table, plan and
-    variants table."""
+    of the jailbreak stage: its CSV, manifest, coverage table, plan,
+    variants table and scenarios table."""
     manifest = manifest_path or Manifest.sidecar(out_path).path
     return {"artifact": out_path, "manifest_path": manifest,
             "also": (coverage_path(manifest), plan_path(manifest),
-                     variants_path(manifest))}
+                     variants_path(manifest), scenarios_path(manifest))}
 
 
 def _variations_csv(data_dir, output_path, variations_path) -> Path:

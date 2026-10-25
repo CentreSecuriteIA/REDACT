@@ -4,7 +4,8 @@ The plan file ``<stem>.plan.json`` records what a stage's plan was made
 with, so a resume can tell when it would plan otherwise. The coverage table
 ``<stem>.coverage.csv`` counts what the plan holds; the jailbreak stage's
 variants table ``<stem>.variants.csv`` counts the template variants its
-rows drew.
+rows drew, and its scenarios table ``<stem>.scenarios.csv`` holds the scene
+each cognitive or persona technique built on, when the stage records them.
 """
 
 import json
@@ -29,6 +30,11 @@ def coverage_path(manifest_path) -> Path:
 def variants_path(manifest_path) -> Path:
     """The variants CSV beside the manifest at ``manifest_path``."""
     return _beside(manifest_path, ".variants.csv")
+
+
+def scenarios_path(manifest_path) -> Path:
+    """The scenarios CSV beside the manifest at ``manifest_path``."""
+    return _beside(manifest_path, ".scenarios.csv")
 
 
 def plan_path(manifest_path) -> Path:

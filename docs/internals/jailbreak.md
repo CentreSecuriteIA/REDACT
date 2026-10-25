@@ -42,10 +42,11 @@ the technique names are in [techniques.md](../techniques.md).
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates`, `after_request_obfuscation` (what may still join once a pick is the request obfuscation) |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family`, `deal_key` (the name a dealer counts a technique under), `is_heavy_encoding`, `REQUEST_SCOPE`, `HEAVY_ENCODINGS` |
 | `plan.py` | `plan_run`, `assign_combination` (with the opt-in group budget: `_allowance`, `UNIT_HEADROOM`), `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written through `dataset/planfile.py`, its `spec_version` dating the pool and its `rules` the rules it was drawn by, `rules_id`), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
-| `chain.py` | `run_chain`, `combine_techniques`, `in_layer_order`, `apply_combination` |
-| `units.py` | `pending_units`, `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
+| `chain.py` | `run_chain` (with `scenarios`, a list, it hands each technique that takes it a `record_scenario` of its own), `combine_techniques`, `in_layer_order`, `apply_combination` |
+| `units.py` | `pending_units` (with `scenarios`, each unit collects its scenes), `is_pending`, `unit_gen`, `row_of`, `error_row_of` |
 | `pipeline.py` | `run_augmentation`, the stage core; `_library_change`, the kept plan's pool against what the library added and retired since |
 | `variants.py` | `variants_of` (a row's template variants, paired by position), `write_variants` (the kind's `<stem>.variants.csv`), `COLUMNS` |
+| `scenarios.py` | `rows_of` (a finished unit's scene rows), `write_scenarios` (the kind's `<stem>.scenarios.csv` kept to its rows), `COLUMNS` |
 | `directives.py` | The variant pools of the pure techniques: `read_pools` (a template file's pools by directive, whatever its shape), `PoolRef` and `uses_pool` (the pool a technique draws from, set as its `variant_pool`), `check_pools` (called by `pool.py` at import), `enabled`, `draw_variant`, `apply_template_directive`; `load_templates` (a file as written) |
 
 ## Techniques
@@ -245,7 +246,9 @@ core, called once per kind:
    path (Anthropic, introspection) a failed `generate()`, a too-long prompt
    included, propagates and stops the stage.
 7. **Count the variants.** `write_variants` reads the kind's CSV in chunks
-   and writes `<stem>.variants.csv` beside the manifest (below).
+   and writes `<stem>.variants.csv` beside the manifest (below). When the
+   kind has a `<stem>.scenarios.csv`, `write_scenarios` keeps it to the
+   rows the CSV holds (below).
 8. **Read back** when asked.
 
 A planned unit whose input is not in the frame is skipped; an input that is
@@ -565,6 +568,23 @@ technique gets a row, 0 when none drew it; a technique outside the pool
 that a row drew (a kept plan's) is added after. No technique's info
 changed for the table: the eval-pool techniques that name no `variant=`
 (continuation, structural) keep their info while the eval pool is pinned.
+
+With `run_augmentation(scenarios=True)` (the front's `scenarios`), each
+pending unit carries a `scenarios` list, which `unit_gen` hands to
+`run_chain`. The chain gives each technique that takes `record_scenario`
+(or `**kwargs`) a callable bound to its name; `cognitive._cognitive_gen`
+and `personas._persona_gen` call it with the scene the construction is
+built on, after the check accepted it, so a discarded scenario records
+nothing. `_row` puts the unit's scene rows (`scenarios.rows_of`: `input_id`,
+`iteration`, the row's `sample_id`, `technique`, `scenario`) on its row
+under a private key, which the save's `_append` takes off and appends to
+`<stem>.scenarios.csv` after the rows and before the acks. The table is
+not in the ledger's `_saved`: `scenarios.write_scenarios(out_path, path)`,
+after the units, keeps the rows whose `(input_id, iteration, sample_id)`
+the kind's CSV holds, the last of a repeated one, and writes the table
+again (`write_concat`) only when one goes; a fresh run removes it, and
+`stages._kind_files` lists it for `clear_stage`. Recording changes no row:
+a test runs the default attack pool both ways and compares the CSVs.
 
 ## The augmentation section in code
 
