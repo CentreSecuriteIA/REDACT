@@ -149,7 +149,7 @@ REDACT/
 │       │       ├── rewrite/              # persuasion_techniques.json: the twelve persuasion techniques
 │       │       ├── hacking/              # framing_templates.json, cognitive_techniques.json, personas.json, persona_templates.json
 │       │       ├── manipulation/         # fake_turns_templates.json
-│       │       ├── obfuscation/          # structural_templates.json, neutral_container_templates.json, payload_split_templates.json, word_art_templates.json, wording_templates.json, decode_hints.json
+│       │       ├── obfuscation/          # structural_templates.json, neutral_container_templates.json, payload_split_templates.json, word_art_templates.json, wording_templates.json, decode_hints.json, suffix_strings.json
 │       │       ├── requests/             # answer, answer_language, continuation, indirect, distractor, impersonation, temporal, asking, smalltalk, benign_role templates
 │       │       └── multi_turn/           # crescendo_followups.json
 │       │
