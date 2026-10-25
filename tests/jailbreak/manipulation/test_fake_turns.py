@@ -26,9 +26,12 @@ _DIRECTIVES = {"to_fake_system_turn": "fake_system_turn",
                "to_fake_history": "fake_history"}
 
 
-def test_the_three_come_last_in_the_manipulation_layer():
-    assert [fn.__name__ for fn in get_all_manipulation_functions()[-3:]] == list(
-        _DIRECTIVES)
+def test_the_three_come_after_fsh_and_dap_in_the_manipulation_layer():
+    """The fake turns follow fsh and dap; spec 1.5's reasoning_injection, the
+    newest manipulation family, is the only one after them."""
+    names = [fn.__name__ for fn in get_all_manipulation_functions()]
+    assert names[-4:-1] == list(_DIRECTIVES)
+    assert names[-1] == "to_fake_reasoning"
 
 
 @pytest.mark.parametrize("fn", _FNS, ids=lambda fn: fn.__name__)
