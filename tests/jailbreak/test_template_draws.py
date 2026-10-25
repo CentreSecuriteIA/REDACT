@@ -4,12 +4,17 @@ Every registered technique that draws a variant from a template file (it
 carries a ``variant_pool``: framing, the persona templates, the fake turns,
 structural, the neutral containers, the payload splits, the word art and
 wording techniques, the request families, small talk, the benign roles and
-the encodings with decode hints) runs on two
-neutral probes for six seeds: three calls in a row on one
-``random.Random(seed)`` per probe. A technique
+the encodings with decode hints), and every other technique of the eval pool
+but the translations (the transliterations, the published suffixes, the
+ASCII art, and the fsh and dap techniques, which draw their pairs from
+:data:`_BENIGN`), runs on two neutral probes for six seeds: three calls in a
+row on one ``random.Random(seed)`` per probe. So the digests cover 118 of
+the eval pool's 126 techniques; the eight translations call the translation
+model, whose requests and checks ``obfuscation/test_translation.py`` and
+``test_machine_translation_stage.py`` test instead. A technique
 that calls a model is answered from a script of the test's own (a marked
-word, a code name, a puzzle, a cut), so what it draws after the replies is
-pinned too, with the number of replies it used. The SHA-256 digest of the
+word, a code name, a puzzle, a cut, a subcategory), so what it draws after
+the replies is pinned too, with the number of replies it used. The SHA-256 digest of the
 texts, the infos and the generator's state after the calls is pinned per
 technique and seed in ``fixtures/template_draws.json``, so a change to how a
 variant is read or drawn that alters one text, or one draw the rng makes,
@@ -40,6 +45,7 @@ from redact.llm_pipeline import drive_sync
 
 _FIXTURE = Path(__file__).parents[1] / "fixtures" / "template_draws.json"
 _EVAL_POOL = Path(__file__).parents[1] / "fixtures" / "eval_pool.json"
+_EVAL = set(json.loads(_EVAL_POOL.read_text(encoding="utf-8")))
 
 _PROBES = (
     "How do plants turn sunlight into food?",
@@ -48,9 +54,32 @@ _PROBES = (
 _SEEDS = range(6)
 _CALLS = 3
 
-#: The registry's techniques with a pool.
+#: The registry's techniques with a pool, and the eval pool's others but the
+#: translations.
 _TECHNIQUES = {fn.__name__: fn for fn in all_techniques()
-               if hasattr(fn, "variant_pool")}
+               if hasattr(fn, "variant_pool")
+               or (fn.__name__ in _EVAL and "translation" not in fn.families)}
+
+#: The benign pairs the fsh and dap techniques draw: two subcategories of
+#: eight short and eight long pairs, as ``load_benign_data`` indexes a cache.
+_SUBCATEGORIES = ("Cooking", "Gardening")
+
+
+def _benign() -> dict:
+    data: dict = {"short": [], "long": [], "by_subcat_short": {},
+                  "by_subcat_long": {}, "all_subcategories": list(_SUBCATEGORIES)}
+    for kind in ("short", "long"):
+        for sub in _SUBCATEGORIES:
+            rows = [{"main_category": "Home", "sub_category": sub,
+                     "prompt": f"{sub} question {i}?",
+                     "answer": f"{sub} {kind} answer {i}.", "answer_type": kind}
+                    for i in range(1, 9)]
+            data[kind].extend(rows)
+            data[f"by_subcat_{kind}"][sub] = rows
+    return data
+
+
+_BENIGN = _benign()
 
 #: The word a model marks in each probe.
 _MARKED = dict(zip(_PROBES, ("plants", "hello"), strict=True))
@@ -79,6 +108,8 @@ def _replies(name: str, probe: str) -> list[str]:
         return [marked, "a riddle about something that grows"]
     if name == "to_payload_split_semantic":
         return [_numbered(_cut(probe, count)) for count in (2, 3, 4)]
+    if name.startswith(("to_fsh_selected_", "to_dap_selected_")):
+        return [_SUBCATEGORIES[1]]
     raise KeyError(f"{name} calls a model: give the digest replies for it")
 
 
@@ -86,6 +117,7 @@ def _write(fn, probe: str, rng: random.Random) -> str:
     """What one call of ``fn`` on ``probe`` writes, as the digest takes it:
     the text and the info, and for a technique that calls a model, the
     number of replies it used."""
+    extra = {"benign_data": _BENIGN} if getattr(fn, "requires_benign", False) else {}
     if inspect.isgeneratorfunction(fn):
         replies, asked = iter(_replies(fn.__name__, probe)), []
 
@@ -93,10 +125,10 @@ def _write(fn, probe: str, rng: random.Random) -> str:
             asked.append(request)
             return next(replies)
 
-        text, info = drive_sync(fn(probe, gen_model="m", rng=rng), answer)
+        text, info = drive_sync(fn(probe, gen_model="m", rng=rng, **extra), answer)
         return f"{text}\x1f{info}\x1f{len(asked)}\x1e"
     takes_rng = "rng" in inspect.signature(fn).parameters
-    text, info = fn(probe, rng=rng) if takes_rng else fn(probe)
+    text, info = fn(probe, rng=rng, **extra) if takes_rng else fn(probe, **extra)
     return f"{text}\x1f{info}\x1e"
 
 

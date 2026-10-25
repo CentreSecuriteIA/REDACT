@@ -815,10 +815,12 @@ among them as before. Two of the rules kept as they were reach further now:
 lifting the manipulation block would admit 146 eval pairs (104 of the first
 pool and 42 of `fake_turns` beside a translation, a heavy encoding or ASCII
 art), and lifting `fake_turns`' refusal of `structural` and
-`neutral_container` 27 (none before). The text a technique draws for a seed
-is pinned for all 126 (`template_draws.json`, whose eval-pool guard now
-covers the new techniques, so a change to their templates is an eval
-review of its own).
+`neutral_container` 27 (none before). The text a technique draws for a seed is pinned by digest for 118 of the
+126 (`template_draws.json`, whose eval-pool guard covers them, so a change
+to their text is an eval review of its own): the template techniques, and,
+since a later fix, the transliterations, the published suffixes, the ASCII
+art and the fsh and dap techniques; the eight translations call the
+translation model and are tested by their requests instead.
 
 No axis is pinned for v2: `check_dimensions` passes as it did. The
 families admitted vary dimensions no axis of the eval type relates to

@@ -349,8 +349,10 @@ contract.
    type's draws shows as a diff of that file, regenerated with
    `PYTHONPATH=src python -m tests.jailbreak.test_eval_pairs` in an eval
    review.
-   A technique that draws a variant from a pool (it has a `variant_pool`)
-   is also pinned by what it writes:
+   A technique that draws a variant from a pool (it has a `variant_pool`),
+   and every other technique of the eval pool but the translations (a fsh
+   or dap one draws on the test's own benign pairs), is also pinned by what
+   it writes:
    `tests/jailbreak/test_template_draws.py` runs each registered one on two
    neutral probes for six seeds (one that calls a model is answered from a
    script of the test's own, which a new one needs too) and compares a

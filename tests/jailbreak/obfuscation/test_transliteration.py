@@ -1,5 +1,9 @@
 """Rule-based transliteration: deterministic, lossy, script-only rewrites."""
 
+import hashlib
+import itertools
+import json
+
 import pytest
 
 import redact.jailbreak  # noqa: F401  (tags the techniques)
@@ -73,3 +77,66 @@ def test_output_is_entirely_in_the_target_script_or_kept_characters(script):
     block (the table's values), so the result is readable text, not mojibake."""
     for value in _TABLES[script].values():
         assert value and not any(c.isascii() and c.isalpha() for c in value)
+
+
+# --- the tables and what they write, pinned ----------------------------------
+# The family is in the eval pool, so its text may move only in an eval
+# review: each table is pinned by digest, and so is what it writes for a
+# sample that holds every key of every table as a word of its own (longest
+# first), then a sentence with case, digraphs inside words, digits,
+# punctuation, a non-ASCII letter and braces. An edited or swapped entry moves
+# the first digest; a change to the matching (digraphs, case, what is kept)
+# moves the second. tests/fixtures/template_draws.json pins the techniques on
+# its own probes too, under its eval-review guard.
+
+_KEYS = sorted({key for table in _TABLES.values() for key in table},
+               key=lambda key: (-len(key), key))
+_PINNED_SAMPLE = (" ".join(_KEYS)
+                  + " | The Quick, BROWN fox; Psalm 3pm, x-ray Shchi? café {braces}")
+
+#: Per script: the first 16 hex digits of the SHA-256 of the table (its JSON,
+#: keys sorted) and of what it writes for :data:`_PINNED_SAMPLE`.
+_PINNED = {
+    "arabic": ("720a63b3d09e0600", "e96953bacfe12488"),
+    "cyrillic": ("ccbb60a5f2eba369", "16ec51cedb779efe"),
+    "devanagari": ("fd236fd0a60b8dd6", "ddcf7ed56057f790"),
+    "greek": ("56d8c57ace667f4b", "5d78e382c7fc3743"),
+}
+
+
+def _short_digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def test_every_table_is_pinned():
+    assert sorted(_PINNED) == _SCRIPTS
+
+
+@pytest.mark.parametrize("script", _SCRIPTS)
+def test_the_table_and_what_it_writes_are_pinned(script):
+    table = _TABLES[script]
+    assert (_short_digest(json.dumps(table, sort_keys=True, ensure_ascii=False)),
+            _short_digest(_transliterate(_PINNED_SAMPLE, table))) == _PINNED[script]
+
+
+@pytest.mark.parametrize("script", _SCRIPTS)
+def test_every_key_alone_is_written_as_its_entry(script):
+    """A digraph or trigraph wins over its letters (``sh`` is one grapheme,
+    not ``s`` then ``h``), in either case."""
+    table = _TABLES[script]
+    for key, value in table.items():
+        assert _transliterate(key, table) == value, key
+        assert _transliterate(key.upper(), table) == value, key
+
+
+@pytest.mark.parametrize("script", _SCRIPTS)
+def test_swapping_any_two_entries_changes_the_pinned_text(script):
+    """The sample holds every key, so the pinned output catches a swap of
+    any two entries that write different text."""
+    table = _TABLES[script]
+    pinned = _transliterate(_PINNED_SAMPLE, table)
+    for first, second in itertools.combinations(table, 2):
+        if table[first] == table[second]:
+            continue
+        swapped = {**table, first: table[second], second: table[first]}
+        assert _transliterate(_PINNED_SAMPLE, swapped) != pinned, (first, second)
