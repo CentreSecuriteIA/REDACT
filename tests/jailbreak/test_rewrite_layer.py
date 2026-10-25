@@ -605,6 +605,22 @@ def test_a_rewrite_technique_does_not_plan_the_translation_model(monkeypatch):
     assert resolve_role({}, "translation", section) == []
 
 
+def test_a_dialect_plans_the_translation_model_only_under_the_switch():
+    """A dialect runs on the translation model, so a kind that draws one plans
+    it; with the translation switch off the dialect leaves the pool and the
+    model is not planned."""
+    on = {"adversarial": {"families": {"allow": ["dialect"]}, "translation": True},
+          "natural": None}
+    off = {"adversarial": {"families": {"allow": ["dialect"]}, "translation": False},
+           "natural": None}
+    assert uses_translation(
+        technique_pool(augmentations_of({"augmentations": on})["adversarial"]))
+    assert resolve_role({}, "translation", on) == [
+        default_model_for_role("translation")]
+    assert not technique_pool(augmentations_of({"augmentations": off})["adversarial"])
+    assert resolve_role({}, "translation", off) == []
+
+
 @pytest.mark.parametrize("dataset_type", ["eval", "training"])
 def test_the_dataset_types_plan_the_models_they_planned(dataset_type):
     """Both types' attacks translate, so the translation model is planned; the

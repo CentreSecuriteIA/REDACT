@@ -65,6 +65,15 @@
       "calls": [2, 12],
       "cross_incompatible_with": ["ascii_art", "encode", "sensitive_words", "tokenbreak", "word_art", "wording", "typos", "casual_writing", "noise", "payload_split"]
     },
+    "dialect": {
+      "description": "The prompt translated into a regional language variant (Brazilian Portuguese, Mexican Spanish, Canadian French, Egyptian Arabic, Swiss German, Traditional Chinese) on the machine-translation model, which takes a region/script code. One technique per row of dialect_variants.json; it reuses the translation machinery (the piece-by-piece machine-translation path, or the chat path by name). Gated by its base language's GlotLID labels and length band (GlotLID tells the base language, not the region) and, for Traditional Chinese, a Traditional-character share; region adherence itself is not verified (see the blockers note). Like translation it runs on the translation model and is gated by a kind's translation switch. It refuses the same obfuscation families a translation does, translation itself and the other language-mix families. Admitted to the natural kind (under the translation switch) in the spec 1.4 language-mix step; adversarial only until then",
+      "layer": "obfuscation",
+      "dimension": "language",
+      "within_layer_order": 11,
+      "check": "translate",
+      "calls": [2, 12],
+      "cross_incompatible_with": ["ascii_art", "encode", "sensitive_words", "tokenbreak", "word_art", "wording", "typos", "casual_writing", "noise", "payload_split", "translation", "transliteration", "code_switching", "romanization"]
+    },
     "code_switching": {
       "description": "A model rewrites the prompt with some phrases in a second language and the rest in English, keeping the meaning (one technique per language of code_switch_languages.json). A whole-text language rewrite at the front of the obfuscations; a code gate checks the mix (the second language's share of the letters for a non-Latin script, GlotLID over word windows for a Latin one) before the check model reads it for meaning. It refuses the same obfuscation families a translation does, translation itself and the other language-mix families, since a second language rewrite over any of them is incoherent. Admitted to the natural kind in the spec 1.4 language-mix step; adversarial only until then",
       "layer": "obfuscation",
@@ -358,7 +367,8 @@
     "translation":     { "file": "languages.json", "where": "translation", "name": "to_{slug}", "requires_llm": true },
     "answer_language": { "file": "languages.json", "where": "answer_language", "name": "to_ask_answer_in_{slug}", "requires_llm": false },
     "code_switching":  { "file": "code_switch_languages.json", "name": "to_code_switch_{slug}", "requires_llm": true, "complexity": 2 },
-    "romanization":    { "file": "romanization_languages.json", "name": "to_romanize_{slug}", "requires_llm": true, "complexity": 2 }
+    "romanization":    { "file": "romanization_languages.json", "name": "to_romanize_{slug}", "requires_llm": true, "complexity": 2 },
+    "dialect":         { "file": "dialect_variants.json", "name": "to_dialect_{slug}", "requires_llm": true, "complexity": 2 }
   },
 
   "techniques": {

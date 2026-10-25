@@ -1072,3 +1072,26 @@ def test_a_combination_holds_one_romanization():
 def test_romanization_joins_a_wrapper_a_request_or_a_few_shot(other):
     assert _joins("to_romanize_hindi", other)
     assert _joins(other, "to_romanize_hindi")
+
+
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_base64", "to_french", "to_russian", "to_lowercase",
+    "to_cyrillic_transliteration", "to_code_switch_spanish", "to_romanize_hindi"])
+def test_dialect_refuses_the_whole_text_obfuscations_either_way(other):
+    """A dialect is a translation into a regional variant: it refuses the
+    obfuscation families a translation does, translation, and the other
+    language-mix families, each way."""
+    assert not _joins("to_dialect_mexican_spanish", other)
+    assert not _joins(other, "to_dialect_mexican_spanish")
+
+
+def test_a_combination_holds_one_dialect():
+    assert not _joins("to_dialect_mexican_spanish", "to_dialect_canadian_french")
+
+
+@pytest.mark.parametrize("other", ["to_json", "to_summarize", "to_fsh_random_short"])
+def test_a_dialect_joins_a_wrapper_a_request_or_a_few_shot(other):
+    """Unlike translation, a dialect is not in the manipulation block, so fsh
+    and dap may sit with it (a deliberate deviation; see the blockers note)."""
+    assert _joins("to_dialect_mexican_spanish", other)
+    assert _joins(other, "to_dialect_mexican_spanish")
