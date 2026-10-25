@@ -46,6 +46,15 @@ of the run, not a guarantee against running out of memory.
 #     that attempt can miss, and a run one unload would fit stays unfit.
 #   - A load that hangs is ended only on the way out (vllm.EXIT_WAIT_S) or by
 #     a second signal; the run does not time a load out.
+#   - An engine loaded before the run (a notebook's) that a stage calls is
+#     resident, for the plan, only from the first stage that calls it. The
+#     driver unloads it on entering an earlier stage whose plan leaves it
+#     out and loads a model (driver._strays; one more load, tested offline
+#     only). Where it stays loaded it keeps the share and cards it was built
+#     with (_survey warns, and plan.loaded names them), and a model planned
+#     beside it may fail to load. The fix: have plan_phases count it from
+#     its first stage on and pass its cards as pinned (placement takes
+#     pinned, but only tests pass it).
 
 import logging
 

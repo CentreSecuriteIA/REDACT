@@ -1,11 +1,13 @@
 """Tests for the per-category tree."""
 
 import pandas as pd
+import pytest
 
 from redact import paths
-from redact.dataset import append_rows, content_id
+from redact.dataset import append_rows, content_id, iter_categories, load_taxonomy
 from redact.dataset.categories import (
     SAMPLE_COLUMNS,
+    check_category_name,
     discover_categories,
     merge_all,
     merge_category_csvs,
@@ -14,6 +16,37 @@ from redact.dataset.categories import (
     sample_row,
     take_per_group,
 )
+
+
+class TestCheckCategoryName:
+    @pytest.mark.parametrize("taxonomy", ["harmful", "benign"])
+    def test_every_packaged_category_names_a_folder(self, taxonomy):
+        for name, _ in iter_categories(load_taxonomy(taxonomy)):
+            assert check_category_name(name) == name
+
+    @pytest.mark.parametrize("name, why", [
+        ("Weapons/Explosives", "path separator"),
+        ("Back\\slash", "path separator"),
+        ("Q: tricks", "may not hold"),
+        ('Say "no"', "may not hold"),
+        ("Why?", "may not hold"),
+        ("Tab\there", "control character"),
+        ("Trailing.", "ends with a dot"),
+        ("Trailing ", "ends with a dot or a space"),
+        ("..", "ends with a dot"),
+        ("", "empty"),
+        ("   ", "empty"),
+        (None, "empty"),
+        ("con", "device name"),
+        ("LPT1.notes", "device name"),
+    ])
+    def test_a_name_no_folder_can_have_is_refused_saying_why(self, name, why):
+        with pytest.raises(ValueError, match="cannot name a folder") as refused:
+            check_category_name(name)
+        assert why in str(refused.value)
+
+    def test_a_name_that_only_starts_like_a_device_is_kept(self):
+        assert check_category_name("Console games") == "Console games"
 
 
 class TestReadCategoryCsv:
@@ -43,17 +76,17 @@ class TestReadCategoryCsv:
 
 class TestSampleRow:
     _EXTRA = {"entry_type": "harmful", "subcategory": "Sub", "reasoning": "fine",
-              "template_style": "long", "rejection_reason": ""}
+              "iteration": 0, "rejection_reason": ""}
 
     def test_the_sample_columns_come_first_then_the_extra_ones(self):
         row = sample_row("a text", "Cyber", turn=2, accepted=False,
                          source="constitution", extra=self._EXTRA)
-        assert list(row) == [*SAMPLE_COLUMNS, "reasoning", "template_style"]
+        assert list(row) == [*SAMPLE_COLUMNS, "reasoning", "iteration"]
         assert row == {
             "sample_id": content_id("a text"), "sample": "a text", "category": "Cyber",
             "subcategory": "Sub", "entry_type": "harmful", "turn": 2, "accepted": False,
             "rejection_reason": "", "source": "constitution", "reasoning": "fine",
-            "template_style": "long"}
+            "iteration": 0}
 
     def test_a_sample_column_nothing_gives_is_empty(self):
         row = sample_row("a text", "Cyber", turn=0)

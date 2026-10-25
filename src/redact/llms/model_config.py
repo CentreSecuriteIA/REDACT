@@ -31,6 +31,9 @@ from .backends import (
 from .backends.base import DEFAULT_MAX_RETRIES
 from .backends.introspection import validate_capture
 
+#: The highest default_temperature a model may set.
+_MAX_TEMPERATURE = 2.0
+
 # Whose budget an APIConfig's rpm is: "model" for this model alone, "endpoint"
 # for every model behind the same provider, URL and key.
 RATE_LIMIT_SCOPES: frozenset[str] = frozenset({"model", "endpoint"})
@@ -358,13 +361,19 @@ class ModelConfig:
         name: Model identifier used at call sites.
         roles: Logical roles this model can fill, for
             :func:`default_model_for_role`.
-        is_uncensored: True for uncensored generation models.
+        is_uncensored: True for uncensored generation models. A record
+            only: no code reads it.
         supports_system_prompt: False if the model ignores system messages.
             The backend then folds system content into the first user
             message.
         default_max_tokens: Used when a caller passes no ``max_tokens``.
         default_temperature: Used when a caller passes no temperature.
             ``None`` leaves it to the backend or provider.
+        supports_temperature: False for a model that rejects sampling
+            settings (Claude Opus 4.7 and later): a temperature a call asks
+            for, such as the checks' ``CHECK_TEMPERATURE``, is then not
+            sent, and the provider's default sampling applies. Such a model
+            takes no ``default_temperature``.
         backend_type: The default setup: "api", "vllm" or "introspect".
             ``None`` means the only setup present. The API provider is named
             by ``api.backend_type``, not here.
@@ -379,6 +388,7 @@ class ModelConfig:
     supports_system_prompt: bool = True
     default_max_tokens: int = 2000
     default_temperature: float | None = None
+    supports_temperature: bool = True
     backend_type: str | None = None
 
     api: APIConfig | None = None
@@ -388,7 +398,8 @@ class ModelConfig:
     def __post_init__(self) -> None:
         _check_str("ModelConfig.name", self.name)
         _require(isinstance(self.roles, list),
-                 f"{self.name!r}: roles must be a list, got {type(self.roles).__name__}",
+                 f"{self.name!r}: roles must be a list, "
+                 f"got {type(self.roles).__name__}",
                  TypeError)
         for role in self.roles:
             _check_str(f"{self.name!r}: role", role)
@@ -409,10 +420,16 @@ class ModelConfig:
                 TypeError,
             )
             _require(
-                0.0 <= self.default_temperature <= 2.0,
+                0.0 <= self.default_temperature <= _MAX_TEMPERATURE,
                 f"{self.name!r}: default_temperature must be within 0.0-2.0, "
                 f"got {self.default_temperature!r}",
             )
+        _check_bool(f"{self.name!r}: supports_temperature", self.supports_temperature)
+        _require(
+            self.supports_temperature or self.default_temperature is None,
+            f"{self.name!r}: default_temperature is set, but supports_temperature "
+            f"is false: a model that takes no temperature has no default one.",
+        )
 
         for field_name, value, cls in (
             ("api", self.api, APIConfig),
@@ -476,13 +493,15 @@ def _load_roles() -> dict[str, str]:
         roles = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Could not read roles from {path}: {exc}") from exc
-    _require(isinstance(roles, dict), f"{path}: expected a JSON object of role -> description")
+    _require(isinstance(roles, dict),
+             f"{path}: expected a JSON object of role -> description")
     return roles
 
 
 def _build_entry(name: str, raw: dict) -> ModelConfig:
     """Turn one JSON entry into a validated :class:`ModelConfig`."""
-    _require(isinstance(raw, dict), f"model {name!r}: entry must be a JSON object", TypeError)
+    _require(isinstance(raw, dict),
+             f"model {name!r}: entry must be a JSON object", TypeError)
     fields = {k: v for k, v in raw.items() if k not in _SETUP_CLASSES and k != "notes"}
     unknown = set(fields) - {f.name for f in dataclasses.fields(ModelConfig)}
     _require(not unknown, f"model {name!r}: unknown field(s) {sorted(unknown)}")
@@ -503,7 +522,8 @@ def _load_registry() -> dict[str, ModelConfig]:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Could not read models from {path}: {exc}") from exc
-    _require(isinstance(raw, dict), f"{path}: expected a JSON object of model -> config")
+    _require(isinstance(raw, dict),
+             f"{path}: expected a JSON object of model -> config")
 
     registry: dict[str, ModelConfig] = {}
     problems: list[str] = []
@@ -576,6 +596,7 @@ def register_model(
     api: APIConfig | None = None,
     vllm: VLLMConfig | None = None,
     introspect: IntrospectConfig | None = None,
+    supports_temperature: bool = True,
 ) -> None:
     """Add or replace a model in the registry for this process.
 
@@ -607,6 +628,8 @@ def register_model(
         api: Hosted-endpoint setup.
         vllm: vLLM setup.
         introspect: Internals-capture setup.
+        supports_temperature: False for a model that rejects sampling
+            settings: a call's temperature is then not sent.
 
     Raises:
         TypeError: A field has the wrong type.
@@ -622,6 +645,7 @@ def register_model(
         supports_system_prompt=supports_system_prompt,
         default_max_tokens=default_max_tokens,
         default_temperature=default_temperature,
+        supports_temperature=supports_temperature,
         backend_type=backend_type,
         api=api,
         vllm=vllm,

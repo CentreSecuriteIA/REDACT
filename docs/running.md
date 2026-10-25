@@ -11,7 +11,7 @@ Python 3.11 or later.
 
 ```bash
 pip install -e .                   # core: pandas, openai, anthropic, python-dotenv, pyfiglet, filelock
-pip install -e ".[vllm]"           # local models through vLLM (vllm, hf_transfer, psutil, langid)
+pip install -e ".[vllm]"           # local models through vLLM 0.31 or later (vllm, hf_transfer, psutil, langid)
 pip install -e ".[langid]"         # GlotLID, the language check of a machine translation and of a paraphrase
 pip install -e ".[transformers]"   # the introspection backend (torch, transformers, accelerate)
 pip install -e ".[hf]"             # loading published datasets from the HuggingFace Hub
@@ -19,9 +19,12 @@ pip install -e ".[dev]"            # pytest, ruff, mypy, ipykernel, pyyaml
 pip install -e ".[docs]"           # the documentation site: mkdocs build --strict
 ```
 
-`requirements.lock` pins an environment that runs vLLM on a GPU pod. Its
-torch build needs a host driver for CUDA 13; on an older driver vLLM stops at
-load with "The NVIDIA driver on your system is too old".
+`requirements.lock` pins an environment that runs vLLM on a GPU pod (Linux,
+Python 3.12, CUDA 13 wheels). It holds the packages of the `vllm`,
+`transformers` and `dev` extras, not redact itself: `pip install -r
+requirements.lock`, then `pip install -e . --no-deps`. Its torch build needs a
+host driver for CUDA 13; on an older driver vLLM stops at load with "The
+NVIDIA driver on your system is too old".
 
 Put API keys in a `.env` file. `import redact` loads `.env` from the default
 working root (`REDACT_OUTPUT_DIR`, else the first folder above the package
@@ -30,7 +33,10 @@ shell's. The keys the shipped models read are `VENICE_API_KEY`,
 `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`. Local weights download to the
 HuggingFace cache (`HF_HOME`); `scripts/download_models.py` fetches every
 local checkpoint of the registry, whole (tokenizer files included, GGUF files
-left out), at the revision an entry pins, ahead of a run. It fetches GlotLID,
+left out), at the revision an entry pins, ahead of a run, and the tokenizer
+files of a setup whose tokenizer vLLM loads from elsewhere (a `tokenizer`
+naming another repository, or a `tokenizer_revision` other than `revision`);
+`--dry-run` lists them without `huggingface_hub`. It fetches GlotLID,
 the language identifier, with a model that has the `machine_translation` or
 the `paraphraser` role. A model named as a recipe's paraphraser without that
 role brings none: name a model with the role too, or the paraphrase check runs
@@ -44,8 +50,11 @@ From the command line:
 python scripts/run.py src/redact/configs/runs/training_example.json --data-dir ./runs/my_run
 ```
 
-`--params` replaces the recipe's `params_file`, `--data-dir` its `data_dir`.
-`--quiet` logs warnings only and `--debug` logs per-item detail. The script
+`--params` replaces the recipe's `params_file`: a relative path is read
+from the current directory, else from the recipe's folder, and the run logs
+the file it read. `--data-dir` replaces the recipe's `data_dir`.
+`--quiet` logs warnings only and `--debug` logs redact's per-item detail (the
+HTTP and lock libraries stay at INFO). The script
 prints the run summary as JSON. The first Ctrl-C, or `kill <pid>`, ends the
 run through its cleanup, which saves the finished units and releases the
 models. A second one ends vLLM's engine processes and exits at once.
@@ -81,7 +90,15 @@ Each recipe there has `"config_dir": "."`: the folder's dataset type,
 taxonomy, augmentation, generation axes and dimensions files are read in
 place of the library's, file by file
 ([configuration.md](configuration.md#your-own-config-folder)). Delete every
-file you do not change, so it keeps following the library.
+file you do not change, so it keeps following the library. Each recipe's
+`data_dir` is `runs/eval` or `runs/training` in the folder, written as an
+absolute path (a recipe's `data_dir` is read from the current directory), so
+a folder moved to another place or machine needs it written again. The
+script refuses to write over a file the folder holds; `--overwrite` writes
+every file again from the library, which replaces your edits to them.
+`scripts/scaffold_prompts.py ./my_prompts` writes an editable copy of the
+prompts in the same way (`--empty` for skeletons, `--overwrite` to replace
+files the folder holds).
 
 The notebooks in `notebooks/` walk through a run step by step:
 `eval_pipeline`, `training_pipeline`, `content_moderation` and
@@ -117,7 +134,7 @@ the stage's name.
 ```json
 {
   "constitution": {"num_taxonomy_categories": 3, "num_categories": 10},
-  "inputs": {"samples_per_entry": 3, "style": "long"},
+  "inputs": {"samples_per_entry": 3},
   "outputs": {"max_per_category": 20},
   "jailbreaks": {"seed": 42}
 }
@@ -130,10 +147,10 @@ the stage's name.
 - Both dataset types add the general-benign part to the constitution:
   benign entries for each category of `benign_taxonomy`.
 - An `eval` run generates only the `harmful` and `benign` entries and inputs,
-  and its jailbreak stage attacks the harmful inputs with a small pool of hard
-  techniques, in two rounds, with no natural variations; a `training` run
-  takes every entry type and the packaged augmentation section. Anything the
-  recipe or the params file gives wins.
+  and its jailbreak stage attacks the harmful inputs with a pinned pool of
+  hard techniques (126 in 22 families), in two rounds, with no natural
+  variations; a `training` run takes every entry type and the packaged
+  augmentation section. Anything the recipe or the params file gives wins.
 - The `inputs` stage reads the constitution saved under `data_dir`, in an
   eval run as in a training one. List `constitution` before it, or run it
   earlier on the same `data_dir`; without either it stops with
@@ -145,7 +162,9 @@ the stage's name.
   names under `taxonomy_dir`, the packaged `configs/taxonomy/` by default.
 - `params_file` and `config_dir` are relative to the recipe's folder.
   `data_dir`, `prompt_dir` and `taxonomy_dir` are relative to the current
-  directory.
+  directory. A params file given in place of `params_file` (`--params`,
+  `run_pipeline(params=...)`) is read from the current directory when it is
+  there, else from the recipe's folder.
 - `config_dir` names a folder of your own configs: a dataset type
   (`eval.json` or `training.json`), taxonomy, `jailbreak/augmentations.json`,
   `generation_axes.json` or `dimensions.json` file there is read in place of
@@ -212,12 +231,12 @@ the local GPU instead.
   workers. `venice-uncensored` allows 75 requests a minute and 3 in flight;
   `claude-opus-4-6` allows 5 a minute, one at a time, and its window is
   shared by every model on the same Anthropic key.
-- A local vLLM model has no rate limit. The inputs, outputs and jailbreak
-  stages keep as many requests in flight as the engine runs at once, times
-  its copies. In the GPU check on an A100 80GB, every such stage ran its
-  local model with at most 256 requests in flight. The paraphrase stage
-  sends calls of `batch_size` instead, and the constitution stage one unit
-  at a time.
+- A local vLLM model has no rate limit. The inputs, outputs, paraphrase and
+  jailbreak stages keep as many requests in flight as the engine runs at
+  once, times its copies (`llm_pipeline.drive_units`, on the async lane). In
+  the GPU check on an A100 80GB, the inputs, outputs and jailbreak stages ran
+  their local model with at most 256 requests in flight. The constitution
+  stage runs one unit at a time.
 
 Large runs belong on local models. A hosted model suits a small run, or the
 role that makes few calls (the constitution).
@@ -226,8 +245,8 @@ role that makes few calls (the constitution).
 
 When any stage calls a local model, the driver plans the GPUs before the
 first stage runs. The plan is a forecast and a set of instructions to the
-loader. It never aborts a run: a plan that does not fit is logged at ERROR
-and the run goes on. So is a planning error, with its traceback; then every
+loader. It never aborts a run: a plan that does not fit is logged at ERROR,
+with `--quiet` too, and the run goes on. So is a planning error, with its traceback; then every
 local engine loads unplanned, at 0.9 of a whole card, so a second engine on
 that card does not start. [internals/residency.md](internals/residency.md) has the
 mechanics.
@@ -263,6 +282,20 @@ the driver unloads the engines that stage does not keep, and preloads the
 stage's models on a background thread (and the next stage's, when they fit
 beside them). An engine keeps the cards it loaded on, and the smallest share
 any of its stages plans for it.
+
+A local engine loaded before the run (a notebook that called a local model,
+then `run_pipeline`) counts, for the plan, only from the first stage that
+calls it. Entering an earlier stage whose plan leaves it out and loads a
+model, the driver unloads it, since that plan hands its memory out (it goes
+by engine, not by card, so on a host with several cards an engine on a card
+that stage's model does not use is unloaded too); it loads again for its
+stage, which costs one more load. While it stays loaded it
+keeps the share and cards it was built with, not the plan's (the plan warns
+that it is loaded already), so a model planned beside it may fail to load.
+Release it first with `redact.residency.unload_local()`, or let the run load
+it. One that no stage calls stays through the run. At its end the run
+releases the engines it loaded, after a planning error too, and keeps those
+loaded before it.
 
 In the GPU check of this release, a 24B generator and a 3B checker on one
 A100 80GB give two plans: the 24B alone for `constitution` and `jailbreaks`,
@@ -328,10 +361,9 @@ A unit is acked only after its rows are on disk, so a crash loses at most the
 units finished since the last save, and those run again. [internals/dataset.md](internals/dataset.md#the-save-and-resume-model)
 explains the mechanism.
 
-The constitution stage is the exception: its ledger is plain, with no lock, no
-recorded sizes and nothing cut back, and it saves each unit as it finishes. A
-crash between a unit's rows and its ack makes the next run generate that unit
-and append its rows again ([stages/constitution.md](stages/constitution.md#how-it-resumes)).
+The constitution stage saves each unit as it finishes, and resumes the same
+way: a torn row, or rows written before their ack, are cut back and the unit
+runs again ([stages/constitution.md](stages/constitution.md#how-it-resumes)).
 
 **Stopping a run.** Ctrl-C, or `kill <pid>` on `scripts/run.py`, ends the run
 cleanly: the finished units are saved, requests in flight are cancelled, and
@@ -361,11 +393,8 @@ and ran the other 400. It ended with 432 rows, 433 ledger lines (the opening
 removes the stage's output, its `.cut` and `.tmp` files, its ledger and its
 manifest (and for each jailbreak kind its `.coverage.csv`, `.plan.json`,
 `.variants.csv` and `.scenarios.csv`),
-then plans anew. The exceptions:
-
-- The `inputs` stage starts over only its current `style`. The rows and
-  acks of other styles stay.
-- The `constitution` stage removes every CSV in `Data_cache/constitution/`.
+then plans anew. The `inputs` stage removes its whole tree of category
+files, and the `constitution` stage every CSV in `Data_cache/constitution/`.
 
 The benign data (`Data_cache/benign/benign_samples.csv`) is never cleared:
 it always resumes from its ledger, generating only the units (one subcategory
@@ -388,10 +417,11 @@ ledger and plan.
 
 A stage that is skipped because none of its inputs was accepted still
 starts over with `"resume": false`. Its earlier output, `.cut` and `.tmp`
-files, ledger and manifest are removed through `dataset.clear_stage`; for the
-jailbreak stage that is each kind that is on, with its `.coverage.csv`,
-`.plan.json`, `.variants.csv` and `.scenarios.csv`. So no stale rows reach
-the build. A jailbreak kind whose
+files, ledger and manifest are removed through `dataset.clear_stage`, with
+the outputs stage's `.coverage.csv` and `.plan.json`; for the jailbreak
+stage that is each kind that is on, with its `.coverage.csv`, `.plan.json`,
+`.variants.csv` and `.scenarios.csv`. So no stale rows reach the build. A
+jailbreak kind whose
 `entry_types` match none of the inputs, or whose section leaves no technique
 in its pool, is skipped with a WARNING and cleared the same way.
 
@@ -414,10 +444,49 @@ in its pool, is skipped with a WARNING and cleared the same way.
   plan's spec version. A plan without that file resumes unchecked, with a
   WARNING. Inputs accepted after the plan was made
   get no unit, and a WARNING counts them.
+- The inputs and outputs stages deal their generation axes again on every
+  run, and the outputs stage its answer modes, from the settings recorded
+  in `<stem>.plan.json` beside the manifest
+  (`constitution_inputs.plan.json`, `output_responses.plan.json`): the
+  `seed` and the axes' weights, with `samples_per_entry` for the inputs and
+  `outputs_per_input` and `modes` for the outputs. A done unit keeps the
+  spec (and answer mode) its ack records. A resume with other values stops
+  with a `ValueError` that names the keys (`Inputs: this run's [...] differ
+  ...`, `Outputs: this run's [...] differ ...`); run the stage with
+  `"resume": false`, or with the settings the plan was made with.
+- The inputs plan file holds one record, `{seed, samples_per_entry,
+  axes}` (`axes` the weights dealt, `{axis: {value: weight}}`), as the
+  outputs' holds its own. A resume of the inputs compares it only once the
+  folder has a done unit: a run that stopped before its first save goes on
+  with its own settings and writes the record anew. The outputs stage
+  compares on every resume.
+- A plan file that holds no record (not JSON, or not an object, as one an
+  earlier version cut off mid-write) stops a resume of the inputs, outputs
+  or jailbreak stage before anything is cut, and gives the lock back. Delete
+  it (the resume then runs unchecked, with a WARNING) or run with
+  `"resume": false`, which writes it anew.
 - A rejected unit is acked and not retried: a constitution unit or a seeded
   entry rejected on every attempt, a rejected output, a dropped paraphrase.
-  Start the stage over to try them again.
+  Start the stage over to try them again; for the inputs that generates the
+  accepted inputs again too, with new ids, so the later stages start over
+  on them. A constitution unit or a seeded entry's unit acked `rejected`
+  with no row can also be tried again alone, by deleting its line from the
+  ledger (`constitution.state.jsonl`, `constitution_inputs.state.jsonl`).
 - A file you edited stops the resume (see the table below).
+- An inputs folder written before the stage had one generation template
+  (when a `style` picked one of two) is not supported: start a new
+  `data_dir`. Its rows carried a `template_style` column, which no file has
+  now: the input rows, the merged inputs file, the jailbreak and variation
+  rows and a training run's `complete_dataset.csv` carry the input axis
+  columns (`length` to `focus`) as they did, and a reader of
+  `complete_dataset.csv` must not require `template_style`. A `style` key in
+  the `inputs` params stops a run before its first stage, as any key the
+  front does not take (`params['inputs'] names ['style'], which
+  generate_inputs does not take; ...`), and a prompt overlay under
+  `input/generation/from_constitution/` is listed as an `unused override` and
+  never read: the one template is `input/generation/template.json`. To make
+  the samples short, as `short` did, see
+  [configuration.md](configuration.md#short-inputs-only).
 
 **Folders and setups from before the answer modes of the outputs stage.**
 
@@ -504,20 +573,20 @@ Other files you may see:
 |---|---|
 | `<ledger>.lock` | The stage's lock. The operating system holds it, so a run that died holds nothing; the file itself may stay |
 | `<output>.cut` | Bytes a resume cut off an output: the tail of a save that did not finish |
-| `<ledger>.dropping` | A fresh run of one seeded-inputs style that did not finish. Run it again |
 | `<kind>.plan.json` | What a jailbreak kind's plan was made with: `seed`, `rounds`, `pool`, `family_weights`, `layer_rates`, `spec_version`, `rules`. A resume compares them with the run's, the pool against what the library added or retired after `spec_version`, and warns when `spec_version` or `rules` is not today's |
-| `constitution_inputs.plan.json`, `output_responses.plan.json` | What the deal of the generation axes was made with: `seed`, the axes' weights, for the inputs `samples_per_entry`, and for the outputs `outputs_per_input` and `modes` (the answer modes of every entry type). A resume compares them with the run's |
+| `constitution_inputs.plan.json`, `output_responses.plan.json` | What the deal of the generation axes was made with, one record: `seed`, the axes' weights, for the inputs `samples_per_entry`, and for the outputs `outputs_per_input` and `modes` (the answer modes of every entry type). A resume compares them with the run's (the inputs' once the folder has a done unit) |
 | `constitution_inputs.coverage.csv`, `output_responses.coverage.csv` | Per axis value, the specs planned and accepted per category and entry type; the outputs' also per answer mode (`axis` `mode`) |
 | `<kind>.coverage.csv` | Per layer, family and technique of a kind's plan, the count per category, entry type and iteration, with a zero row for each pool technique never drawn |
 | `<kind>.variants.csv` | Per template technique and variant, the rows of a kind's CSV that drew it, written after each run, with a zero row for each variant of the pool never drawn ([stages/jailbreaks.md](stages/jailbreaks.md#files)) |
 | `<kind>.scenarios.csv` | With the jailbreak stage's `scenarios` on: the scene each cognitive or persona technique built its row on, by `input_id`, `iteration` and the row's `sample_id`, kept to the kind's rows after each run ([stages/jailbreaks.md](stages/jailbreaks.md#the-scenarios-table)) |
 | `*.tmp` | A file being replaced. It is gone once the write finishes; a kill can leave one, which the next write replaces, and `resume: false` removes the output's |
 
-A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`,
-`params` (the stage's params: the dataset type's with the params file's
-entry over them), `models` (the recipe's role names),
+A run record, `Datasets/<stage>.run.json`, holds `stage`, `timestamp`
+(UTC, with its offset, as the trace's), `params` (the stage's params: the dataset type's with the params file's
+entry over them), `models` (the recipe's role names, its comment keys left
+out),
 `counts` (`rows`, and `accepted` when the files have that column; the inputs
-stage counts only the accepted rows of its `style`; an eval build with
+stage counts only the accepted rows of its category files; an eval build with
 `exclude_from` adds `excluded`; the paraphrase stage adds `skipped`: the units
 under `min_words` words, per reason), `sources` (the files the stage
 read its inputs from: the taxonomy file for the constitution, and the benign
@@ -550,7 +619,11 @@ no extra brings), and `REDACT_TRACE=off` writes nothing and leaves
 `summary["telemetry"]` empty.
 
 At the end of the run the driver logs a roll-up at INFO and returns it as
-`summary["telemetry"]`:
+`summary["telemetry"]`, then stops collecting: a stage function called after
+the run, as from a notebook, writes to no trace until the next run, and
+`telemetry.summary()` is then empty. The same holds for a collector you
+installed yourself before the run: the run replaces it with its own and does
+not put it back.
 
 | Key | Meaning |
 |---|---|
@@ -589,15 +662,17 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | `ValueError: No benign pairs at ...` | Every benign unit was rejected: no reply in the format in three calls, or every pair rejected by the check three times | Use a stronger `gen` model (or another `check` model), then delete the ledger the message names |
 | `KeyError: Model 'x' needs an API key, but the environment variable ... is not set` | A hosted model without its key | Add the key to `.env`, or serve the model locally |
 | `ImportError: The 'vllm' package is required for VLLMBackend` | A stage calls a local model and the `vllm` extra is not installed. The role defaults for `translation` (when a kind translates) and `paraphraser` are local | Install the extra. On a machine without a GPU, name `deepseek-v3.2` for `translation` (or set `"translation": false` in the adversarial kind) and take `paraphrase` out of `stages` |
+| `ImportError: vLLM X is installed, but VLLMBackend needs vLLM 0.31 or later ...` (a WARNING `[vllm] vLLM X is installed; VLLMBackend needs 0.31 or later ...` when the older release still imports) | The installed vLLM is older than the floor the `vllm` extra sets | `pip install -U 'vllm>=0.31'` |
 | WARNING `jailbreaks: <model> is a machine-translation model and GlotLID is not available ...` | The `langid` extra, or GlotLID's model file, is missing, so the language of the translations is not checked (the other checks run) | `pip install -e ".[langid]"`, then `python scripts/download_models.py` |
 | `KeyError: Model 'x' is not registered` | A name not in the registry | Fix the name, or add the model ([extending.md](extending.md#add-a-model)) |
 | `ValueError: params['outputs'] names [...], which generate_outputs does not take` | A params key that is not a parameter of the front | Use a key from [configuration.md](configuration.md#params-keys-per-stage) |
 | `ValueError: params['x'] sets [...], which the run passes ... itself` | The params file sets a key the recipe owns (`model`, `resume`, ...) | Set it in the recipe |
+| `ValueError: inputs.samples_per_entry must be a whole number of at least 1, got ...` (or `outputs.outputs_per_input`, `paraphrase.paraphrases_per_sample`, `paraphrase.min_words`; `paraphrase.target must be one of [...]`) | At load, before any stage: a params value the stage would refuse | Fix the value ([configuration.md](configuration.md#params-keys-per-stage)) |
+| `ValueError: params['build'] sets exclude_from, which leaves out of an eval build what another run holds; a training build takes none ...` | At load: a `training` run that lists the build, with `exclude_from` in its params | Leave it out, or run `"dataset_type": "eval"` |
 | `ValueError: augmentations.<kind> ...` | A bad augmentation section; the message names the key and what to write | Fix the section ([configuration.md](configuration.md#the-augmentation-section)) |
 | `RuntimeError: ... is locked: another run, or this same process, is writing this stage's output` | Two runs on one output | Stop the other run, or use another `data_dir` |
 | `RuntimeError: Cannot resume <file>: <ledger> recorded N bytes of it and the file is missing / is M bytes / holds other bytes there` | The output has been replaced, edited or copied incompletely since its last save | Restore the file; or delete the ledger, and the next resume takes over the rows in the file; or start the stage over |
 | `RuntimeError: <file> is N bytes and <ledger> recorded M bytes after the last save: something else changed the file` | Another writer touched the output during the run | Stop the other writer, then resume |
-| `RuntimeError: A fresh run of 'long' did not finish in ...` | A fresh run of one seeded-inputs style stopped half way | Run that style again with `resume: false` |
 | ERROR `[residency] ...` with `PROBLEM:` lines | The local models of a stage do not fit the cards | Follow the plan's advice; the run continues and may run out of memory at load |
 | ERROR `[preload] <model> failed to load` | A background load failed | The stage that needs the model fails when it calls it, with the cause in the log |
 | WARNING `[vllm] The engine of ... failed to build with N copies ...; loading one copy on ... instead` | The engine failed to build with copies | The run goes on with one copy; set `"copies": 1` for that role to skip the attempt |
@@ -614,12 +689,18 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | WARNING `GPU cost reported as $0` | Local GPUs held, and no GPU price set | Set a rate (see above) |
 | `DeprecationWarning` for flat augmentation keys | `include_*`, `sampling_probs` and the other flat keywords | Write them in the `adversarial` kind |
 | `DeprecationWarning` naming `content_moderation_categories` | The former name of `harmful.json` in `configs/taxonomy/`, read for one release | Write `"taxonomy": "harmful"`; rename a file of your own `harmful.json` |
+| `DeprecationWarning` on `import redact.pipelines` or `import redact.runconfig`, or on `manifest_path`, `write_manifest` or `read_manifest` | Former module and record names, read for one release | Import the fronts from `redact`, `RunContext` and `Stage` from `redact.stages`, the loaders from `redact.recipe`, and `record_path`, `write_record` and `read_record` from `redact.driver` |
+| `FileExistsError: ... already holds ...; pass overwrite=True` | `scaffold_setup` or `scaffold_prompt_tree` (the two scaffold scripts) found a file it would write | Name an empty folder, or pass `--overwrite`, which replaces your edits to those files |
 | WARNING `jailbreak: N of the M inputs are not in the plan ...` | A resume keeps the plan made before those inputs were accepted | Run the jailbreak stage with `"resume": false` to plan them |
 | `ValueError: jailbreak: this run's [...] differ from those the plan jailbreaks.manifest.jsonl was made with (see jailbreaks.plan.json) ...` | A resume with another augmentation section or seed than the plan's; also an adversarial plan made before the packaged attacks dealt a request obfuscation, whose rounds now carry `allow_request_obfuscation` (the differing key is `rounds`) | Run the jailbreak stage with `"resume": false`, or with the plan's section and seed (`"allow_request_obfuscation": false` in the adversarial kind for a plan made before) ([release notes](configuration.md#release-notes)) |
 | WARNING `jailbreak: since the plan jailbreaks.manifest.jsonl was made (spec version ..., now ...), the library added [...] and retired [...] ...` | The library added or retired techniques after the plan was made; the kept plan does not draw the added ones | Nothing, or `"resume": false` to plan again and draw them |
 | WARNING `augmentations.adversarial.techniques.allow names ... (1.1), which the spec retired ...` (and a `DeprecationWarning`) | A kind's `techniques.allow` names a retired technique, which it still draws for this release | Take the name out of `techniques.allow` |
 | WARNING `jailbreak: the plan ... has no jailbreaks.plan.json beside it ...` | A plan made before plan files were written; its section and seed are not checked | Nothing, or `"resume": false` to plan again |
 | `ValueError: .../output_responses.state.jsonl acks units without an iteration ...` or `Cannot append to .../output_responses.csv: its header has no column 'iteration', 'response_mode', ... It was written before an input had several responses, each in an answer mode.` | A resume onto an outputs folder written when a unit was an input, before the answer modes | Run the outputs stage with `"resume": false`, or in a new `data_dir` |
+| `ValueError: Inputs: this run's ['samples_per_entry'] differ from those the units in constitution_inputs were dealt with ...` (or `['seed']`, `['axes']`) | A resume of an inputs folder with done units with another `samples_per_entry`, seed or axes' weights (another `axes_weighting` too) than its plan file's record; a folder written by the fronts' defaults, then run as a `training` type (log weights), is one | Run the inputs stage with `"resume": false` (it starts the stage over), or with the plan's settings |
+| `ValueError: The plan file <path> holds no plan record (...). Delete it ..., or run with resume=False ...` | A resume of the inputs, outputs or jailbreak stage found a plan file that is not a JSON object, such as one an earlier version cut off mid-write; nothing was cut, and the lock is given back | Delete the file (the resume then runs unchecked, with a WARNING), or `"resume": false`, which writes it anew |
+| `RuntimeError: Cannot resume .../merged.csv: constitution.state.jsonl recorded ...` | A constitution CSV is missing, or was edited or replaced since its last save | Restore the file; or delete the ledger, and the next resume takes over the units whose rows are in `merged.csv` (what that leaves in the per-type files: [stages/constitution.md](stages/constitution.md#how-it-resumes)); or `"resume": false` |
+| `ValueError: Category name '...' cannot name a folder: ...` | A taxonomy (or constitution) category with a path separator, one of `<>:"?*` or the vertical bar, a control character, a trailing dot or space, an empty name, or a Windows device name (`CON`, `NUL`, `COM1`, ...); raised by the constitution or the inputs stage before any call | Rename the category in the taxonomy |
 | `ValueError: Outputs: this run's ['outputs_per_input'] differ from those the responses in output_responses.csv were dealt with ...` (or `['modes']`) | A resume with another `outputs.outputs_per_input` or `outputs.modes` (or seed, or axes' weights) than the plan file's; a training folder of one response per input resumed with the type's 2 is one | Run the outputs stage with `"resume": false`, or with the plan's settings |
 | `ValueError: Outputs: N input(s) have no entry type (a missing, NaN or empty entry_type cell), first [...] ...` | Inputs given to the outputs stage with blank `entry_type` cells, such as a merged frame or a hand-edited `samples.csv`; raised before anything is cleared | Give each input one of the four entry types (a frame without the column at all is answered as `harmful`, with a WARNING) |
 | `ValueError: Outputs: the inputs hold the entry type(s) [...], which outputs.modes does not map ...` | An input whose `entry_type` is none of the four; raised before anything is cleared | Fix the inputs' entry types |

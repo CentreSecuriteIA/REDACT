@@ -11,7 +11,6 @@
   "few_shot_examples": [],
   "metadata": {
     "version": "1.0",
-    "style": "long",
     "notes": "Constitution-to-input: Generates detailed, multi-sentence prompts from constitution entry descriptions. Part of the constitution input_generation pipeline. The format instruction (numbered list) is appended to the system prompt automatically by InputPipeline."
   }
 }

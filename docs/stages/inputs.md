@@ -33,14 +33,21 @@ type `benign` and its constitution subcategory.
   `source_category`, `constitution_subcategory`, `constitution_category`,
   `source_group_tag`, and `source_taxonomy` when the constitution has it.
   `entry_types` keeps only some entry types.
-- The prompt `prompts/input/generation/from_constitution/<style>/` with the
-  `numbered` format instruction, and the check prompt
-  `prompts/input/quality_check/`, each read through the overlay. The
-  template's `{sample_spec}` shows the unit's spec; a prompt without it is
-  warned about (`The prompt ... has no {sample_spec}`), and its units are
-  dealt and recorded a spec the model is not shown.
+- The prompt `prompts/input/generation/` with the `numbered` format
+  instruction, and the check prompt `prompts/input/quality_check/`, each
+  read through the overlay. The template's `{sample_spec}` shows the unit's
+  spec; a prompt without it is warned about (`The prompt ... has no
+  {sample_spec}`), and its units are dealt and recorded a spec the model is
+  not shown.
 - The `inputs` section of `generation_axes.json`, a recipe's `config_dir`'s
   when it has one ([configuration.md](../configuration.md#the-generation-axes)).
+
+Where the words live: the generation prompt's own text is in
+`prompts/input/generation/template.json` (overlaid by `prompt_dir`); the
+words of a spec, each axis's label and each value's label and hint, are in
+`configs/generation_axes.json` beside their weights (overlaid by a recipe's
+`config_dir`, the file read whole). The spec's lines are rendered by code
+that adds only a colon and a dash.
 
 ## Models
 
@@ -59,11 +66,19 @@ checker repeated its own verdict on 95.2 percent of harmful samples at
 
 ## Settings
 
-Params keys: `style`, `samples_per_entry`, `entry_types`, `axes`,
+Params keys: `samples_per_entry`, `entry_types`, `axes`,
 `axes_weighting`, `seed`, `batch_size`, `max_attempts`, `check_max_tokens`
-([configuration.md](../configuration.md#inputs)). The `eval` type pins the
+([configuration.md](../configuration.md#inputs)). A `samples_per_entry`
+that is not a whole number of at least 1 raises
+(`check_samples_per_entry`) when the params load, and again in the front
+and the core, before the stage writes anything. The `eval` type pins the
 `directness` axis at `explicit`; the `training` type deals the weights
 log-scaled (`axes_weighting: "log"`).
+
+There is one generation template and no setting that picks a length: the
+`length` axis sets each sample's. For short inputs only, give the two long
+`length` values weight 0
+([configuration.md](../configuration.md#short-inputs-only)).
 
 ## Unit and ledger key
 
@@ -78,15 +93,22 @@ and check requests take the async lane and units finish apart.
    written without it), or holding another number of samples than one, is
    rejected whole and asked again, up to `max_attempts` generations. The
    replies without the marker are counted in a WARNING at the end.
-3. A sample whose text is already in the folder (by content id, any category
-   and any style) is dropped.
+3. A sample whose text is already in the folder (by content id, in any
+   category) is dropped.
 4. A sample left gets one check call.
+
+The key holds no category. So an entry whose `sample_description` and
+`entry_type` an earlier entry of the frame has (one description in two
+categories, or a constitution row saved twice by an earlier version) is
+left out, the first kept, with a WARNING (`Inputs: N constitution entries
+repeat ...`): the two would share their units' keys, both run, and a resume
+would skip both once one was done.
 
 | | Value |
 |---|---|
-| Ledger key | `(sample_description, entry_type, style, iteration)` |
-| Ledger record | the key, `ids` (the `sample_id` of the row it wrote) and `accepted` (the verdict). Or the key with `status` `rejected` or `no_sample` and `attempts` |
-| Manifest row | `sample_description`, `entry_type`, `style`, `iteration`, `category`, `spec` (the dealt value of each axis; none without axes), `status` |
+| Ledger key | `(sample_description, entry_type, iteration)` |
+| Ledger record | the key, `ids` (the `sample_id` of the row it wrote) and `accepted` (the verdict). Or the key with `status` `rejected` or `no_sample` and `attempts`. Each also holds `spec`, the unit's dealt spec (none without axes) |
+| Manifest row | `sample_description`, `entry_type`, `iteration`, `category`, `spec` (the dealt value of each axis; none without axes), `status` |
 
 ## The generation axes
 
@@ -99,7 +121,8 @@ normalised per axis. The `domain` axis is not dealt: it shows the entry's
 subcategory.
 
 - **Groups.** Units are dealt per `(source_category, entry_type)`, the
-  input tree's folders and the coverage table's columns. A group's units go
+  coverage table's `category` and `entry_type` columns (the input tree has
+  one folder per category, its entry types together in one file). A group's units go
   in `(sample_description, iteration)` order, so an entry's units are dealt
   one after another, from one dealer (`dataset/dealing.py`, the jailbreak
   plan's): each value goes to the unit when its count so far over its weight
@@ -120,11 +143,25 @@ subcategory.
   `{sample_spec}` is empty.
 - **Deterministic.** The deal is a function of the seed, the weights, the
   units of each group and `samples_per_entry`. It is made again on every
-  run, and the plan file stops a run that would deal another. Entries added
-  since (a regenerated constitution, a new category) are dealt into their
-  groups; units already done keep the specs their rows record (the manifest
-  and the coverage table take the new deal), and the specs of units not done
-  may move.
+  run, and the plan file stops a run that would deal another.
+- **Done units keep their spec.** A done unit keeps the spec its ack
+  records, the one its row was written with: the deal counts it as dealt
+  and deals the other units around it, so the manifest and the coverage
+  table agree with the rows. Entries that join a group already dealt (a
+  frame passed with entries added) are dealt around the done units, and
+  the specs of units not done may move; a new category is a group of its
+  own. A group that did not change is dealt again to the same specs. The
+  deal counts a done unit's spec when it reaches the unit, in
+  `(sample_description, iteration)` order, so a unit of the same entry
+  with a lower iteration that is not done (one in flight when a run
+  crashed) is dealt without it, and in a group that changed it can repeat
+  the done sibling's value. An ack written by an earlier version, without
+  a spec, leaves its unit to the deal: its row keeps its spec, and the
+  manifest may show another.
+- **Entries that leave.** The units of entries no longer in the frame (a
+  constitution regenerated with `resume: false`, or a subset passed) are
+  not planned: their rows stay in the category files and reach the later
+  stages, and the manifest and the coverage table no longer count them.
 
 ## Files
 
@@ -132,14 +169,14 @@ Under `Datasets/constitution_inputs/`:
 
 | File | Content |
 |---|---|
-| `<category>/samples.csv` | One per category (`source_category`): a harmful-taxonomy category, or a benign one for the general-benign part; a benign category named as a harmful one shares its file, its rows told apart by `entry_type` and `source_taxonomy`. Accepted and rejected rows |
-| `constitution_inputs.manifest.jsonl` | The plan of the current style, written again every run |
-| `constitution_inputs.state.jsonl` | The ledger, for every style |
-| `constitution_inputs.plan.json` | What the deal was made with: `seed`, `samples_per_entry`, and each dealt axis's weights as dealt, log-scaled with `axes_weighting` `"log"` (`null` without axes). Labels and hints are not in it: rewording them changes no deal |
-| `constitution_inputs.coverage.csv` | Per axis value and group: `axis`, `value`, `category`, `entry_type`, `planned` (from the manifest), `accepted` (from the acks of this style). Every value of the table has a row in every group seen, `0` when never dealt. Written when the stage ends, and when it has nothing to run; removed without axes |
+| `<category>/samples.csv` | One per category (`source_category`): a harmful-taxonomy category, or a benign one for the general-benign part; a benign category named as a harmful one shares its file. Its general-benign rows and the harmful taxonomy's `benign` entry rows are both `benign`: only `source_taxonomy` tells them apart. Accepted and rejected rows |
+| `constitution_inputs.manifest.jsonl` | The plan, written again every run |
+| `constitution_inputs.state.jsonl` | The ledger |
+| `constitution_inputs.plan.json` | What the deal was made with, one record: `{"seed": ..., "samples_per_entry": ..., "axes": {axis: {value: weight}}}`, each dealt axis's weights as dealt, log-scaled with `axes_weighting` `"log"` (`null` without axes). A resume compares it only once the folder has a done unit ([below](#how-it-resumes)). Labels and hints are not in it: rewording them changes no deal |
+| `constitution_inputs.coverage.csv` | Per axis value and group: `axis`, `value`, `category`, `entry_type`, `planned` (from the manifest), `accepted` (from the acks, each counting the spec it records). Every value of the table has a row in every group seen, `0` when never dealt. Written when the stage ends, and when it has nothing to run; removed without axes |
 
 And `Datasets/constitution_inputs_merged.csv`: the rows of every category
-and every style whose `accepted` reads true (`dataset.accepted_mask`),
+whose `accepted` reads true (`dataset.accepted_mask`),
 copied by the front after the core returns. The build reads it. It is
 removed when no category file holds an accepted row, so the build never
 reads rows the category files no longer hold.
@@ -161,7 +198,6 @@ Columns of `samples.csv`:
 | `constitution_category` | The entry's constitution category |
 | `source_group_tag` | The entry's group tag |
 | `source_taxonomy` | `harmful` or `benign`, copied from the entry: `benign` marks the general-benign part. Only when the constitution has the column |
-| `template_style` | The `style` that generated it |
 | `iteration` | The unit's iteration: 0 for an entry's first sample |
 | `length`, `register`, `writer`, `framing`, `directness`, `focus` | The unit's dealt value of each axis. Only with axes |
 
@@ -173,32 +209,56 @@ all category files are checked and cut back together
 Units the ledger records are skipped. The ids on the ledger records keep a
 text from being written twice.
 
-The deal is made again, and compared with `constitution_inputs.plan.json`:
-a resume whose `seed`, `samples_per_entry` or axes' weights differ (another
-`axes` or `axes_weighting`) raises `Inputs: this run's [...] differ from
-those the units in ... were dealt with`, naming the keys and `resume=False`.
-The plan file is the folder's, for every style: a `generate_inputs` call on
-a training run's folder passes `axes_weighting="log"`, as the run does. A
-folder with finished units and no plan file runs unchecked, with a
-WARNING.
+The deal is made again, and compared with the record in
+`constitution_inputs.plan.json` once the folder has a done unit: a resume
+whose `seed`, `samples_per_entry` or axes' weights differ (another `axes` or
+`axes_weighting`) from those the done units were dealt with raises
+`Inputs: this run's [...] differ from those the units in ... were dealt
+with`, naming the keys and `resume=False`, and gives the lock back. A
+`generate_inputs` call on a training run's folder passes
+`axes_weighting="log"`, as the run does. A folder with no done unit (a run
+that stopped before its first save) is not compared: nothing dealt before
+has to be dealt again, so the run goes on with its own settings and writes
+its record anew. The outputs stage compares on every resume; the inputs
+stage keeps this rule. A folder with finished units and no plan file runs
+unchecked, with a WARNING. A plan file that holds no record (one an
+earlier version cut off as it wrote it) stops the resume before anything is
+cut, naming the file: delete it to resume unchecked, or start the stage
+over.
 
 A folder written before units had an iteration stops before any call: a
 ledger that acks a unit without `iteration` (an entry was one call then), or
 a category file whose header lacks `iteration` or an axis column. The
-message names the remedies: start the style over (`resume: false`), run in
+message names the remedies: start the stage over (`resume: false`), run in
 a new `data_dir`, or, for a folder without the axis columns,
 `inputs.axes: false`.
 
-A category file written from a constitution without `source_taxonomy`
-cannot take rows that have it: the save raises `Cannot append to ...: its
-header has no column 'source_taxonomy'`. Start the style over
-(`resume: false`) after regenerating the constitution.
+An inputs folder written before the stage had one generation template (when
+a `style` picked one of two) is not supported: start a new `data_dir`.
 
-`resume: false` starts over the current `style` only. Its rows are removed
-from every category file and its acks from the ledger (`dataset.drop_units`);
-the rows of other styles stay. Until that finishes, a
-`constitution_inputs.state.jsonl.dropping` file names the style; a later run
-stops until the same fresh run is repeated.
+A category file written from a constitution without `source_taxonomy`
+cannot take rows that have it: with a constitution that has the column, the
+stage stops before any call with `Cannot append to ...: its header has no
+column 'source_taxonomy'`. Start the stage over (`resume: false`) after
+regenerating the constitution, or run in a new `data_dir`.
+
+`resume: false` starts the whole stage over, as every other stage does: the
+category files, their `.cut` and `.tmp` files, the ledger and the manifest
+are removed, and the plan file is written anew. An empty constitution frame
+(every entry filtered out by `entry_types`, say) still starts the stage
+over, and leaves no manifest; on a resume it changes nothing.
+
+## Checked before any call
+
+Before anything is cleared (a fresh run's clear) or any call made:
+
+- each entry's `source_category` must name a folder
+  (`dataset.check_category_name`; see
+  [constitution](constitution.md#inputs)), else a `ValueError` names it;
+- the generation prompt, with its format instruction, and the check prompt
+  are rendered once with empty values, so an overlay with a placeholder the
+  stage does not fill stops the run here rather than inside its first units;
+- the folder of an earlier layout stops it, as above.
 
 ## Rejected and failed units
 
@@ -218,7 +278,11 @@ stops until the same fresh run is repeated.
   requests go out in grouped calls, and a prompt too long there fails the
   call and stops the stage.
 - These acked units are skipped on resume; a warning at the end counts the
-  rejected ones. Start the style over to try them again.
+  rejected ones. Start the stage over to try them again, which generates
+  the accepted inputs again too (with new `sample_id`s, so the outputs,
+  paraphrases and jailbreaks keyed on them start over as well). A unit acked
+  `rejected` with no row can also be tried again alone, by deleting its
+  line from the ledger.
 - Any other error inside a unit, and any failed call, stops the stage. Saved
   units stay saved.
 
@@ -227,5 +291,5 @@ When under half of the generated samples are accepted, the front warns:
 
 Every call asks for one sample, so a model that captures internals works at
 any `samples_per_entry`: a generation is captured under
-`<entry id>/<iteration>/input_<style>`, its check under
-`<sample_id>/val_in_<style>`.
+`<entry id>/<iteration>/input`, the entry id the content id of
+`<sample_description>:<entry_type>`, its check under `<sample_id>/val_in`.

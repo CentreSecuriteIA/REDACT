@@ -57,7 +57,7 @@ Python 3.11 or later.
 git clone https://github.com/CentreSecuriteIA/REDACT.git
 cd REDACT
 pip install -e .            # hosted models (Venice, Anthropic, OpenRouter)
-pip install -e ".[vllm]"    # + local models through vLLM
+pip install -e ".[vllm]"    # + local models through vLLM (0.31 or later)
 ```
 
 Put the API keys (`VENICE_API_KEY`, `ANTHROPIC_API_KEY`,
@@ -74,10 +74,19 @@ python scripts/run.py src/redact/configs/runs/training_example.json --data-dir .
 
 The merged dataset lands in `./runs/first/Datasets/complete_dataset.csv`.
 The `paraphrase` stage loads a 12B model, and the `jailbreaks` stage the 27B
-TranslateGemma translator, on a local GPU. To run on hosted models only, take
-`paraphrase` out of the recipe's `stages` and set `"translation": false` in
-`augmentations.adversarial` (or name the hosted `deepseek-v3.2` as the
-`translation` model; [docs/running.md](docs/running.md#choose-models)).
+TranslateGemma translator, on a local GPU. To run on hosted models only,
+write a setup of your own rather than edit the packaged recipe:
+
+```bash
+python scripts/scaffold_setup.py ./my_setup
+```
+
+then, in `./my_setup/training_recipe.json`, take `paraphrase` out of
+`stages` and set `"translation": false` in `augmentations.adversarial` (or
+name the hosted `deepseek-v3.2` as the `translation` model;
+[docs/running.md](docs/running.md#choose-models)), and run
+`python scripts/run.py ./my_setup/training_recipe.json`. The setup writes
+into its own `runs/` folder; its `README.md` says what each file is.
 `eval_example.json` makes a small eval set the same way, as `eval_inputs.csv`,
 `eval_outputs.csv` and
 `eval_jailbreaks.csv`. A recipe's `dataset_type`, `training` or `eval`, picks
@@ -124,6 +133,19 @@ Access is granted on request, on each dataset's page.
 - [constitution-dataset](https://huggingface.co/datasets/centrepourlasecuriteia/constitution-dataset)
 - [constitution-input-dataset](https://huggingface.co/datasets/centrepourlasecuriteia/constitution-input-dataset)
 - [constitution-input-augmented-dataset](https://huggingface.co/datasets/centrepourlasecuriteia/constitution-input-augmented-dataset)
+
+## Citation
+
+If you use REDACT, please cite it ([CITATION.cff](CITATION.cff)):
+
+```bibtex
+@software{redact_2026,
+  title={REDACT: Red-team Dataset Automation \& Construction Toolkit},
+  author={Waibl, Leonhard and Michalak, Felix and Mariaccia, Hadrien},
+  year={2026},
+  url={https://github.com/CentreSecuriteIA/REDACT}
+}
+```
 
 ## License
 

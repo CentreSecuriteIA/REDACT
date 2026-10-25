@@ -58,7 +58,7 @@ def build_output_quality_checker(
     A harmful-mode response must carry what was asked for; a helpful-mode
     one must be a normal, helpful answer to the request as it was asked. In
     both a refusal is rejected. The checker is shown the category, not the
-    input's entry type. ``mode`` took the place of ``entry_type``.
+    input's entry type.
 
     Raises:
         ValueError: ``mode`` is not one of the answer modes.

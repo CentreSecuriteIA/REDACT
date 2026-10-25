@@ -56,7 +56,8 @@ def _sdk_client(
         client = cache.get(key)
         if client is None:
             sdk_class = openai.AsyncOpenAI if async_calls else openai.OpenAI
-            # The SDK retries a failed call itself, unseen by the rate limiter and the trace.
+            # The SDK retries a failed call itself, unseen by the rate limiter
+            # and the trace.
             client = sdk_class(api_key=api_key, base_url=base_url,
                                **sdk_client_kwargs(max_retries, timeout_s))
             cache[key] = client

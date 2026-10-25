@@ -26,7 +26,11 @@ the `paraphraser` role when you have it.
 | `outputs` | the rows of `Datasets/output_responses.csv`, or of `outputs=`, whose `accepted` reads true (`dataset.accepted_mask`); a frame without the column is taken whole | `output_response`, else `sample` | `sample_id`, the response's own id, as `response_id`; `input_id`, the input answered, is kept |
 
 `target` is `inputs` (the default), `outputs` or `both`: a call or a recipe
-that names none paraphrases the inputs alone. A target whose source has rows but
+that names none paraphrases the inputs alone. Another value, a
+`paraphrases_per_sample` that is not a whole number of at least 1, or a
+`min_words` that is not one of at least 0, raises before anything runs
+(`paraphrase.check_settings`); a recipe's params are checked when they load,
+before the run's first stage. A target whose source has rows but
 none accepted, or that is given an empty frame, is skipped with a warning
 (`paraphrase (<target>) skipped: ...`). A target with no rows at all goes to
 `run_paraphrase_target`, which takes the lock, clears the target on a fresh
@@ -68,7 +72,8 @@ WARNING says so when the packaged prompt it replaces has one; remove the key
 to run another wording.
 
 `paraphraser` may name one model, or `"distribution"` for every model with
-the `paraphraser` role. With several, each unit goes to one of them, picked
+the `paraphraser` role. Each must be registered: an unregistered one stops
+the front, with a `KeyError`, before a fresh run clears anything. With several, each unit goes to one of them, picked
 from a hash of `(seed, id, iteration)`, the id being the unit's: `input_id`
 for the inputs, `response_id` for the outputs. The front warns when the check
 model is also a paraphraser, and when `paraphrases_per_sample` is above 1
@@ -99,12 +104,13 @@ training run), it paraphrases each of an input's k responses: its units are
 |---|---|---|
 | Ledger key | `(input_id, iteration)` | `(response_id, iteration)` |
 | Ledger record | the key, `paraphrase_model`, and `status`: `accepted`, `rejected`, `dropped_dedup`, `prompt_too_long` or `skipped` (with `reason` and `min_words`) | the key, `input_id`, `paraphrase_model`, `status` (and for `skipped`, `reason` and `min_words`) |
-| Manifest row | `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` (`planned`, or `skipped` for a text under `min_words` words) | `response_id`, `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` |
+| Manifest row | `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type` (each empty where the source has none, never `nan`), `status` (`planned`, or `skipped` for a text under `min_words` words) | `response_id`, `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` |
 
 Two accepted responses with one text (siblings of one input that a model
 answered alike) have one `response_id`: the target plans two units under
-one key, which a resume skips alike once acked, and the second paraphrase,
-equal to a text already written, is dropped.
+one key, and both are paraphrased (each paraphrase is its own sample, so
+the dedup keeps both unless they come out the same), giving two rows and
+two acks under that key; a resume skips both.
 
 The stage runs one paraphraser at a time. Its pending units go to the unit
 pool (`llm_pipeline.drive_units`), each its own `llm_pipeline.checked`
@@ -117,8 +123,9 @@ a power of two from 64 (so a grouped call meets few distinct caps), at most
 the paraphraser's `default_max_tokens`. With the check on, a reply cut at its
 cap usually fails the length gate. Not always: the gate counts characters, so
 a cut reply in a script of few characters a token (Chinese, Japanese) can
-pass it; and with `check: false` no gate runs. The check request keeps the
-check model's default. A finished unit is saved without waiting for the
+pass it; and with `check: false` no gate runs. The check request's reply
+limit is the check model's default (its temperature is `CHECK_TEMPERATURE`,
+0.15). A finished unit is saved without waiting for the
 others: every 32 units, after each paraphraser's last unit (before the next
 paraphraser is loaded), and on any exit. When the paraphrasers cannot be resident together on the GPUs, the
 stage unloads each one before the next, and keeps the check model and the
@@ -141,7 +148,7 @@ Per target, under `Datasets/`:
 | `input_id` | The input: the one reworded, or the one the response answers |
 | `iteration` | Which paraphrase of the row |
 | `sample` | The paraphrase |
-| `category`, `entry_type` | Copied from the source row: for a response, its input's |
+| `category`, `entry_type` | Copied from the source row: for a response, its input's. Empty where the source has no such column or cell, never `nan` |
 | `response_mode`, `output_label`, `response_label` | `outputs` only: copied from the response, so a paraphrase carries its response's label ([outputs](outputs.md#answer-modes)). Always written, empty when the source lacks the column |
 | `paraphrase_model` | The model that wrote it |
 | `accepted` | The gates' and the checker's verdict; `true` when `check` is off |
@@ -194,8 +201,10 @@ row; the manifest marks it `skipped` too, on a resume as its ack says. Below 12 
 paraphraser read a text as a headline and wrote a post under it (on the
 benign test, 0 to 50% of its rewrites of 4 to 11 words were good, against
 92% at 12 to 15 words), and every input under 12 words was a fragment. In a
-default training run that is about one input in six, the `fragment` length
-value. `min_words: 0` paraphrases every text.
+default training run that is about one input in five, the `fragment`
+length value (0.19 with the training type's log weighting; 0.15, one in
+six or seven, at the table's weights). `min_words: 0` paraphrases every
+text.
 
 The run record counts the skipped units per reason, over the targets the run
 named: `counts.skipped`, as `{"short": n}`; a run that skipped none has no

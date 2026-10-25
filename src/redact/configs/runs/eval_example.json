@@ -1,5 +1,5 @@
 {
-  "_comment": "The eval type translates on translategemma-27b, a local vLLM model (one GPU). To serve gen, check and paraphrase_check on the same card, name venice-uncensored-fp8 for gen; without a GPU, name the hosted deepseek-v3.2 for translation.",
+  "_comment": "The eval type translates on translategemma-27b and paraphrases on humanizer-12b, both local vLLM models (a GPU). To serve gen and check there too, name venice-uncensored-fp8 for gen; paraphrase_check stays on the hosted default unless it names that model too. Without a GPU, name the hosted deepseek-v3.2 for translation and give the recipe a stages list without paraphrase.",
   "dataset_type": "eval",
   "data_dir": "./runs/eval_example",
   "models": {

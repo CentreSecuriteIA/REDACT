@@ -1186,6 +1186,116 @@ def test_a_stage_keeps_the_engines_loaded_before_the_run_that_no_stage_plans(
     assert engines.shut == [f"org/{gen}"]
 
 
+def test_an_engine_loaded_before_the_run_leaves_for_the_stages_before_its_own(
+        local_model, engines, tmp_path, monkeypatch):
+    """A notebook loaded the paraphraser. The inputs stage's plan gives gen
+    the card as if it were free, so entering that stage, the first, releases
+    it (the paraphrase stage loads it again); an engine no stage calls
+    stays."""
+    import redact.llms.backends.vllm as vllm_module
+
+    gen = local_model("_ph_early_gen")
+    para, check = local_model("_ph_early_para"), local_model("_ph_early_check")
+    users = engines("org/users-own-model")
+    engines(f"org/{para}")
+    seen = []
+    _run(tmp_path, monkeypatch, ["inputs", "paraphrase"],
+         {"gen": gen, "paraphraser": para, "paraphrase_check": check},
+         generate_inputs=lambda **kw: seen.append(set(vllm_module._engines)))
+    assert seen == [{users}]
+    assert engines.shut == [f"org/{para}"]
+
+
+def test_an_engine_loaded_before_the_run_stays_while_nothing_loads_beside_it(
+        local_model, engines, tmp_path, monkeypatch):
+    """gen is loaded too, so the inputs stage loads nothing and the
+    paraphraser stays for its own stage; gen goes when that stage drops it."""
+    import redact.llms.backends.vllm as vllm_module
+
+    gen = local_model("_ph_idle_gen")
+    para, check = local_model("_ph_idle_para"), local_model("_ph_idle_check")
+    loaded = {engines(f"org/{gen}"), engines(f"org/{para}")}
+    seen = []
+    _run(tmp_path, monkeypatch, ["inputs", "paraphrase"],
+         {"gen": gen, "paraphraser": para, "paraphrase_check": check},
+         generate_inputs=lambda **kw: seen.append(set(vllm_module._engines)))
+    assert seen == [loaded]
+    assert engines.shut == [f"org/{gen}"]
+
+
+def test_an_engine_loaded_before_the_run_stays_when_its_stage_loads_ahead(
+        local_model, engines, tmp_path, monkeypatch):
+    """The paraphrase stage keeps gen and fits on the card, so its models
+    load during the inputs stage under its plan, which counts the
+    paraphraser a notebook loaded: it stays."""
+    import redact.llms.backends.vllm as vllm_module
+
+    gen, para = local_model("_ph_ahead_gen"), local_model("_ph_ahead_para")
+    paraphraser = engines(f"org/{para}")
+    seen = []
+    _run(tmp_path, monkeypatch, ["inputs", "paraphrase"],
+         {"gen": gen, "paraphraser": para, "paraphrase_check": gen},
+         generate_inputs=lambda **kw: seen.append(set(vllm_module._engines)))
+    assert seen == [{paraphraser}]
+    assert engines.shut == []
+
+
+def test_a_planning_error_still_releases_the_engines_the_run_loaded(
+        local_model, engines, tmp_path, monkeypatch):
+    """Without a plan the stages load their engines unplanned; the run's end
+    releases them all the same, and keeps a notebook's."""
+    import redact.llms.backends.vllm as vllm_module
+
+    gen = local_model("_ph_noplan_gen")
+    users = engines("org/users-own-model")
+    with patch("redact.residency.plan_phases", side_effect=ZeroDivisionError):
+        _run(tmp_path, monkeypatch, ["inputs"], {"gen": gen},
+             generate_inputs=lambda **kw: engines(f"org/{gen}") and None)
+    assert set(vllm_module._engines) == {users}
+    assert engines.shut == [f"org/{gen}"]
+
+
+def test_a_planning_error_drops_a_plan_applied_before_it(local_model):
+    """The second report fails after the first plan reached the loader: the
+    loader holds nothing, so every engine does load unplanned."""
+    import redact.llms.backends.vllm as vllm_module
+    from redact import residency, telemetry
+    from redact.driver import _plan_phases
+    from redact.llms.resources import measure
+    from redact.recipe import _DEFAULT_MODELS
+
+    gen = local_model("_ph_partial_gen")
+    para, check = local_model("_ph_partial_para"), local_model("_ph_partial_check")
+    models = {**_DEFAULT_MODELS, "gen": gen, "paraphraser": para,
+              "paraphrase_check": check}
+    reports, applied = [], []
+    apply = residency.apply_plan
+
+    def report(plan, **kw):
+        reports.append(plan)
+        if len(reports) > 1:
+            raise ZeroDivisionError
+
+    def record(plan, **kw):
+        apply(plan, **kw)
+        applied.append(dict(vllm_module._planned_utilization))
+
+    try:
+        with patch.object(measure, "detect_gpus", return_value=("FakeGPU", 1)), \
+             patch.object(measure, "card_sizes_gib", return_value=[24.0]), \
+             patch.object(residency, "report", side_effect=report), \
+             patch.object(residency, "apply_plan", side_effect=record):
+            assert _plan_phases(models, ["inputs", "paraphrase"], verbose=False) == []
+        left = (dict(vllm_module._planned_utilization),
+                dict(vllm_module._planned_devices))
+    finally:
+        telemetry.uninstall()
+        vllm_module.set_planned_utilization({})
+        vllm_module.set_planned_devices({})
+    assert len(applied) == 1 and applied[0]          # the first plan was applied
+    assert left == ({}, {})
+
+
 def test_a_planned_engine_loaded_already_is_warned_about(
         local_model, monkeypatch, caplog):
     """A notebook loaded gen alone, so with 0.9 of the card. The plan gives

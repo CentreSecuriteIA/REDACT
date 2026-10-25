@@ -99,8 +99,13 @@ format and follows no other instruction:
 - Set `vram_gb` when you know the weights' size better than the estimate (an
   MoE checkpoint, a measured figure). Set `min_gpus` for a model larger than
   one card.
+- Set `"supports_temperature": false` for a model that rejects sampling
+  settings (Claude Opus 4.7 and later, such as the shipped `claude-opus-5-5`):
+  a temperature a call asks for, the checks' 0.15 included, is then not sent,
+  and the provider's default sampling applies. Such an entry may set no
+  `default_temperature`. `register_model` takes the same keyword.
 - `python scripts/download_models.py my-local-8b` fetches the weights ahead
-  of a run.
+  of a run (`--dry-run` lists what it would fetch).
 
 The registry loads and validates every entry at import; a bad entry stops the
 import with a message naming the field. `tests/llms/test_model_config.py`
@@ -155,18 +160,22 @@ prompt. A placeholder may not share a name with a parameter of
 `source`, `is_override`, `prompt_dir`), nor, through `PromptTemplate.load`,
 with `pipeline` or `category`.
 
-**A new input style** needs only a file:
-`prompts/input/generation/from_constitution/<style>/template.json`, then
-`"style": "<style>"` under `inputs` in the params file. The seeded inputs
-stage renders it with `Category`, `sample_description`,
-`constitution_subcategory`, `entry_type`, `sample_spec` (the unit's dealt
-generation axes; empty without axes) and `num_samples`, and appends the
-`numbered` format instruction.
+**A different input template** needs only a file in the overlay:
+`<prompt_dir>/input/generation/template.json`, read in place of the
+packaged one. The seeded inputs stage renders it with `Category`,
+`sample_description`, `constitution_subcategory`, `entry_type`,
+`sample_spec` (the unit's dealt generation axes; empty without axes) and
+`num_samples`, and appends the `numbered` format instruction. To vary the
+samples' length, register and the rest, change the
+[generation axes](configuration.md#the-generation-axes) rather than the
+template: the words of the spec, each axis value's label and hint, are in
+`configs/generation_axes.json` (a `config_dir`'s copy is read whole), not in
+the template.
 
 **To change a prompt for your runs** without editing the library, use the
-overlay: `scripts/scaffold_prompts.py ./my_prompts`, keep the files you
-change, and set `prompt_dir`
-([configuration.md](configuration.md#the-prompt-overlay)).
+overlay: `scripts/scaffold_prompts.py ./my_prompts` (it refuses to write over
+a file the folder holds, unless `--overwrite`), keep the files you change, and
+set `prompt_dir` ([configuration.md](configuration.md#the-prompt-overlay)).
 
 ## Add a jailbreak technique
 
@@ -328,7 +337,9 @@ contract.
      review. A user's copy of `eval.json` in a `config_dir` is not updated:
      a deny added to the packaged file does not reach it, so a technique new
      to a family the copy allows joins that user's eval pool, and an eval
-     run names it in a WARNING (`extra_eval_techniques`).
+     run names it in a WARNING (`extra_eval_techniques`); a family the copy
+     lacks, that the packaged type draws, is named in another
+     (`unseen_type_families`).
 5. **Test it.** Add tests beside the module's, under
    `tests/jailbreak/<layer>/`. `tests/jailbreak/test_registry.py` compares
    the registry with `tests/fixtures/technique_registry.json` (names, tags,
@@ -676,14 +687,23 @@ folder of a recipe's `config_dir`, or under the folder a recipe names as
 ```
 
 - **A new category** is one more entry under `categories`. Its name is a
-  folder name on disk, so it may not hold `/` or `\`.
+  folder name on disk, so `dataset.check_category_name` refuses, on every
+  platform, a name no folder can have on Windows: a path separator, any of
+  `<>:"|?*`, a control character, a trailing dot or space, an empty name,
+  or a device name (`CON`, `NUL`, `COM1`, ...). The constitution checks the
+  categories it plans and the inputs stage every `source_category`, before
+  any call; `create_taxonomy` checks every category it writes.
 - The constitution stage fills its prompts with the category's name,
   `description`, `subcategories` (a list, or a dict whose keys are used) and
   `group_tag` (default `general`, recorded as `source_group_tag`).
 - **A new taxonomy**: write the file, or call
   `redact.create_taxonomy(name, categories, taxonomy_dir=...)`, then set
   `"taxonomy": "<name>"` (and `taxonomy_dir`) in the recipe. A dict passed to
-  a front as `taxonomy=` works too.
+  a front as `taxonomy=` works too. `create_taxonomy` writes to the packaged
+  `configs/taxonomy/` by default, and refuses (`FileExistsError`) to write
+  over a taxonomy packaged there (`harmful`, `benign`) unless
+  `overwrite=True`, since every run reads it; give a `taxonomy_dir` of your
+  own. A file in another folder is written over.
 
 The category reaches every later stage through its rows' `category` column.
 The benign categories are a taxonomy of their own,

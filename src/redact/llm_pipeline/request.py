@@ -17,8 +17,9 @@ class LLMRequest:
         messages: Chat messages for the call.
         internals_id: Capture this call's internals under this id. ``None``
             captures nothing.
-        client: The client to call. Requests with the same client object go
-            out as one batch; ``None`` resolves ``model`` by name.
+        client: The client to call; ``None`` resolves ``model`` by name.
+            ``drive_generators`` batches the requests of one client object,
+            ``drive_units`` those of one model and setup.
         max_tokens: Reply limit for this call. ``None`` leaves the model's
             default. Requests share a call only when their limits agree.
         temperature: Sampling temperature for this call. ``None`` leaves the

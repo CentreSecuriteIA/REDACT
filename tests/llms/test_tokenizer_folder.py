@@ -199,6 +199,23 @@ class TestReuse:
         assert _text(built / "marker") == "theirs"
         assert sorted(p.name for p in built.parent.iterdir()) == [built.name]
 
+    def test_a_folder_another_process_finished_meanwhile_is_kept(
+            self, hub, config, monkeypatch):
+        """Between the check and the build another process renamed its whole
+        folder into place; an engine of its may be reading it, so it stays."""
+        built = Path(tf.tokenizer_folder("org/m", str(config)))
+        (built / "marker").write_text("theirs", encoding="utf-8")
+        complete, calls = tf._complete, []
+
+        def not_yet_at_the_first_look(folder):
+            calls.append(folder)
+            return len(calls) > 1 and complete(folder)
+
+        monkeypatch.setattr(tf, "_complete", not_yet_at_the_first_look)
+        assert Path(tf.tokenizer_folder("org/m", str(config))) == built
+        assert _text(built / "marker") == "theirs"
+        assert len(calls) == 2  # noqa: PLR2004
+
     def test_threads_build_one_folder_once(self, hub, config, monkeypatch):
         links = []
         link = tf._link

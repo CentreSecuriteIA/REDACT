@@ -1,5 +1,8 @@
 """Conversation datasets: a Setting played on seeds, saved and scored.
 
+A planned extension, not finished: not part of a recipe run, and its
+interfaces may change.
+
 Usage::
 
     from redact.multi_turn import (

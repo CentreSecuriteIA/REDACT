@@ -450,9 +450,22 @@ def _survey(
 
     # Before anything starts CUDA: a transformers model's device_map counts
     # the cards in this order.
-    measure.bus_order()
+    late = measure.bus_order()
     # CUDA without nvidia-smi reports a size and no count: that is one card.
     count = gpus_available if gpus is not None else max(gpus_available, 1)
+    # Too late for this process: only a model it loads itself counts the
+    # cards in CUDA's own order, which matters with two or more visible, or
+    # with one that CUDA_VISIBLE_DEVICES names by index on a machine of
+    # several. Engine processes start after the variable is set.
+    in_process = [fp.model for fp in footprints if fp.setup == "introspect"
+                  and str(fp.parts.get("device_map", "auto")) != "cpu"]
+    if late and not given and in_process and (count > 1 or _named_by_index()):
+        logger.warning(
+            "[residency] CUDA started in this process before CUDA_DEVICE_ORDER "
+            "was set, so it counts the cards fastest first, not as nvidia-smi "
+            "and the plan do: the device_map of %s may name another card than "
+            "the plan's. Set CUDA_DEVICE_ORDER=PCI_BUS_ID before CUDA starts.",
+            ", ".join(in_process))
     if gib_per_gpu is not None:
         plan.gib_per_card = [gib_per_gpu] * count
     else:
@@ -477,6 +490,14 @@ def _survey(
     if plan.per_gpu_gb and gpus is None:
         plan.gpus_available = count
     return _Stage(plan, footprints, count, counts)
+
+
+def _named_by_index() -> bool:
+    """Whether ``CUDA_VISIBLE_DEVICES`` names a card by its index on a
+    machine of two or more cards: CUDA reads the index in its own order."""
+    ids = measure.visible_gpu_ids()
+    return (bool(ids) and any(not entry.startswith("GPU-") for entry in ids)
+            and measure.detect_gpus()[1] > 1)
 
 
 def _arrange(

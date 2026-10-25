@@ -1,3 +1,8 @@
+# A freeze of the GPU pod environment the GPU tests passed with: Linux,
+# Python 3.12, CUDA 13 wheels (vllm 0.31.0, torch 2.13.0, transformers
+# 5.17.0); the host driver must support CUDA 13. It holds the packages of
+# the vllm, transformers and dev extras, not redact itself:
+# pip install -r requirements.lock, then pip install -e . --no-deps.
 accelerate==1.15.0
 agent-detector==2.0.0
 aiohappyeyeballs==2.7.1

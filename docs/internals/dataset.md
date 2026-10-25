@@ -2,8 +2,7 @@
 
 `dataset/` is everything a stage does with files: the identity of a row,
 appending and reading CSV rows, the two sidecar files, saving finished units,
-resuming, a fresh run of part of a stage, and the per-category tree of input
-samples.
+resuming, and the per-category tree of input samples.
 
 ## Responsibilities and boundaries
 
@@ -14,7 +13,6 @@ It is responsible for:
 - the ledger and the manifest (`sidecar.py`);
 - a save: rows first, acks after (`save.py`);
 - what a run skips, and what a resume puts back (`resume.py`);
-- a fresh run of part of a stage (`drop.py`);
 - the per-category tree of inputs (`categories.py`);
 - what an eval build leaves out because another run holds it
   (`exclusion.py`: `exclusion_files`, `Exclusion`);
@@ -159,7 +157,11 @@ not retried forever. Leaving the block also releases the stage's lock.
 `resume_state(ledger, resume=True, artifact=out)`:
 
 1. takes the stage's lock (below);
-2. stops if a `drop_units` did not finish;
+2. reads the plan file beside the manifest, when one is given and the file
+   exists: one that holds no record (not JSON, or not an object) stops the
+   resume with a `ValueError` naming the file and the remedies (delete it,
+   and the stage resumes without comparing its settings, with a WARNING; or
+   start over with `resume=False`), and the lock is given back;
 3. reads the ledger;
 4. checks every file the last `_saved` names: a file that is missing,
    shorter than recorded, or different in the last 4 kB before the recorded
@@ -179,26 +181,28 @@ row.
 
 A folder whose ledger records no sizes, such as one written before the
 ledger did, is taken over once: each output file is read for the unit keys
-of its rows, and one ledger write acks them and records the sizes.
+of its rows, and one ledger write acks them and records the sizes. A file
+that does not end in a whole row, or does not parse, stops the takeover with
+a `RuntimeError`, since nothing recorded says where its whole rows end.
 
 `resume_state(ledger, resume=False, artifact=out, manifest=manifest)` takes
 the stage's lock and removes the output, its `.cut` and `.tmp` files, the
-`.dropping` marker, the ledger and the manifest, and returns no key. The
+ledger and the manifest, and returns no key. The
 lock stays held until the `CommitBuffer` exits or `release_lock` is called.
-Called with no `artifact`, as the constitution stage does, the ledger is
-plain: read as it is, with no lock, no sizes, nothing cut, and
-`resume=False` removes only the ledger and the manifest.
+Called with no `artifact`, which no stage does, the ledger is plain: read as
+it is, with no lock, no sizes, nothing cut, and `resume=False` removes only
+the ledger and the manifest.
 
 `clear_stage(artifact, *, manifest_path=None, also=())` does what a fresh
 run's `resume_state` does, for a stage that starts over with nothing to run:
 it takes the stage's lock, removes the output, its `.cut` and `.tmp` files,
-the `.dropping` marker, the ledger beside it and the manifest (beside it
+the ledger beside it and the manifest (beside it
 unless `manifest_path` names it), gives the lock back, then removes the
 files in `also`. The fronts call it with `resume=False` for a stage skipped
 for want of accepted rows: outputs, each paraphrase target, and each
 jailbreak kind. A jailbreak kind is also cleared when its `entry_types`
 match no input or its pool is empty. `also` holds the `.coverage.csv` and `.plan.json` of the
-outputs stage and of a kind, and a kind's `.variants.csv`.
+outputs stage and of a kind, and a kind's `.variants.csv` and `.scenarios.csv`.
 
 ### The lock
 
@@ -224,21 +228,9 @@ Every matching file is checked and cut back together. A matching file that
 no finished save recorded is cut whole: a save that did not finish created
 it. The seeded inputs stage checks the columns of every file of a save
 (`check_columns`) before it writes the first, so a save never stops half way
-over a bad column.
-
-### A fresh run of part of a stage
-
-`drop_units(ledger, *, artifact, name, rows, acks, pattern=None,
-units_in=None)` removes some units' rows and acks and leaves the rest. A
-folder whose ledger records no sizes is taken over first. It puts the files
-back at the last save, writes each output again without the picked rows,
-then the ledger without the picked acks, each through `<file>.tmp`, synced,
-and a rename. A file left with no row is removed, so the next save writes
-its header. The CSV reader's field limit is raised to 2^31 - 1, so a cell as
-long as pandas writes it is read; a file that does not parse as CSV stops it
-with a `RuntimeError`. Until it is done, `<ledger name>.dropping` holds
-`name`: a resume stops, and only the same call, made again, finishes the
-job. The inputs stage uses it for a fresh run of one style.
+over a bad column. The constitution's pattern is `*.csv` of its folder, so
+every CSV there is the stage's: `ConstitutionPipeline`'s `output_dir` has to
+be the constitution's own folder.
 
 ## The per-category tree
 
@@ -247,6 +239,7 @@ Input samples live in one `samples.csv` per category folder, under
 
 | Function | Does |
 |---|---|
+| `check_category_name(name)` | The name, when it can name a category's folder on every platform; else a `ValueError` saying why: a path separator, one of `<>:"|?*` or a control character, a trailing dot or space, an empty name, or a device name Windows reserves. The constitution checks the categories it plans, the inputs stage every `source_category`, `create_taxonomy` every category it writes |
 | `categories.SAMPLE_COLUMNS` | `sample_id`, `sample`, `category`, `subcategory`, `entry_type`, `turn`, `accepted`, `rejection_reason`, `source`; more columns are kept |
 | `sample_row(text, category, turn, accepted, source, extra)` | One input row in that column order |
 | `categories.read_category_csv(category, dataset_dir=None, filename="samples.csv")` | A category's file: ids as text, missing text as `""`; an empty `SAMPLE_COLUMNS` frame when there is no file or it has 0 bytes |
@@ -279,8 +272,8 @@ inputs and outputs stages.
 | `dealing.stable_seed(*parts)` | A seed from the parts, the same in every process: the first 16 hex digits of the SHA-256 of the parts joined by `::` |
 | `planfile.plan_path(manifest)`, `coverage_path(manifest)`, `variants_path(manifest)`, `scenarios_path(manifest)` | `<stem>.plan.json`, `<stem>.coverage.csv`, `<stem>.variants.csv` (the jailbreak kind's variants table) and `<stem>.scenarios.csv` (its scenarios table) beside a manifest |
 | `planfile.plan_record(**made_with)` | What a plan is made with, as JSON reads it back |
-| `planfile.write_plan(manifest, record)` | Writes the plan file |
-| `planfile.read_plan(manifest)` | The record the plan file holds; `None` without a plan file |
+| `planfile.write_plan(manifest, record)` | Writes the plan file through `<name>.tmp`, synced, and a rename, so it holds the old record or the new one |
+| `planfile.read_plan(manifest)` | The record the plan file holds; `None` without a plan file. A file that is not a JSON object raises a `ValueError` naming it and the remedies: delete it, or `resume=False` |
 | `planfile.changed_plan(manifest, current)` | The keys whose values differ from the plan file's; `None` without a plan file |
 
 ## Taxonomy and published datasets
@@ -288,9 +281,9 @@ inputs and outputs stages.
 | Function | Does |
 |---|---|
 | `load_taxonomy(name, config_dir=None)` | A taxonomy file, from the folder `config_dir`, by default `configs/taxonomy/` (the folder of the files, not a recipe's `config_dir`, whose `taxonomy/` a run passes here through `config_overlay.taxonomy_folder`). The name is taken with or without `.json`; a name with another suffix gets `.json` added (`harmful.v2` reads `harmful.v2.json`). A missing file raises `FileNotFoundError`. The former name `content_moderation_categories` loads `harmful`, and a folder holding only `content_moderation_categories.json` is read for `harmful`, each with a `DeprecationWarning` |
-| `create_taxonomy(name, categories, description="", taxonomy_dir=None, verbose=True)` | Writes `<name>.json` under `taxonomy_dir` (default the packaged `configs/taxonomy/`) and returns the taxonomy; a bare description is written as `{"description": ...}`. It adds `.json` unless the name ends in it |
+| `create_taxonomy(name, categories, description="", taxonomy_dir=None, verbose=True, overwrite=False)` | Writes `<name>.json` under `taxonomy_dir` (default the packaged `configs/taxonomy/`) through `<name>.json.tmp`, synced, and a rename, and returns the taxonomy; a bare description is written as `{"description": ...}`. It adds `.json` unless the name ends in it. A file packaged with the library (`harmful.json`, `benign.json`), which every run reads by default, is written over only with `overwrite=True`, else `FileExistsError`; a file of another folder is written over. A category that cannot name a folder raises before anything is written |
 | `iter_categories(taxonomy)` | `(name, info)` per category, a bare description as `{"description": ...}` |
-| `load_hf_dataset(dataset_id, split, columns, filters, exclude, ...)`, `load_from_config(name)` | A HuggingFace dataset, filtered, directly or from a config under `configs/datasets/`; needs the `hf` extra |
+| `load_hf_dataset(dataset_id, split, columns, filters, exclude, ...)`, `load_from_config(name)` | A HuggingFace dataset, filtered, directly or from a config under `configs/datasets/`; needs the `hf` extra. The columns are the published dataset's own: `content_moderation_input.json` keeps `id`, not the `sample_id` the stages read, and no stage or recipe reads it |
 
 [extending.md](../extending.md#add-a-category-or-a-taxonomy) shows the
 taxonomy format.
@@ -299,12 +292,13 @@ taxonomy format.
 
 | Stage | `resume_state` call | Ledger key | Records also carry |
 |---|---|---|---|
-| constitution | plain: no artifact | `unit` | `status`, `attempts` when rejected |
-| inputs | `artifact=folder, pattern="*/samples.csv"`, `units_in` | `sample_description`, `entry_type`, `style`, `iteration` | `ids`, `accepted`; or `status`, `attempts` |
-| outputs | `artifact=output_responses.csv` | `input_id`, `iteration` | `accepted` |
+| constitution | `artifact=Data_cache/constitution/, pattern="*.csv"`, `units_in` (the units of `merged.csv`'s rows) | `unit` | `status`, `attempts` when rejected |
+| inputs | `artifact=folder, pattern="*/samples.csv"`, `units_in` | `sample_description`, `entry_type`, `iteration` | `ids`, `accepted`; or `status`, `attempts`; and `spec` with axes |
+| outputs | `artifact=output_responses.csv` | `input_id`, `iteration` | `mode`, `spec` (with axes), `accepted` |
 | paraphrase | `artifact=paraphrases_<target>.csv` | `input_id`, `iteration` (inputs); `response_id`, `iteration` (outputs) | `paraphrase_model`, `status`; `input_id` (outputs); `reason`, `min_words` when `skipped` |
 | jailbreaks, per kind | `artifact=jailbreaks.csv` or `variations.csv` | `input_id`, `iteration` | |
 | benign data (jailbreaks) | `artifact=benign_samples.csv`, always `resume=True` | `main_category`, `sub_category`, `answer_type` | `status`, `attempts` when rejected; `rejected_pairs`, the pairs the check left out |
+| combination search (`search_combinations`) | `artifact=jailbreak_search.csv` | `input_id`, `round`, `candidate` | |
 | conversations | `artifact=conversations.csv` | `input_id`, `iteration` | `stop_reason` |
 | scoring | `artifact=conversations_scored.csv`, no manifest | `sample_id` | |
 

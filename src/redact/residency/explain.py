@@ -238,16 +238,18 @@ def report(
     """Log the plan and emit it as a telemetry event.
 
     A plan that does not fit is logged at ERROR, one with warnings at
-    WARNING. Neither raises. ``stages`` names the stages the plan is for.
+    WARNING, whatever ``verbose`` says: a quiet run still hears of a plan
+    that will fail. A plan that fits cleanly is logged at INFO, only with
+    ``verbose``. Nothing raises. ``stages`` names the stages the plan is for.
     """
     label = f"stages {', '.join(stages)}: " if stages else ""
-    if verbose:
-        if not plan.fits:
-            log = logger.error
-        elif plan.warnings:
-            log = logger.warning
-        else:
-            log = logger.info
+    if not plan.fits:
+        log = logger.error
+    elif plan.warnings:
+        log = logger.warning
+    else:
+        log = logger.info if verbose else None
+    if log is not None:
         log("[residency] %s%s", label, plan.explain())
     event = {"ev": "residency", **plan.as_dict()}
     if stages:

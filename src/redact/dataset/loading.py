@@ -41,9 +41,10 @@ def load_hf_dataset(
         from datasets import load_dataset
     except ImportError:
         raise ImportError(
-            "The 'datasets' package is required for HuggingFace loading. "
-            "Install with: pip install datasets"
-        )
+            "The 'datasets' package is required for HuggingFace loading: "
+            "install the library's hf extra (pip install -e \".[hf]\" from the "
+            "repository)."
+        ) from None
 
     dataset = load_dataset(dataset_id, split=split)
 
@@ -84,7 +85,9 @@ def load_from_config(
     ``filters``, ``exclude`` and ``drop_columns``, as :func:`load_hf_dataset`
     takes them. ``config_dir`` defaults to the packaged ``configs/datasets``,
     which holds ``content_moderation_input.json``. The name is taken with or
-    without its ``.json``.
+    without its ``.json``. The columns are the published dataset's own: that
+    config's id column is ``id``, not the ``sample_id`` the stages read, and
+    no stage or recipe reads it.
 
     Raises:
         FileNotFoundError: The directory holds no such file.

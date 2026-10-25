@@ -22,7 +22,7 @@ from redact.dataset import (
     resume_state,
 )
 from redact.llm_pipeline import LLMRequest, drive_units
-from tests.conftest import as_resolver
+from tests.conftest import as_resolver, lock_is_free
 
 
 def _ledger(tmp_path, key_fields=("input_id",), casters=None):
@@ -75,6 +75,20 @@ class TestResumeState:
 
         assert resume_state(led, resume=False, manifest=manifest) == set()
         assert not manifest.exists()
+
+    @pytest.mark.parametrize("artifact", [None, "out.csv"])
+    def test_a_broken_plan_file_stops_a_resume_and_gives_the_lock_back(
+            self, tmp_path, artifact):
+        led = _ledger(tmp_path)
+        manifest = Manifest(tmp_path / "a.manifest.jsonl")
+        (tmp_path / "a.plan.json").write_text('{"seed": 4', encoding="utf-8")
+        where = {"artifact": tmp_path / artifact} if artifact else {}
+        with pytest.raises(ValueError, match="resume=False"):
+            resume_state(led, resume=True, manifest=manifest, **where)
+        assert lock_is_free(led.path)
+        # A fresh run does not read it: the stage writes it again.
+        assert resume_state(led, resume=False, manifest=manifest, **where) == set()
+        release_lock(led)
 
     def test_resume_keeps_the_manifest(self, tmp_path):
         led = _ledger(tmp_path)

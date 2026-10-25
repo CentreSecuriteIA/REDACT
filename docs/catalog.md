@@ -32,7 +32,7 @@ Contents:
 | Compatible pairs of active techniques | 36630 |
 | Variant pools | 95 |
 | Template variants | 690 |
-| Model prompt files | 50 |
+| Model prompt files | 49 |
 | Jailbreak prompt steps | 29 |
 | Pool `adversarial` | 285 |
 | Pool `adversarial_rewrite` | 301 |
@@ -919,11 +919,11 @@ Same techniques as `natural`.
 | `constitution` | 5 | 5 | 0 |
 | `conversation` | 3 | 3 | 0 |
 | `format_instructions` | 2 | 2 | 0 |
-| `input` | 4 | 4 | 0 |
+| `input` | 3 | 3 | 0 |
 | `jailbreak` | 29 | 29 | 52 |
 | `output` | 4 | 4 | 0 |
 | `paraphrase` | 3 | 3 | 0 |
-| all | 50 | 50 | 52 |
+| all | 49 | 49 | 52 |
 
 ### Jailbreak prompt steps
 

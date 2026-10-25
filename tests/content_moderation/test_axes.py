@@ -244,6 +244,54 @@ class TestTheDeal:
         assert A.deal_specs(None, _units(2, k=2), seed=_SEED) == [{}] * 4
 
 
+class TestFixedSpecs:
+    """A done unit keeps the spec its ack records; the others are dealt
+    around it."""
+
+    def test_fixing_the_specs_a_deal_gave_changes_nothing(self):
+        axes = A.resolve("inputs")
+        units = _units(_ENTRIES)
+        free = A.deal_specs(axes, units, seed=_SEED)
+        fixed = {i: free[i] for i in range(0, len(units), 2)}
+        assert A.deal_specs(axes, units, seed=_SEED, fixed=fixed) == free
+
+    def test_a_fixed_unit_keeps_its_spec_and_counts_for_its_siblings(self):
+        axes = A.resolve("inputs")
+        units = _units(1)
+        free = A.deal_specs(axes, units, seed=_SEED)
+        other = next(v for v in _LENGTHS if v not in {s["length"] for s in free})
+        mine = {**free[0], "length": other}
+        dealt = A.deal_specs(axes, units, seed=_SEED, fixed={0: mine})
+        assert dealt[0] == mine
+        # The siblings still differ on length (no value above a third).
+        assert len({spec["length"] for spec in dealt}) == _K
+
+    def test_units_that_join_a_group_leave_the_fixed_specs_as_they_were(self):
+        axes = A.resolve("inputs")
+        first = _units(_ENTRIES)
+        done = A.deal_specs(axes, first, seed=_SEED)
+        # The new entries sort before the done ones: "entry 0" < "entry 00".
+        joined = [(g, ("entry 0" + name.split()[1], it))
+                  for g, (name, it) in first] + first
+        fixed = {len(first) + i: spec for i, spec in enumerate(done)}
+        dealt = A.deal_specs(axes, joined, seed=_SEED, fixed=fixed)
+        assert dealt[len(first):] == done
+        assert A.deal_specs(axes, joined, seed=_SEED)[len(first):] != done
+
+    @pytest.mark.parametrize("change", [
+        lambda spec: {k: v for k, v in spec.items() if k != "focus"},
+        lambda spec: {**spec, "length": "gigantic"},
+        lambda spec: {**spec, "colour": "red"},
+        lambda spec: "not a spec",
+    ])
+    def test_a_spec_that_does_not_fit_the_axes_is_dealt_again(self, change):
+        axes = A.resolve("inputs")
+        units = _units(2)
+        free = A.deal_specs(axes, units, seed=_SEED)
+        assert A.deal_specs(axes, units, seed=_SEED,
+                            fixed={0: change(free[0])}) == free
+
+
 class TestRendering:
     _AXES = {
         "length": {"label": "Length", "values": {
@@ -345,6 +393,18 @@ class TestTheStageCoverage:
             rows = {row["value"]: (row["planned"], row["accepted"])
                     for row in csv.DictReader(fh)}
         assert rows == {"short": ("2", "1"), "long": ("2", "1")}
+
+    def test_an_accepted_unit_counts_the_spec_its_ack_records(self, tmp_path):
+        """An ack's spec is the one its row was written with; the manifest's
+        may be another, as in a plan written before acks recorded it."""
+        manifest, ledger = self._sidecars(tmp_path)
+        ledger.record([{"entry": "a", "iteration": 0, "spec": {"length": "long"},
+                        "accepted": True}], saved={"f": [1, "x"]})
+        path = A.write_stage_coverage(self._AXES, manifest, ledger)
+        with path.open(encoding="utf-8", newline="") as fh:
+            rows = {row["value"]: (row["planned"], row["accepted"])
+                    for row in csv.DictReader(fh)}
+        assert rows == {"short": ("2", "0"), "long": ("2", "2")}
 
     def test_without_axes_it_removes_the_table(self, tmp_path):
         manifest, ledger = self._sidecars(tmp_path)
