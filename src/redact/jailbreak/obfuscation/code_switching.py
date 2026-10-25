@@ -9,13 +9,41 @@ reads the rewrite against the prompt for meaning. A rejected rewrite is made
 again with the reason as feedback, up to ``check_attempts``; one rejected
 every time is ``DISCARDED; reason=code switch failed; language=<name>; ...``.
 
+A prompt of one word cannot be code-switched: one word is in one language.
+The technique refuses it before any call (``DISCARDED; reason=too short to
+mix; language=<name>``), and its applicability keeps a fresh plan from
+drawing it for such a prompt (:func:`can_mix`), in every script.
+
+The Latin-script gate (:func:`_gate_windows`). A rewrite of more than
+:data:`WINDOW_WORDS` (4) words is read in overlapping windows of 4 words, as
+since spec 1.4. A shorter one was a single window, which cannot be both the
+second language and English, so it was always rejected; it is now read in
+windows of half its words, rounded down: one word each for 2 or 3 words, two
+words for 4, so a text that switches language once in its middle can show
+each language in a window of its own. A rewrite of one word stays one window
+and is rejected (``no <name>`` or ``no english left``, as its label says).
+The rule is the same at every length: at least one window labeled the second
+language and at least one English, each at least :data:`MIN_WINDOW_SHARE` of
+the windows (which binds only above ten windows, so never on a short text).
+
+GlotLID is trained on sentences, and its labels for one or two words are
+unreliable (a short shared word, a cognate, a name), unmeasured here: the
+short gate can reject a real mix or pass one whose labels happened to fall
+right. It is a cheap filter, not a proof of the mix; the check model still
+reads every rewrite the gate passes, for meaning.
+
 ``info`` is ``language=<name>``.
 """
 
 from collections.abc import Callable
 
 from redact.content_moderation.feedback import with_feedback
-from redact.jailbreak.technique import DISCARDED, TechniqueGen, data_rows
+from redact.jailbreak.technique import (
+    DISCARDED,
+    TechniqueGen,
+    applicable_when,
+    data_rows,
+)
 from redact.llm_pipeline import CHECK_TEMPERATURE, checked
 from redact.llms.prompting import PromptTemplate, build_messages, load_prompt
 
@@ -37,13 +65,25 @@ SECOND_SCRIPT_BAND = (0.08, 0.9)
 
 #: For a Latin-script second language, GlotLID reads word windows of this many
 #: words; at least this share of them must be the second language and this
-#: share English, so the text genuinely mixes the two.
+#: share English, so the text genuinely mixes the two. A text of this many
+#: words or fewer is read in shorter windows (:func:`_gate_windows`).
 WINDOW_WORDS = 4
 MIN_WINDOW_SHARE = 0.1
+
+#: The fewest words a prompt needs to be code-switched: one word is in one
+#: language (:func:`can_mix`).
+MIN_MIX_WORDS = 2
 
 #: Reply caps: a code-switch rewrite, and the meaning check.
 GEN_MAX_TOKENS = 2048
 CHECK_MAX_TOKENS = 256
+
+
+def can_mix(text: str) -> bool:
+    """Whether ``text`` has the :data:`MIN_MIX_WORDS` words (split on
+    whitespace) a code-switch needs: the technique's applicability, and what
+    it checks before any call."""
+    return len(text.split()) >= MIN_MIX_WORDS
 
 
 def _windows(text: str, size: int = WINDOW_WORDS) -> list[str]:
@@ -55,12 +95,29 @@ def _windows(text: str, size: int = WINDOW_WORDS) -> list[str]:
     return [" ".join(words[i:i + size]) for i in range(len(words) - size + 1)]
 
 
+def _gate_windows(text: str) -> list[str]:
+    """The windows the Latin-script gate labels.
+
+    More than :data:`WINDOW_WORDS` words: overlapping windows of that many,
+    as before. At most that many: windows of half the words, rounded down
+    (one word each for 2 or 3 words, two for 4), so a short text has at
+    least two windows and one switch in its middle leaves each language a
+    window of its own. One word: a single window, which cannot pass the
+    two-sided rule. No word: none.
+    """
+    n = len(text.split())
+    if n > WINDOW_WORDS:
+        return _windows(text)
+    return _windows(text, max(1, n // 2))
+
+
 def _latin_mix_reason(text: str, label: str, name: str) -> str | None:
     """Why a Latin-script code-switch is rejected by GlotLID over word
-    windows, or ``None``; skipped (``None``) without the detector."""
+    windows (:func:`_gate_windows`), or ``None``; skipped (``None``) without
+    the detector."""
     if not langid.available():
         return None
-    windows = _windows(text)
+    windows = _gate_windows(text)
     if not windows:
         return f"no {name}"
     labels = [langid.detect(window) for window in windows]
@@ -115,8 +172,11 @@ def _code_switch_gen(
 ) -> TechniqueGen:
     """Rewrite ``prompt`` code-switched into ``language`` on ``gen_model``,
     gated in code and checked for meaning by ``check_model`` (``gen_model``
-    when None), up to ``check_attempts`` rewrites."""
+    when None), up to ``check_attempts`` rewrites. A prompt :func:`can_mix`
+    refuses is discarded before any call."""
     name = language["name"]
+    if not can_mix(prompt):
+        return prompt, f"{DISCARDED}; reason=too short to mix; language={name}"
     gen = build_messages(
         load_prompt("jailbreak", "code_switch", prompt_dir),
         prompt=prompt, language=name)
@@ -140,8 +200,10 @@ def _code_switch_gen(
 
 def _make_fn(language: dict) -> Callable:
     """The technique that code-switches into ``language``, named
-    ``to_code_switch_<slug>``."""
+    ``to_code_switch_<slug>``, drawn only for a prompt :func:`can_mix`
+    accepts."""
 
+    @applicable_when(lambda text, entry_type: can_mix(text))
     def fn(prompt: str, **kwargs) -> TechniqueGen:
         return (yield from _code_switch_gen(prompt, language, **kwargs))
 

@@ -121,11 +121,17 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   the plan with a `RuntimeError` naming the technique and the input. The
   predicate calls the helper
   the technique itself calls, so the two cannot drift apart. The registry
-  fixture records `has_applicable`, a bool, not the function. Today
-  `to_abbreviations` and `to_stripped_accents` have one: each applies only
-  to a text it changes; and the three benign roles (spec 1.2), which apply
-  to benign and dual-use benign inputs only (`benign_role.is_benign_input`,
-  on the entry type alone).
+  fixture records `has_applicable`, a bool, not the function. Today 22
+  have one: `to_abbreviations` and `to_stripped_accents`, each applying only
+  to a text it changes; the three benign roles (spec 1.2), which apply to
+  benign and dual-use benign inputs only (`benign_role.is_benign_input`, on
+  the entry type alone), and the three guardrail addresses (spec 1.4), to
+  every input but an absolutely benign one
+  (`guardrail_address.is_targeted_input`); the four transliterations (spec
+  1.4), to a text with a Latin letter (`transliteration._has_latin`); and
+  the ten code-switches (spec 1.4), to a text of at least two words
+  (`code_switching.can_mix`, which the technique also checks before any
+  call, refusing a shorter prompt).
 - A pure template technique draws its text from a variant pool, one
   directive's variants in its template file, and names it with
   `@uses_pool(file, directive, slots, info_key, request_slot)` (its `variant_pool`;
