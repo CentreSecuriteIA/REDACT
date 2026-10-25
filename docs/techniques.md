@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 328 active techniques in 5 layers and 44
+The jailbreak stage draws from 335 active techniques in 5 layers and 49
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -76,11 +76,11 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 | Layer | Families | Techniques | Picks per combination |
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
-| `hacking` | 4 | 47 | at most 1 |
-| `obfuscation` | 21 | 179 | no cap |
-| `requests` | 13 | 71 | at most 1 |
-| `manipulation` | 3 | 15 | at most 1 |
-| all | 44 | 328 | |
+| `hacking` | 5 | 49 | at most 1 |
+| `obfuscation` | 22 | 180 | no cap |
+| `requests` | 15 | 74 | at most 1 |
+| `manipulation` | 4 | 16 | at most 1 |
+| all | 49 | 335 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -103,6 +103,7 @@ that call a model call the generation model.
 | hacking | `framing` | `role_framing` |  | 5 | no | no | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` |
 | hacking | `persona` | `role_framing` |  | 14 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona`, `to_mercenary_persona`, `to_underground_hacker_persona`, `to_anarchist_philosopher_persona` |
 | hacking | `persona_template` | `role_framing` |  | 23 | no | no | `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template`, `to_caring_grandma_persona_template`, `to_worried_parent_persona_template`, `to_loyal_friend_persona_template`, `to_licensed_professional_persona_template`, `to_official_investigator_persona_template`, `to_research_scientist_persona_template`, `to_game_engine_persona_template`, `to_terminal_simulator_persona_template`, `to_simulation_rules_persona_template`, `to_penalty_game_persona_template`, `to_tagged_speaker_persona_template`, `to_character_reset_persona_template` |
+| hacking | `policy_framing` | `role_framing` |  | 2 | no | no | `to_policy_puppetry`, `to_skeleton_key` |
 | obfuscation | `translation` | `language` | 10 | 24 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_chinese`, `to_hindi`, `to_yoruba`, `to_amharic` |
 | obfuscation | `dialect` | `language` | 11 | 6 | yes | no | `to_dialect_brazilian_portuguese`, `to_dialect_mexican_spanish`, `to_dialect_canadian_french`, `to_dialect_egyptian_arabic`, `to_dialect_german_switzerland`, `to_dialect_traditional_chinese` |
 | obfuscation | `code_switching` | `language` | 12 | 10 | yes | no | `to_code_switch_spanish`, `to_code_switch_french`, `to_code_switch_german`, `to_code_switch_portuguese`, `to_code_switch_swahili`, `to_code_switch_russian`, `to_code_switch_arabic`, `to_code_switch_hindi`, `to_code_switch_chinese`, `to_code_switch_japanese` |
@@ -118,6 +119,7 @@ that call a model call the generation model.
 | obfuscation | `suffixes` | `surface_noise` | 60 | 28 | no | no | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_fragments`, `to_adversarial_suffix_unicode`, `to_adversarial_suffix_emoji`, `to_adversarial_suffix_gcg_site_example`, `to_adversarial_suffix_gcg_repo_demo_llama2`, `to_adversarial_suffix_gcg_smoothllm_llama2_1`, `to_adversarial_suffix_gcg_smoothllm_llama2_2`, `to_adversarial_suffix_gcg_smoothllm_vicuna_1`, `to_adversarial_suffix_gcg_smoothllm_vicuna_2`, `to_adversarial_suffix_gcg_jbb_llama2_65`, `to_adversarial_suffix_gcg_jbb_llama2_75`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_78`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_86`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_1`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_48`, `to_adversarial_suffix_gcg_jbb_vicuna_2`, `to_adversarial_suffix_gcg_jbb_vicuna_6`, `to_adversarial_suffix_gcg_jbb_vicuna_26`, `to_adversarial_suffix_gcg_jbb_vicuna_32`, `to_adversarial_suffix_gcg_jbb_vicuna_38`, `to_adversarial_suffix_gcg_jbb_vicuna_45`, `to_adversarial_suffix_gcg_jbb_vicuna_54`, `to_adversarial_suffix_gcg_jbb_vicuna_76`, `to_adversarial_suffix_gcg_jbb_vicuna_77`, `to_adversarial_suffix_gcg_jbb_vicuna_90`, `to_adversarial_suffix_gcg_jbb_vicuna_95`, `to_adversarial_suffix_gcg_jbb_vicuna_97` |
 | obfuscation | `payload_split` | `encoding` | 65 | 2 | `to_payload_split_semantic` | no | `to_payload_split`, `to_payload_split_semantic` |
 | obfuscation | `encode` | `encoding` | 70 | 28 | no | no | `to_base64`, `to_rot13`, `to_rot18`, `to_rot47`, `to_unicode_escape`, `to_ascii_ordinal`, `to_separator`, `to_leetspeak_basic`, `to_leetspeak_intermediate`, `to_leetspeak_advanced`, `to_morse`, `to_braille`, `to_reversed_characters`, `to_reversed_words`, `to_reversed_word_order`, `to_lookalike_letters`, `to_zero_width_noise`, `to_hex`, `to_binary`, `to_url_encoding`, `to_html_entities`, `to_base32`, `to_base85`, `to_caesar_cipher`, `to_atbash`, `to_fullwidth`, `to_math_styled`, `to_letter_spacing` |
+| obfuscation | `bijection` | `encoding` | 72 | 1 | no | no | `to_bijection_learning` |
 | obfuscation | `unicode_smuggling` | `encoding` | 73 | 3 | no | no | `to_variation_selector_smuggling`, `to_invisible_suffix`, `to_unicode_tag_smuggling` |
 | obfuscation | `neutral_container` | `container` | 80 | 6 | no | no | `to_code_comment`, `to_yaml_document`, `to_csv_row`, `to_email_message`, `to_transcript_line`, `to_log_entry` |
 | obfuscation | `structural` | `container` | 80 | 3 | no | no | `to_json`, `to_xml`, `to_markdown` |
@@ -128,9 +130,11 @@ that call a model call the generation model.
 | requests | `answer_language` | `language` |  | 26 | no | no | `to_ask_answer_in_french`, `to_ask_answer_in_japanese`, `to_ask_answer_in_russian`, `to_ask_answer_in_spanish`, `to_ask_answer_in_german`, `to_ask_answer_in_arabic`, `to_ask_answer_in_turkish`, `to_ask_answer_in_czech`, `to_ask_answer_in_vietnamese`, `to_ask_answer_in_greek`, `to_ask_answer_in_croatian`, `to_ask_answer_in_swahili`, `to_ask_answer_in_thai`, `to_ask_answer_in_khmer`, `to_ask_answer_in_maori`, `to_ask_answer_in_nepali`, `to_ask_answer_in_zulu`, `to_ask_answer_in_scots_gaelic`, `to_ask_answer_in_bengali`, `to_ask_answer_in_javanese`, `to_ask_answer_in_hmong`, `to_ask_answer_in_guarani`, `to_ask_answer_in_chinese`, `to_ask_answer_in_hindi`, `to_ask_answer_in_yoruba`, `to_ask_answer_in_amharic` |
 | requests | `asking` | `request_shape` |  | 3 | no | no | `to_innocuous_question`, `to_ask_for_details`, `to_ask_with_urgency` |
 | requests | `benign_role` | `role_framing` |  | 3 | no | no | `to_benign_role_subject_helper`, `to_benign_role_tutor`, `to_benign_role_task_assistant` |
+| requests | `code_framing` | `request_shape` |  | 2 | no | no | `to_code_completion`, `to_decrypt_function` |
 | requests | `continuation` | `request_shape` |  | 4 | no | no | `to_continue_passage`, `to_complete_story`, `to_fill_in_blank`, `to_continue_instructions` |
 | requests | `distractor_prefix` | `request_shape` |  | 3 | no | no | `to_distractor_prefix_related`, `to_distractor_prefix_unrelated`, `to_distractor_prefix_task` |
 | requests | `distractor_suffix` | `request_shape` |  | 3 | no | no | `to_distractor_suffix_related`, `to_distractor_suffix_unrelated`, `to_distractor_suffix_task` |
+| requests | `fallacy` | `request_shape` |  | 1 | no | no | `to_fallacy_failure` |
 | requests | `guardrail_address` | `request_shape` |  | 3 | no | no | `to_guardrail_block_question`, `to_guardrail_classify_benign`, `to_guardrail_security_override` |
 | requests | `impersonation` | `role_framing` |  | 3 | no | no | `to_impersonate_good_person`, `to_impersonate_authority`, `to_impersonate_developer` |
 | requests | `indirect` | `request_shape` |  | 6 | no | no | `to_summarize`, `to_proofread`, `to_critique`, `to_translate_task`, `to_explain_to_child`, `to_rewrite` |
@@ -140,6 +144,7 @@ that call a model call the generation model.
 | manipulation | `dap` | `example_priming` |  | 6 | `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_selected_many` | yes | `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long`, `to_dap_random_many`, `to_dap_selected_many` |
 | manipulation | `fake_turns` | `example_priming` |  | 3 | no | no | `to_fake_system_turn`, `to_fake_assistant_turn`, `to_fake_history` |
 | manipulation | `fsh` | `example_priming` |  | 6 | `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_selected_many` | yes | `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long`, `to_fsh_random_many`, `to_fsh_selected_many` |
+| manipulation | `reasoning_injection` | `example_priming` |  | 1 | no | no | `to_fake_reasoning` |
 <!-- END families -->
 
 Each family's dimension is a tag of `configs/dimensions.json`: what the
@@ -699,6 +704,21 @@ generation model.
   technique's own text, so the variant floor counts the six mechanics
   alone. The family is attack-only, and the eval type draws all 23 since
   eval pool v2.
+- `policy_framing` (spec version 1.5) has two pure techniques.
+  `to_policy_puppetry` (HiddenLayer 2025) sets the prompt inside a fake policy
+  or configuration file (XML, INI, JSON, YAML, TOML or a role-play rulebook)
+  that redefines the assistant's output rules, the request its active task;
+  `to_skeleton_key` (Microsoft 2024, single-turn form) wraps the prompt in a
+  request to augment the guidelines and add a warning instead of refusing.
+  Each draws one of its pool's variants in
+  `configs/jailbreak/hacking/policy_framing_templates.json` (policy_puppetry
+  nine, skeleton_key eight; floor 8) and keeps the prompt as it is; the info
+  is `directive=<name>;variant=<variant>`. Its dimension is `role_framing`,
+  as `persona`/`framing`/`cognitive`: it sets up a role and a rule-set. Being
+  a hacking family it is drawn once per combination (the layer cap), and it
+  refuses `fsh`, `dap`, `fake_turns` and `impersonation` (the same reason as
+  `persona`/`cognitive`: one social-engineering or identity frame per prompt).
+  It is not in the eval pool (a new family, which `eval.json` does not allow).
 
 **Manipulation.** `fsh` and `dap` build on benign question-and-answer pairs
 of the subcategories of the benign taxonomy. The `random` variants pick a
@@ -763,6 +783,22 @@ their obfuscation block, and refuse the same hacking and request families,
 the persona templates, and the `structural` and `neutral_container`
 wrappers. The family is attack-only, and the eval type draws all three since
 eval pool v2.
+
+`reasoning_injection` (spec version 1.5) has one pure technique,
+`to_fake_reasoning` (H-CoT, Kuo 2502.12893): a fabricated chain-of-thought or
+deliberation block, written as if it were the assistant's own, that concludes
+the request is acceptable and should be answered, placed before the prompt
+(the finished question). It draws one of eight variants of its pool in
+`configs/jailbreak/manipulation/reasoning_injection_templates.json` (floor 8);
+the info names the variant (`variant=<name>`). Being of the manipulation
+layer it applies last and takes `fsh`, `dap` and `fake_turns`' place (one
+manipulation at most) and their obfuscation block (no heavy encoding,
+translation, `ascii_art`, `payload_split`, `word_art` or `wording` around it),
+inherited by being of the layer. Its dimension is `example_priming`, as the
+other manipulation families: it primes the assistant's own prior reasoning.
+It carries no cross rule of its own, so an approving reasoning preamble sits
+with a hacking frame or a request frame. The family is attack-only; a new
+family, not in the eval pool.
 
 **Obfuscation.**
 
@@ -1210,6 +1246,25 @@ eval pool v2.
   layer, whose example turns or invented conversation clash with the injected
   turn markup; it still joins an encoding, a translation, a hacking frame and
   a request.
+- `bijection` (spec version 1.5, Huang 2410.01294) has one pure technique,
+  `to_bijection_learning`: it draws a random one-to-one letter cipher from the
+  unit's rng — one of three schemes, letter to letter, letter to a distinct
+  two-digit number, or letter to a distinct symbol — and teaches it in context
+  by showing the key and a few benign sentences with their encodings
+  (`configs/jailbreak/obfuscation/bijection_sentences.json`, at least twenty)
+  before the encoded prompt, set into one of eight framing variants
+  (`bijection_learning_templates.json`, floor 8). The letters are normalised to
+  lower case (the cipher is over 26 symbols), every non-letter passes through,
+  and the encoding is emitted as space-separated tokens, so a reader (and the
+  test) decodes it unambiguously back to the lower-cased request. It is drawn
+  only for a text with a Latin letter (an applicability). As a heavy full-text
+  cipher it refuses what the heavy encodings refuse — `ascii_art`,
+  `translation`, the `encode` family, `payload_split`, `word_art` and the
+  manipulation families — bound from its own `cross_incompatible_with` (the
+  heavy encode members and the manipulation block do not name it). Its
+  dimension is `encoding`, its `within_layer_order` 72 (just after `encode`),
+  its complexity 3. The info is `scheme=<letter|digit|symbol>;variant=<name>`.
+  Attack only; a new family, not in the eval pool.
 
 **Requests.** These change how a request is posed, not its text, and call no
 model. Each technique picks one of its named template variants from a JSON
@@ -1276,6 +1331,39 @@ combination (the layer cap), competing with the other requests through the
 dealer as the distractors do, so a row carries one request frame. The eval
 type allows the family since eval pool v2, and every eval attack input
 (harmful) takes it.
+
+Spec version 1.5 adds the request family `fallacy` (Zhou 2407.00869, Fallacy
+Failure): one technique, `to_fallacy_failure`, which reshapes the request as a
+call for a deliberately fallacious, flawed or incorrect rendering of the task
+(a wrong-answer key, a debunking draft, an intentionally faulty procedure),
+which a model may comply with while leaking the real method. It draws one of
+the nine variants of its pool in `requests/fallacy_templates.json` (floor 8)
+and sets the prompt into it, keeping the prompt as it is; the info is
+`directive=fallacy_failure;variant=<name>`. Pure (no model call), attack only,
+its dimension `request_shape` as the other request frames. Being a
+request-layer family it is drawn once per combination (the layer cap), so a
+row carries one request frame; it has no cross rule beyond the cap, since the
+frame wraps the finished request and chokes on nothing an obfuscation does.
+It is not in the eval pool (a new family, which `eval.json` does not allow).
+
+Spec version 1.5 also adds the request family `code_framing`, two pure
+techniques. `to_code_completion` (CodeAttack, Ren 2403.07865) embeds the
+request as the task of a code-completion stub, one of nine variants over
+languages (Python, JavaScript, C, Java, Go, Ruby, Rust, SQL, Bash), the info
+`directive=code_completion;variant=<name>`. `to_decrypt_function`
+(CodeChameleon, Lv 2402.16717) transforms the prompt by one of three
+reversible transforms drawn from the unit's rng — the whole string reversed,
+the word order reversed, or each word reversed — and shows a Python decrypt
+function that inverts it, the ciphertext set into one of eight framing
+variants, the info `transform=<slug>;variant=<name>`. The transforms are
+involutions, so the shown decrypt is the same operation; a test runs each
+shown decrypt on the transformed text in a restricted `exec` and checks it
+returns the original. The codes shown live in the template file's `_decrypt`
+map (not Python), so no technique text sits in code. The frames and the
+`_decrypt` map are in `requests/code_framing_templates.json` (both pools at
+floor 8). Both are request-layer frames (dimension `request_shape`, one
+request per combination), with no cross rule beyond the layer cap; they are
+attack only and not in the eval pool (a new family).
 
 Three request families of spec version 1.2 are for natural variations only
 (their `kinds` are `["natural"]`, so no attack draws them): ordinary,

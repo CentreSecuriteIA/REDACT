@@ -624,12 +624,16 @@ SPEC_1_4_ADDED = {"persona_template": 12, "suffixes": 24, "translation": 1,
                   "encode": 1, "guardrail_address": 3, "transliteration": 4,
                   "code_switching": 10, "romanization": 10, "dialect": 6}
 
-#: What spec 1.5 added to the attack pool, by family: three unicode_smuggling
-#: techniques (two full-prompt hidings and one invisible suffix), eight
-#: char_injection techniques (a bidi reversal, upside-down, and deletion and
-#: zalgo at three densities each) and two special_tokens techniques (eos
-#: markers and chat-template abuse).
-SPEC_1_5_ADDED = {"unicode_smuggling": 3, "char_injection": 8, "special_tokens": 2}
+#: What spec 1.5 added to the attack pool, by family (the literature-gap
+#: families): packet A's three unicode_smuggling techniques (two full-prompt
+#: hidings and one invisible suffix), eight char_injection techniques (a bidi
+#: reversal, upside-down, and deletion and zalgo at three densities each) and
+#: two special_tokens techniques (eos markers and chat-template abuse); packet
+#: B's fallacy technique, two policy-framing frames, one reasoning-injection
+#: technique, two code-framing frames and one bijection-learning cipher.
+SPEC_1_5_ADDED = {"unicode_smuggling": 3, "char_injection": 8, "special_tokens": 2,
+                  "fallacy": 1, "policy_framing": 2, "reasoning_injection": 1,
+                  "code_framing": 2, "bijection": 1}
 
 
 def _by_family(names: list[str]) -> dict[str, int]:
@@ -658,7 +662,7 @@ def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
         for version in {by_name[name].since for name in added}}
     assert retired == []
     assert {version: len(names) for version, names in by_version.items()} == {
-        "1.3": 36, "1.4": 71, "1.5": 13}
+        "1.3": 36, "1.4": 71, "1.5": 20}
     assert set(_FOUR_TRANSLATIONS) <= set(by_version["1.3"])
     assert _by_family(by_version["1.4"]) == SPEC_1_4_ADDED
     assert _by_family(by_version["1.5"]) == SPEC_1_5_ADDED
@@ -692,9 +696,11 @@ def _growth_since_1_3(key: str, pool: list) -> tuple[list[str], list[str]] | Non
 
 
 def test_an_attack_plan_of_spec_1_3_finds_what_spec_1_4_and_1_5_added_as_growth():
-    """Spec 1.4 switched Yoruba's translation on and added the language-mix
-    families and more; spec 1.5 added the three unicode_smuggling techniques:
-    a plan kept from 1.3 finds both specs' additions as the library's growth,
+    """Spec 1.4 switched Yoruba's translation on and added twelve persona
+    templates, the 24 published suffixes, the letter spacing, three
+    guardrail-address techniques and the language-mix families; spec 1.5 added
+    the literature-gap families: a plan kept from 1.3 finds them all as the
+    library's growth,
     retiring nothing, so the plan is kept and the run warns."""
     added, retired = _growth_since_1_3(
         "adversarial", technique_pool(resolve(None, "adversarial")))

@@ -19,16 +19,18 @@ _FAMILY_TAGS = {
     "surface_noise": ["typos", "casual_writing", "noise", "suffixes",
                       "char_injection"],
     "encoding": ["encode", "sensitive_words", "wording", "tokenbreak", "ascii_art",
-                 "payload_split", "word_art", "transliteration", "unicode_smuggling"],
+                 "payload_split", "word_art", "transliteration",
+                 "unicode_smuggling", "bijection"],
     "container": ["structural", "neutral_container", "special_tokens"],
     "role_framing": ["persona", "framing", "cognitive", "impersonation",
-                     "benign_role", "persona_template"],
+                     "benign_role", "persona_template", "policy_framing"],
     "request_shape": ["indirect", "distractor_prefix", "distractor_suffix",
                       "continuation", "asking", "temporal", "smalltalk_prefix",
-                      "smalltalk_suffix", "guardrail_address", "persuasion",
-                      "tense_rewrite", "model_distractors"],
+                      "smalltalk_suffix", "guardrail_address", "fallacy",
+                      "code_framing", "persuasion", "tense_rewrite",
+                      "model_distractors"],
     "answer_shape": ["answer_format"],
-    "example_priming": ["fsh", "dap", "fake_turns"],
+    "example_priming": ["fsh", "dap", "fake_turns", "reasoning_injection"],
 }
 
 _AXIS_TAGS = {
@@ -163,15 +165,15 @@ class TestTheCheck:
             check_dimensions(_MIXED, augmentations_of({}))
         message = str(raised.value)
         assert "the axis inputs.focus (focus) and the request_shape families" in message
-        assert "adversarial: asking, continuation" in message
+        assert "adversarial: asking, code_framing, continuation" in message
         # The natural kind draws neither continuation, temporal nor
         # structural; the attacks draw no small talk.
         assert ("natural: asking, indirect, smalltalk_prefix, smalltalk_suffix)"
                 in message)
         assert ("the container families (adversarial: neutral_container, "
                 "special_tokens, structural; natural: neutral_container).") in message
-        assert ("the example_priming families (adversarial: dap, fake_turns, fsh)"
-                in message)
+        assert ("the example_priming families (adversarial: dap, fake_turns, fsh, "
+                "reasoning_injection)" in message)
         assert message.count("undecided") == len(("request_shape", "container",
                                                    "example_priming"))
         assert 'params inputs.axes, as {"focus": null}' in message

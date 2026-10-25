@@ -74,6 +74,11 @@ FLOORS = {
     "smalltalk_suffix": 20,
     "unicode_smuggling": 8,
     "special_tokens": 8,
+    "fallacy": 8,
+    "code_framing": 8,
+    "policy_framing": 8,
+    "reasoning_injection": 8,
+    "bijection": 8,
 }
 
 

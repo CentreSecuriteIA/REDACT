@@ -305,8 +305,12 @@ def test_the_default_attacks_draw_every_technique_of_their_pool(section):
     holds them all. The first eval release's rules left the ten heavy full-text
     encodings 5 draws in all under the unit budget and 10 under the group
     budget, five and two of them never, until they got a dealing slot of
-    their own (``sampling.HEAVY_ENCODINGS``)."""
-    units = 4000
+    their own (``sampling.HEAVY_ENCODINGS``). Spec 1.5's four literature-gap
+    families shifted the seed-42 dealing, so the rarest members (the three
+    heavy ``sensitive_words`` encodings, complexity 3, which need a marked word
+    and three budget points) now need 5,000 units to all come out under the
+    group budget."""
+    units = 5000
     drawn, pool = simulate.deal_kind(section, units, groups=3, seed=42)
     table = simulate.shares(drawn, pool)
     texts = simulate.inputs(units, groups=3)["prompt"]
@@ -332,23 +336,22 @@ _HEAVY = ("to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
 
 
 def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares):
-    """3,000 units in three groups at seed 42: 39 draws of the ten, 3 to 5
-    each. The slot fixes the total, not a count for each encoding; the total
-    is 37 or 38 in one group, 38 or 39 in three and 40 in ten (seeds 42 to
-    46); the least drawn of the ten is drawn 3 times in one and three groups,
-    1 or 2 times in ten. The four spec 1.4 language-mix families (dialect,
-    code-switching, transliteration, romanization) joined the obfuscation
+    """3,000 units in three groups: 35 draws of the ten, 3 or 4 each. The
+    slot fixes the total, not a count for each encoding. The spec 1.4
+    language-mix families and spec 1.5's `bijection` joined the obfuscation
     layer, so the layer's family-first picks are shared among more families
     and at the weight of 0.2 the slot's count fell from 45 to 30 (the bounds
-    were 28 to 42 then); spec 1.4 retuned the weight to 0.25 for about 40,
-    and the bounds are those of spec 1.3 again. Dealt as encode's members the
-    ten got 12, two of them never; dealt as a family of their own (weight 1),
-    ~200. Spec 1.5's two new obfuscation families (unicode_smuggling,
-    char_injection) share the layer's family-first picks with two more
-    families, so at 0.25 the slot fell again to 33 (sum at seeds 42 to 46, min
-    3); the owner may retune heavy_encoding_weight for the ~40 aim (see
-    .claude/completion_blockers.md), so the lower bound is widened, not the
-    weight changed."""
+    were 28 to 42 then); spec 1.4 retuned the weight to 0.25 for about 40, and
+    the bounds are those of spec 1.3 again. Dealt as encode's members the ten
+    got 12, two of them never; dealt as a family of their own (weight 1),
+    ~200. Spec 1.5's literature-gap obfuscation families (unicode_smuggling,
+    char_injection and bijection here; semantic_reencoding, translationese and
+    sociolect arrive with packet C) each share the layer's family-first picks,
+    so at 0.25 the slot fell again, to ~30 at the fixture's three groups,
+    seed 42 (29 to 30 over seeds 42 to 46 in one, three or ten groups, min 2
+    to 3). The lower bound is widened, not the weight changed, until the
+    post-merge retune of heavy_encoding_weight restores the ~40 aim (see
+    .claude/completion_blockers.md B16/B17)."""
     counts = [default_shares[name]["count"] for name in _HEAVY]
     assert 30 <= sum(counts) <= 60  # noqa: PLR2004
     assert min(counts) >= 3  # noqa: PLR2004
@@ -589,27 +592,17 @@ _BUDGETS = [
 # not the Swiss German dialects) moved it by the name alone: the draws are
 # the same, with the new name in the 5 of the 240 dealt units and the 2 of
 # the 200 undealt draws that held the technique (its row keeps its place).
-# Spec 1.5's unicode_smuggling (three attack-only obfuscation techniques: two
-# full-prompt hidings, complexity 3, and one invisible suffix, complexity 1,
-# all refusing every other obfuscation family and the manipulation layer)
-# joined the obfuscation family-first picks, so the group's family counts and
-# the tie-break names change from the first obfuscation pick on, and the
-# undealt draws gain the new family (199 of the 240 dealt units, 21 of them
-# holding one of the three; 13 of the 200 undealt draws, 8 holding one). The
-# eval type's pin below does not move: no eval pool draws the family.
-# Spec 1.5's char_injection (eight attack-only obfuscation techniques: a bidi
-# reversal and upside-down, complexity 2, and deletion and zalgo at three
-# densities, complexity 1 to 3, all refusing every other obfuscation family)
-# moved it again, the same way (175 of the 240 dealt units, 22 of them holding
-# one of the eight; 10 of the 200 undealt draws, all holding one). The eval
-# type's pin does not move: no eval pool draws the family.
-# Spec 1.5's special_tokens (two attack-only obfuscation techniques: an eos
-# marker append, complexity 1, and chat-template abuse, complexity 2; a
-# wrapper that joins encode and translation, so not exclusive) moved it again,
-# the same way (180 of the 240 dealt units, 34 of them holding one of the two;
-# 73 of the 200 undealt draws, 44 holding one). The eval type's pin does not
-# move: no eval pool draws the family.
-_PINNED_DRAWS = "d5d413a541703c22da1c5bd53fad97bb90384929b5eed153c3ca79247c20276d"
+# Spec 1.5 adds the literature-gap families, each joining the family-first
+# picks of its layer, so the group's family counts and tie-break names change
+# and the undealt draws gain the new techniques. The digest is re-pinned once
+# per integration merge as the families land (packet A: unicode_smuggling,
+# char_injection, special_tokens; packet B: fallacy, policy_framing,
+# code_framing, reasoning_injection, bijection; packet C: semantic_reencoding,
+# translationese, sociolect) and once more after heavy_encoding_weight is
+# retuned. The eval type's pin below does not move: no eval pool draws any of
+# the new families.
+_PINNED_DRAWS = "8d4e21146934db5a1633204e59661317713c2feec16538294fd86f8ace451e7f"
+
 
 
 def test_the_budget_draws_are_the_pinned_ones():
