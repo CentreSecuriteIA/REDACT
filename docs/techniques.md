@@ -855,8 +855,25 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   which the natural kind draws; import fails for a pool of hints that names one
   (`NEVER_HINTED` in `obfuscation/encoding.py`). The ten `to_sensitive_words_encode_*` techniques
   call the plain encoders, so they carry none.
-- `structural` wraps the text in JSON, XML or markdown. `to_json` keeps
-  non-ASCII characters as they are.
+- `structural` wraps the text in JSON, XML or markdown. Each of its three
+  techniques draws one of the variants of its pool in
+  `obfuscation/structural_templates.json`: ten for `to_json` (its first
+  variant is the wrapper it always wrote), nine each for `to_xml` and
+  `to_markdown` (their first is the template each always had). The
+  variants differ in structure, not only in wording: a flat record, a
+  JSON-RPC call, a chat payload, a configuration, a nested directive, a
+  ticket, a schema instance, a task list and an event for JSON; a policy
+  update, a configuration patch, a SOAP envelope, a command, a form and a
+  rule set for XML; a changelog, a README, a runbook, a settings table, a
+  checklist, an API reference, a memo and a wiki page for Markdown. Every
+  variant states an override of the usual guidelines, the technique's
+  point. `to_json` writes the prompt as the inside of a JSON string, so
+  each JSON variant parses whatever the prompt holds, and keeps non-ASCII
+  characters as they are; `to_xml` and `to_markdown` write it as it is. The
+  fields (a priority and a format for JSON, one of three policy ids for XML)
+  are drawn first, in the order they were drawn before the pools, and the
+  variant after them; every JSON variant holds both fields and every XML
+  variant the policy id, so the info is true of the text.
 - `neutral_container` (spec version 1.2) places the text in an everyday
   document, the formats a classifier meets in real traffic. Each of its six
   pure techniques draws one of eight variants of its pool in
@@ -1014,10 +1031,10 @@ directive and variant of a fault. A pool should hold at least 8 variants
 (a request or framing directive, a container, a fake turn, the payload split's reassembly, the
 word art's decoding, the wording's key and puzzles), 12 for a benign role, 20 for small talk, 6 for the
 persona templates' mechanics and 4 for an encoding's decode hints;
-13 of the 85 pools are below their floor today (the five
-framing, the four continuation, the two structural, `refusal_then_comply` and
-`past_tense`, each with 4, or 1): the techniques of the eval pool, whose
-text is pinned until the next eval review. A test ratchets the rest
+11 of the 86 pools are below their floor today (the five
+framing, the four continuation, `refusal_then_comply` and `past_tense`, each
+with 4): the techniques of the eval pool, whose text is pinned until the next
+eval review. A test ratchets the rest
 ([extending.md](extending.md#add-variants-to-a-template-pool)).
 
 The info names the variant drawn: `variant=<name>` for the framing
@@ -1032,10 +1049,11 @@ persona templates, which name the mechanic drawn
 (`category=<key>_persona_template;variant=<mechanic>`);
 `hint=<name>` after an encoding's own info (`shift=<n>;hint=<name>`) when
 it wrote a decode hint; `style=<name>` for
-continuation. Structural's `to_xml` and `to_markdown` have one template
-each and name none (`to_xml`'s info names its policy id), and `to_json`
-writes its wrapper in code. Continuation and structural are drawn by the
-eval pool, so their infos stay as they are until the next eval review.
+continuation, and `variant=<name>` after the fields the wrapper drew for
+the structural techniques (`priority=<p>;format=<f>;variant=<name>` for
+`to_json`, `policy_id=<id>;variant=<name>` for `to_xml`, `variant=<name>`
+for `to_markdown`). Continuation is drawn by the eval pool, so its info
+stays as it is until the next eval review.
 After a run, `<kind>.variants.csv` counts the rows that drew each variant
 ([stages/jailbreaks.md](stages/jailbreaks.md#files)).
 

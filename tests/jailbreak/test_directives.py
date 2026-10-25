@@ -218,11 +218,10 @@ class TestDrawVariant:
         assert 0.72 < drawn["alpha"] / 4000 < 0.78
 
 
-def test_every_template_technique_names_its_pool_but_to_json():
-    """``to_json`` writes its wrapper in code until the next eval review."""
+def test_every_template_technique_names_its_pool():
     unmarked = [name for name, fn in _TEMPLATE_TECHNIQUES.items()
                 if not hasattr(fn, "variant_pool")]
-    assert unmarked == ["to_json"]
+    assert unmarked == []
 
 
 @pytest.mark.parametrize("name", sorted(
@@ -239,8 +238,7 @@ def test_a_technique_writes_a_variant_of_the_pool_it_names(name):
              else variant["prefix"] + probe + variant["suffix"]
              for variant in read_pools(ref.file)[ref.directive]}
     for seed in range(8):
-        kwargs = {"rng": random.Random(seed)} if name != "to_markdown" else {}
-        found = fn(probe, **kwargs)[0] in texts
+        found = fn(probe, rng=random.Random(seed))[0] in texts
         assert found, f"{name}: its text is not a variant of {ref.name}"
 
 

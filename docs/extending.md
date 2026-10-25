@@ -473,7 +473,9 @@ directive's list in its template file under `configs/jailbreak/`, read by
 `directives.read_pools` whatever the file's shape. Most files are
 `{directive: [{"name", "template"}, ...]}`; continuation's variants are
 `{"name", "prefix", "suffix"}` (the prompt goes between them, unformatted);
-structural's `to_xml` and `to_markdown` have one template each, read as a
+structural's `to_json`, `to_xml` and `to_markdown` are lists like the rest
+(its `policy_ids` is a list its module reads for itself, not a pool); the
+persona frames of `persona_templates.json` are single templates, read as a
 pool of one variant named after the entry. `personas.json` and
 `cognitive_techniques.json` are definitions, not pools.
 
@@ -482,7 +484,8 @@ pool of one variant named after the entry. `personas.json` and
    `<kind>.variants.csv` counts the rows that drew it), and a
    `template` that holds `{prompt}` once and no other slot than those its
    technique fills (`{language}` for the answer languages, `{policy_id}`
-   for `to_xml`); a literal brace is written `{{` or `}}`. A pool whose
+   for `to_xml`, `{priority}` and `{format}` for `to_json`, whose `{prompt}`
+   is the prompt as the inside of a JSON string); a literal brace is written `{{` or `}}`. A pool whose
    technique sets the filled variant into another template, which holds the
    request, has no request slot: its technique names it with
    `@uses_pool(..., slots=(...), request_slot=False)`, and its templates
@@ -534,9 +537,8 @@ pool of one variant named after the entry. `personas.json` and
    keeps as it is. A pool that reaches its floor must leave
    `known_short`: the test fails until it does. The list is kept by hand and
    nothing but review stops a new below-floor pool from being added to it, so
-   add one only on purpose. 13 of the 85 pools are on it today, in 5
-   families, all drawn by eval-pool techniques (whose text is pinned);
-   `to_json`'s wrapper is not a pool yet.
+   add one only on purpose. 11 of the 86 pools are on it today, in 4
+   families, all drawn by eval-pool techniques (whose text is pinned).
 
 A new directive is a new list in the file and a technique that names it
 with `@uses_pool` ([above](#add-a-jailbreak-technique)); its family needs
@@ -554,8 +556,8 @@ A new string fails, printing only `file:line` and its word count: put the
 text in a template file, or, for a message the lint cannot tell from
 output, add its entry. An entry no string matches fails too, so moving a
 text into JSON takes its entry out and the list only shrinks. Text built
-from shorter strings (the suffix fragments, the abbreviation map, the keys
-of `to_json`'s wrapper) is not found.
+from shorter strings (the suffix fragments, the abbreviation map) is not
+found.
 
 ## Add a stage
 

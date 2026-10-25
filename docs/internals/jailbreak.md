@@ -129,9 +129,9 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   `info_key` the key of its info that names the variant drawn, `variant`
   unless it says otherwise; the answer languages share one pool, set by
   their factory). `read_pools` reads a
-  file of any of the three shapes (`{name, template}` lists,
-  continuation's `{name, prefix, suffix}`, structural's one template per
-  technique) into lists of variants; `pool.py` checks every named pool at
+  file of either shape (`{name, template}` lists, continuation's
+  `{name, prefix, suffix}`; a single template entry, the persona frames',
+  is a pool of one) into lists of variants; `pool.py` checks every named pool at
   import (`check_pools`: unique non-empty names of letters, digits, `_` and
   `-`, `{prompt}` exactly once in each template and only the technique's
   slots, each written alone with no conversion or format spec, a `weight` a
@@ -145,9 +145,7 @@ def to_y(prompt: str, **kwargs) -> TechniqueGen:
   before pools had weights (`tests/fixtures/template_draws.json` pins every
   template technique's texts and draws by digest), and a weighted one with
   `rng.choices`; a variant of weight 0 is never drawn, and a pool of one
-  makes no draw. `to_json`'s wrapper is still written in
-  `obfuscation/structural.py`, since it is in the pinned eval pool and moves
-  only in an eval review. A
+  makes no draw. A
   technique's text belongs in a template file: a lint
   (`tests/jailbreak/test_prose_in_code.py`) fails on a string of eight or
   more words in the package's code that is not a docstring or a message,
@@ -554,7 +552,7 @@ natural kind runs with `read_back=False`, so the file is read, not the
 frame). `variants_of(technique, info, registry)` pairs one row's variants by
 position: a technique's pool names the info key that holds its variant
 (`PoolRef.info_key`: `variant` as `apply_template_directive` writes it,
-continuation's `style`, structural's none), and the values of each key go,
+continuation's `style`), and the values of each key go,
 in order, to the row's techniques that write it, less those noted
 `noop=`; a row whose values and techniques do not pair up (a rejected or an
 error row) counts none, except for the key of an optional pool
@@ -563,8 +561,8 @@ whose values may be fewer than its techniques: a row without a hint counts
 none for that key and keeps its other variants. Every variant of weight above 0 of a pool
 technique gets a row, 0 when none drew it; a technique outside the pool
 that a row drew (a kept plan's) is added after. No technique's info
-changed for the table: the eval-pool techniques that name no `variant=`
-(continuation, structural) keep their info while the eval pool is pinned.
+changed for the table: continuation, which the eval pool draws, keeps its
+`style=` info while the eval pool is pinned.
 
 ## The augmentation section in code
 
