@@ -499,7 +499,7 @@ type is a one-key override: its pool keeps the other 28 techniques. An allow
 list left empty by this is dropped when the other list still names
 something; when nothing but translation was allowed, the kind raises.
 
-The packaged attacks have it `true`, drawing all 23 languages, and the
+The packaged attacks have it `true`, drawing all 24 languages, and the
 natural kind `false`; the eval type narrows its attacks to the eight
 low-resource languages. They run on the `translation` role's default,
 `translategemma-27b`, a local vLLM model
@@ -688,7 +688,31 @@ the default) and in `params["jailbreaks"]`.
 
 ### Release notes
 
-**Upgrading from the previous release (spec version 1.0, now 1.3).** The
+**Spec version 1.4.** What changes for a run you already have:
+
+- **The Yoruba translation.** `to_yoruba` (its row of `languages.json` says
+  `"translation_since": "1.4"`) joins the default attack pool, now 215
+  techniques in 29 families, and the natural pool with `"translation": true`
+  (96). An attack plan kept from 1.3 resumes with the growth WARNING naming
+  it and does not draw it until planned again with `resume=False`; a fresh
+  plan with the same seed draws it for some units. The eval pool is
+  unchanged. Yoruba is on watch: in the measurement the judge rejected 40.7%
+  of its calls and 7.4% of its units were discarded after 4 rounds, so expect
+  more calls and more discarded rows for it than for the other languages.
+- **The benign pairs are checked.** Each pair the stage generates for `fsh`
+  and `dap` is read by the `check` model (else the `gen` model) and asked for
+  again when rejected; a cache written before is loaded as it is, unchecked.
+  To check it, delete `benign_samples.csv` and its two sidecars, so the
+  pairs are generated again. A recipe that names a separate `check` model now
+  has it planned for the jailbreak stage when the attacks draw `fsh` or `dap`,
+  which the eval type's do.
+- **`to_morse` and `to_braille` are tagged `needs_latin`.** No rule reads the
+  tag: no draw, pair or pin moves.
+- **Published adversarial suffixes** come from
+  `configs/jailbreak/obfuscation/suffix_strings.json`, a technique per row,
+  attack only.
+
+**Upgrading from spec version 1.0 to 1.3.** The
 jailbreak library grew from 151 techniques in 23 families to 244 active ones
 (251 registered, 7 retired) in 36 families and five layers. What that asks of
 a run you already have, and what you will see; each point has its note below.
@@ -1167,7 +1191,7 @@ in `techniques.deny` and allows none of the families), so its pool stays at
   Hindi, Yoruba and Amharic (rows of `configs/jailbreak/languages.json`): six
   pure techniques, `to_ask_answer_in_<slug>`, in the default attack pool and
   the natural pool. Four of them became translations in spec 1.3 (the note
-  on the four translation languages). The answer
+  on the four translation languages), and Yoruba in spec 1.4. The answer
   languages now follow the language table's order, which puts Swahili before
   Thai, so a fresh plan that drew one of the two draws the other (a kept plan
   replays by name) ([techniques.md](techniques.md#the-language-table)).

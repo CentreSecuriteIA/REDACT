@@ -345,8 +345,8 @@ keeps the rewrite layer out of a count round.
 
 Every pick is **family first** (`_pick_by_family`): a family, then a
 technique within it, both dealt when the plan passes its dealer
-([balanced dealing](#balanced-dealing)). The 23 translation languages are
-one choice, not 23.
+([balanced dealing](#balanced-dealing)). The 24 translation languages are
+one choice, not 24.
 The rules are those of [techniques.md](../techniques.md#compatibility-rules);
 among them, a translation is never paired with `sensitive_words`, `wording`,
 `tokenbreak` or `word_art`, whose marking call mostly fails on translated

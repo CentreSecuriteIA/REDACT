@@ -516,8 +516,11 @@ _BUDGETS = [
 # obfuscations deal them under a name of their own beside encode, so the
 # group's family counts and the names the dealer breaks a tie among change
 # from the first obfuscation pick on (219 of the 240 dealt units; the 200
-# undealt draws ask no dealer and do not move).
-_PINNED_DRAWS = "93982088b48668f879bb867db3cdaf1665975b1561731774159496f26b5f01ed"
+# undealt draws ask no dealer and do not move). The spec 1.4 Yoruba
+# translation moved it once more: a wider translation family changes the
+# member a translation draw lands on (1 of the 240 dealt units, 2 of the 200
+# undealt draws, each now drawing Yoruba).
+_PINNED_DRAWS = "6ebe63d8716a3a6b0af511446a6de30fc75c2920385b84d1f37e93e705f6a836"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

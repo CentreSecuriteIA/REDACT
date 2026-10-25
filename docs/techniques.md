@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 244 active techniques in 5 layers and 36
+The jailbreak stage draws from 245 active techniques in 5 layers and 36
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -72,10 +72,10 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 35 | at most 1 |
-| `obfuscation` | 14 | 110 | no cap |
+| `obfuscation` | 14 | 111 | no cap |
 | `requests` | 12 | 68 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| all | 36 | 244 | |
+| all | 36 | 245 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -98,7 +98,7 @@ that call a model call the generation model.
 | hacking | `framing` | `role_framing` |  | 5 | no | no | `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints` |
 | hacking | `persona` | `role_framing` |  | 14 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona`, `to_mercenary_persona`, `to_underground_hacker_persona`, `to_anarchist_philosopher_persona` |
 | hacking | `persona_template` | `role_framing` |  | 11 | no | no | `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template` |
-| obfuscation | `translation` | `language` | 10 | 23 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_chinese`, `to_hindi`, `to_amharic` |
+| obfuscation | `translation` | `language` | 10 | 24 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_chinese`, `to_hindi`, `to_yoruba`, `to_amharic` |
 | obfuscation | `typos` | `surface_noise` | 20 | 4 | yes | no | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium`, `to_rewrite_with_typos_high`, `to_rewrite_with_typos_insane` |
 | obfuscation | `casual_writing` | `surface_noise` | 30 | 9 | no | no | `to_lowercase`, `to_uppercase`, `to_no_sentence_capitals`, `to_dropped_spaces`, `to_doubled_spaces`, `to_dropped_punctuation`, `to_doubled_punctuation`, `to_abbreviations`, `to_stripped_accents` |
 | obfuscation | `noise` | `surface_noise` | 35 | 12 | no | no | `to_random_capitals_low`, `to_random_capitals_medium`, `to_random_capitals_high`, `to_scrambled_letters_low`, `to_scrambled_letters_medium`, `to_scrambled_letters_high`, `to_keyboard_typos_low`, `to_keyboard_typos_medium`, `to_keyboard_typos_high`, `to_emoji_sprinkle_low`, `to_emoji_sprinkle_medium`, `to_emoji_sprinkle_high` |
@@ -214,9 +214,9 @@ whether it has a `translation` technique (`to_<slug>`) and an
 spec's `generators` make a technique entry of each marked row as the spec
 loads, and the two families' modules build the functions from the same
 rows, in the table's order. Of the twenty-six rows, all have an
-answer-language technique and twenty-three a translation: not Maori, nor
-Guarani and Yoruba, two of the six rows spec version 1.2 added (Hmong,
-Guarani, Chinese, Hindi, Yoruba, Amharic). Spec version 1.3 switched on the
+answer-language technique and twenty-four a translation: not Maori, nor
+Guarani, one of the six rows spec version 1.2 added (Hmong, Guarani,
+Chinese, Hindi, Yoruba, Amharic). Spec version 1.3 switched on the
 translations of the other four (Hmong, Chinese, Hindi, Amharic) after a
 measurement with the translation model on a GPU (2026-10-22: TranslateGemma
 27B on the FLORES-200 devtest, 1,012 sentences, and on REDACT's inputs, with
@@ -225,11 +225,20 @@ GlotLID reading 99.8% to 99.9% of the translations as the language, and
 runaway replies (1,500 tokens or more) in none of Chinese's and Hindi's 1,012
 sentences, 3 of Amharic's and 4 of Hmong's. Guarani stays an
 answer language, since TranslateGemma loops on a fifth of its sentences and
-only 40% of the units pass; Yoruba too, since the judge rejects 41% of its
-calls and 93% of the units pass, below the 97% bar. A row's
-`translation_since` (`"1.3"` for these four) dates its translation apart from
-its `since` (`"1.2"`, the answer language), so a plan kept from spec 1.2
-resumes with the growth WARNING. Chinese is scored high (0, as Japanese),
+only 40% of the units pass. Spec version 1.4 switched on Yoruba's
+translation from the same measurement, on watch: GlotLID read 98.6% of its
+translations as Yoruba (`yor_Latn`, no other label at 2% or more), its
+median length is 1.10 of its input, and its chrF++ on the devtest is 1.7
+points below NLLB-200's, but the judge rejected 40.7% of its calls and only
+214 of 231 units (92.6%) were accepted within the 4 rounds, below the 97%
+bar the others passed (12 runaway replies in 1,012 sentences, a
+back-translation chrF++ of 41.7). So `to_yoruba` discards about one text in
+thirteen (`DISCARDED`, `piece=all` for the judge) and takes more rounds, and
+calls, than the other languages; it is sent to the model by its name, which
+measured better than `yo`. A row's `translation_since` (`"1.3"` for the
+four, `"1.4"` for Yoruba) dates its translation apart from its `since`
+(`"1.2"`, the answer language), so a plan kept from spec 1.2 or 1.3 resumes
+with the growth WARNING. Chinese is scored high (0, as Japanese),
 Hindi mid (1, as Turkish and Vietnamese), and Hmong, Guarani, Yoruba and
 Amharic low (2, as Zulu and Swahili). Two of the four are on watch, as Scots
 Gaelic is: the judge rejects 20% of Hmong's calls (a back-translation
@@ -239,7 +248,8 @@ Hmong's acceptance, 230 of 237 units (97.05%, a Wilson 95% interval of 94.0%
 to 98.6%), passes the 97% bar on the point estimate and not with certainty. Hmong is sent to the translation
 model by its name, never a code (`hmn` and `mww` gave Hawaiian and Marathi);
 Chinese is accepted as `cmn_Hani` or `wuu_Hani`. The translation family
-kept the order it had, the four joining at their rows; the answer languages took the table's, which puts
+kept the order it had, the five joining at their rows (Yoruba between Hindi
+and Amharic); the answer languages took the table's, which puts
 Swahili before Thai, so a fresh plan that drew one of the two draws the
 other (a kept plan replays by name). The table is read from the package
 only. To add a language: [extending.md](extending.md#add-a-language).
@@ -491,7 +501,7 @@ their own. The natural kind draws only what is marked natural: by default
 | `encode` | `to_leetspeak_basic` |
 | `suffixes` | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_emoji` |
 
-With `"natural": {"translation": true}` the 23 translations join them (95);
+With `"natural": {"translation": true}` the 24 translations join them (96);
 the kind draws one technique per input unless `exact_techniques` says more,
 and with two or more a translation is kept from `typos`, `casual_writing` and
 `noise` by the rules above.
@@ -718,19 +728,20 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   `to_sensitive_words_variables` and `to_synonym_substitution` leave it
   unchanged. `to_synonym_substitution`
   makes one more call per word; its info is `substitutions=a->b,c->d`.
-- `translation` covers 23 languages, the rows of
+- `translation` covers 24 languages, the rows of
   [the language table](#the-language-table) marked `translation` (not Maori,
   which TranslateGemma renders
   with invented sensitive and technical terms, fluently enough to pass every
-  check, nor Guarani and Yoruba, which measured below the acceptance bar) in
+  check, nor Guarani, which measured below the acceptance bar) in
   three resource tiers, which the table scores by complexity:
   high (`to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`,
   `to_arabic`, `to_chinese`; 0), mid (`to_turkish`,
   `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_hindi`; 1) and low
   (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`,
-  `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_amharic`; 2),
-  the last two (spec 1.3) on watch like Scots Gaelic ([the language
-  table](#the-language-table)). On a chat translator
+  `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_yoruba`,
+  `to_amharic`; 2), the last three (spec 1.3, Yoruba spec 1.4) on watch like
+  Scots Gaelic ([the language table](#the-language-table)): the judge rejects
+  41% of Yoruba's calls, so it discards about one text in thirteen. On a chat translator
   each is a translate, check and retry loop on the `translation` model. On
   a machine-translation model (`translategemma-27b`, the default) the text
   goes paragraph by paragraph; each piece is checked for its language
@@ -1102,7 +1113,8 @@ Also beyond the reference list:
 - continuation attacks (4) and indirect task embedding (6);
 - the answer languages Zulu, Scots Gaelic, Bengali and Javanese, and (spec
   version 1.2) Hmong, Guarani, Chinese, Hindi, Yoruba and Amharic, of which
-  (spec version 1.3) Hmong, Chinese, Hindi and Amharic are also translations;
+  Hmong, Chinese, Hindi and Amharic (spec version 1.3) and Yoruba (spec
+  version 1.4) are also translations;
 - (spec version 1.3) the persona templates (11 frames, 6 mechanics), three
   named personas (a mercenary, an underground hacker, an anarchist
   philosopher), the fake turns (3), the payload split (2: at word boundaries, or where a
