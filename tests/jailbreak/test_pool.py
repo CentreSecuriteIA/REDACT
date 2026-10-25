@@ -170,7 +170,7 @@ def test_the_default_variation_pool_is_the_96_pinned_natural_techniques():
         "suffixes", "transliteration", "code_switching", "romanization"}
 
 
-def test_the_default_attack_pool_is_285_techniques_in_34_families():
+def test_the_default_attack_pool_is_286_techniques_in_35_families():
     """Every active technique but casual writing and the natural-only
     families: the 24 translations included, now the packaged adversarial
     kind has its translation switch on (the four spec 1.3 ones are Hmong,
@@ -186,23 +186,23 @@ def test_the_default_attack_pool_is_285_techniques_in_34_families():
     spec 1.4's twelve persona templates, 24 published suffixes, letter
     spacing, three guardrail-address techniques, four transliterations, ten
     code-switching techniques, ten romanizations and six dialects (its
-    translation switch on) in. Small talk and the benign roles leave it as
-    it was."""
+    translation switch on) in, and spec 1.5's one fallacy technique. Small
+    talk and the benign roles leave it as it was."""
     pool = technique_pool(resolve(None, "adversarial"))
-    assert len(pool) == 285     # noqa: PLR2004
-    assert len({fn.families[0] for fn in pool}) == 34     # noqa: PLR2004
+    assert len(pool) == 286     # noqa: PLR2004
+    assert len({fn.families[0] for fn in pool}) == 35     # noqa: PLR2004
 
 
 def test_the_rewrite_layer_is_off_by_default_and_layers_allow_adds_its_16_techniques():
     """The spec has the layer off by default, so the default attack pool is
-    the 285 and no other pool holds a rewrite technique; a section that allows
+    the 286 and no other pool holds a rewrite technique; a section that allows
     the layer gains the 16 of its three families, and nothing else leaves or
     joins."""
     default = technique_pool(resolve(None, "adversarial"))
     allowed = technique_pool(resolve(
         {"adversarial": {"layers": {"allow": ["rewrite"]}}}, "adversarial"))
     gained = [fn for fn in allowed if fn not in default]
-    assert (len(default), len(allowed), len(gained)) == (285, 301, 16)   # noqa: PLR2004
+    assert (len(default), len(allowed), len(gained)) == (286, 302, 16)   # noqa: PLR2004
     assert gained == _rewrites(all_techniques())
     assert {fn.families[0] for fn in gained} == {
         "persuasion", "tense_rewrite", "model_distractors"}

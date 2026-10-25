@@ -79,6 +79,7 @@
   "requests/distractor_templates.json:suffix_related": {"family": "distractor_suffix", "variants": 8, "floor": 8},
   "requests/distractor_templates.json:suffix_task": {"family": "distractor_suffix", "variants": 8, "floor": 8},
   "requests/distractor_templates.json:suffix_unrelated": {"family": "distractor_suffix", "variants": 8, "floor": 8},
+  "requests/fallacy_templates.json:fallacy_failure": {"family": "fallacy", "variants": 9, "floor": 8},
   "requests/guardrail_templates.json:block_question": {"family": "guardrail_address", "variants": 8, "floor": 8},
   "requests/guardrail_templates.json:classify_benign": {"family": "guardrail_address", "variants": 8, "floor": 8},
   "requests/guardrail_templates.json:security_override": {"family": "guardrail_address", "variants": 8, "floor": 8},

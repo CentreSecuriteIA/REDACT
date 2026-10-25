@@ -24,8 +24,8 @@ _FAMILY_TAGS = {
                      "benign_role", "persona_template"],
     "request_shape": ["indirect", "distractor_prefix", "distractor_suffix",
                       "continuation", "asking", "temporal", "smalltalk_prefix",
-                      "smalltalk_suffix", "guardrail_address", "persuasion",
-                      "tense_rewrite", "model_distractors"],
+                      "smalltalk_suffix", "guardrail_address", "fallacy",
+                      "persuasion", "tense_rewrite", "model_distractors"],
     "answer_shape": ["answer_format"],
     "example_priming": ["fsh", "dap", "fake_turns"],
 }

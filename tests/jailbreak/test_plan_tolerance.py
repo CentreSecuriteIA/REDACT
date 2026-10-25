@@ -624,6 +624,10 @@ SPEC_1_4_ADDED = {"persona_template": 12, "suffixes": 24, "translation": 1,
                   "encode": 1, "guardrail_address": 3, "transliteration": 4,
                   "code_switching": 10, "romanization": 10, "dialect": 6}
 
+#: What spec 1.5 added to the attack pool, by family (the literature-gap
+#: families): one fallacy technique so far.
+SPEC_1_5_ADDED = {"fallacy": 1}
+
 
 def _by_family(names: list[str]) -> dict[str, int]:
     every = registry(all_techniques())
@@ -650,9 +654,10 @@ def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
         for version in {by_name[name].since for name in added}}
     assert retired == []
     assert {version: len(names) for version, names in by_version.items()} == {
-        "1.3": 36, "1.4": 71}
+        "1.3": 36, "1.4": 71, "1.5": 1}
     assert set(_FOUR_TRANSLATIONS) <= set(by_version["1.3"])
     assert _by_family(by_version["1.4"]) == SPEC_1_4_ADDED
+    assert _by_family(by_version["1.5"]) == SPEC_1_5_ADDED
     assert "to_letter_spacing" in by_version["1.4"]
 
 
@@ -685,14 +690,14 @@ def _growth_since_1_3(key: str, pool: list) -> tuple[list[str], list[str]] | Non
 def test_an_attack_plan_of_spec_1_3_finds_what_spec_1_4_added_as_growth():
     """Spec 1.4 switched Yoruba's translation on and added twelve persona
     templates, the 24 published suffixes, the letter spacing and three
-    guardrail-address techniques: a plan kept from 1.3 finds the 41 as the
-    library's growth, retiring nothing, so the plan is kept and the run
-    warns."""
+    guardrail-address techniques, and spec 1.5 added the literature-gap
+    families: a plan kept from 1.3 finds them all as the library's growth,
+    retiring nothing, so the plan is kept and the run warns."""
     added, retired = _growth_since_1_3(
         "adversarial", technique_pool(resolve(None, "adversarial")))
     assert "to_yoruba" in added and retired == []
-    assert {registry(all_techniques())[name].since for name in added} == {"1.4"}
-    assert _by_family(added) == SPEC_1_4_ADDED
+    assert {registry(all_techniques())[name].since for name in added} == {"1.4", "1.5"}
+    assert _by_family(added) == {**SPEC_1_4_ADDED, **SPEC_1_5_ADDED}
 
 
 def test_a_resume_of_a_spec_1_3_plan_warns_that_the_library_added_yoruba(

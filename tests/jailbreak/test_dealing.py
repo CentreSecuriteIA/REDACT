@@ -568,7 +568,11 @@ _BUDGETS = [
 # not the Swiss German dialects) moved it by the name alone: the draws are
 # the same, with the new name in the 5 of the 240 dealt units and the 2 of
 # the 200 undealt draws that held the technique (its row keeps its place).
-_PINNED_DRAWS = "ca39fc158e15fa9ab4ec9b1afa893de5e5c58693f878c64562291ef39ed379a2"
+# Spec 1.5's new families join the family-first picks of their layers, so the
+# group's family counts and tie-break names change and the undealt draws gain
+# the new techniques; re-pinned as each family (fallacy, then policy_framing,
+# code_framing, reasoning_injection, bijection) was added.
+_PINNED_DRAWS = "59b621fa1f3e674970411a3579e5655a552870719dab0a9ce35773c788710bd4"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 315 active techniques in 5 layers and 41
+The jailbreak stage draws from 316 active techniques in 5 layers and 42
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -78,9 +78,9 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 47 | at most 1 |
 | `obfuscation` | 18 | 166 | no cap |
-| `requests` | 13 | 71 | at most 1 |
+| `requests` | 14 | 72 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| all | 41 | 315 | |
+| all | 42 | 316 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -128,6 +128,7 @@ that call a model call the generation model.
 | requests | `continuation` | `request_shape` |  | 4 | no | no | `to_continue_passage`, `to_complete_story`, `to_fill_in_blank`, `to_continue_instructions` |
 | requests | `distractor_prefix` | `request_shape` |  | 3 | no | no | `to_distractor_prefix_related`, `to_distractor_prefix_unrelated`, `to_distractor_prefix_task` |
 | requests | `distractor_suffix` | `request_shape` |  | 3 | no | no | `to_distractor_suffix_related`, `to_distractor_suffix_unrelated`, `to_distractor_suffix_task` |
+| requests | `fallacy` | `request_shape` |  | 1 | no | no | `to_fallacy_failure` |
 | requests | `guardrail_address` | `request_shape` |  | 3 | no | no | `to_guardrail_block_question`, `to_guardrail_classify_benign`, `to_guardrail_security_override` |
 | requests | `impersonation` | `role_framing` |  | 3 | no | no | `to_impersonate_good_person`, `to_impersonate_authority`, `to_impersonate_developer` |
 | requests | `indirect` | `request_shape` |  | 6 | no | no | `to_summarize`, `to_proofread`, `to_critique`, `to_translate_task`, `to_explain_to_child`, `to_rewrite` |
@@ -1227,6 +1228,20 @@ combination (the layer cap), competing with the other requests through the
 dealer as the distractors do, so a row carries one request frame. The eval
 type allows the family since eval pool v2, and every eval attack input
 (harmful) takes it.
+
+Spec version 1.5 adds the request family `fallacy` (Zhou 2407.00869, Fallacy
+Failure): one technique, `to_fallacy_failure`, which reshapes the request as a
+call for a deliberately fallacious, flawed or incorrect rendering of the task
+(a wrong-answer key, a debunking draft, an intentionally faulty procedure),
+which a model may comply with while leaking the real method. It draws one of
+the nine variants of its pool in `requests/fallacy_templates.json` (floor 8)
+and sets the prompt into it, keeping the prompt as it is; the info is
+`directive=fallacy_failure;variant=<name>`. Pure (no model call), attack only,
+its dimension `request_shape` as the other request frames. Being a
+request-layer family it is drawn once per combination (the layer cap), so a
+row carries one request frame; it has no cross rule beyond the cap, since the
+frame wraps the finished request and chokes on nothing an obfuscation does.
+It is not in the eval pool (a new family, which `eval.json` does not allow).
 
 Three request families of spec version 1.2 are for natural variations only
 (their `kinds` are `["natural"]`, so no attack draws them): ordinary,

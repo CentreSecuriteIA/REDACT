@@ -72,6 +72,11 @@ FLOORS = {
     "benign_role": 12,
     "smalltalk_prefix": 20,
     "smalltalk_suffix": 20,
+    "fallacy": 8,
+    "code_framing": 8,
+    "policy_framing": 8,
+    "reasoning_injection": 8,
+    "bijection": 8,
 }
 
 
