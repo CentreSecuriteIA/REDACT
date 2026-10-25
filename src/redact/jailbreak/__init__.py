@@ -39,6 +39,14 @@ from .pool import all_techniques, registry, technique_pool, uses_translation
 from .rules import compatible
 from .sampling import sample_combination, sample_exact_combination
 
+# A beam search over combinations against a target model
+from .search import (
+    BestCombo,
+    best_combinations,
+    search_combinations,
+    search_tree,
+)
+
 # The spec and its tags
 from .technique import load_spec, tag
 
@@ -46,9 +54,11 @@ from .technique import load_spec, tag
 tag(all_techniques())
 
 __all__ = [
+    "BestCombo",
     "all_techniques",
     "apply_combination",
     "assign_combination",
+    "best_combinations",
     "combination_of",
     "combine_techniques",
     "compatible",
@@ -63,6 +73,8 @@ __all__ = [
     "run_chain",
     "sample_combination",
     "sample_exact_combination",
+    "search_combinations",
+    "search_tree",
     "tag",
     "technique_pool",
     "uses_translation",
