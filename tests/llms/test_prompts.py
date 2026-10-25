@@ -595,11 +595,11 @@ class TestPromptResolution:
         assert is_override is False
 
     def test_nested_category_is_overridden_alone(self, tmp_path):
-        _write(tmp_path, "input/generation/from_constitution/long")
-        nested = "generation/from_constitution/"
-        config = load_prompt("input", nested + "long", tmp_path)
+        _write(tmp_path, "output/generation/harmful")
+        nested = "generation/"
+        config = load_prompt("output", nested + "harmful", tmp_path)
         assert config["system_prompt"] == "MINE"
-        assert resolve_prompt("input", nested + "short", tmp_path)[1] is False
+        assert resolve_prompt("output", nested + "helpful", tmp_path)[1] is False
 
     @pytest.mark.parametrize("kind", ["missing", "file"])
     def test_prompt_dir_that_is_not_a_directory(self, tmp_path, caplog, kind):
@@ -657,7 +657,7 @@ class TestReportPromptSources:
     def test_no_override_directory_lists_the_packaged_prompts(self):
         summary = report_prompt_sources(None)
         assert summary["overridden"] == summary["unused"] == []
-        assert "input/generation/from_constitution/long" in summary["packaged"]
+        assert "input/generation" in summary["packaged"]
         assert len(summary["packaged"]) == len(set(summary["packaged"]))
 
     def test_every_packaged_name_resolves(self):

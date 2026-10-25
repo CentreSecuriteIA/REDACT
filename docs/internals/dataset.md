@@ -243,7 +243,7 @@ its header. The CSV reader's field limit is raised to 2^31 - 1, so a cell as
 long as pandas writes it is read; a file that does not parse as CSV stops it
 with a `RuntimeError`. Until it is done, `<ledger name>.dropping` holds
 `name`: a resume stops, and only the same call, made again, finishes the
-job. The inputs stage uses it for a fresh run of one style.
+job.
 
 ## The per-category tree
 
@@ -306,7 +306,7 @@ taxonomy format.
 | Stage | `resume_state` call | Ledger key | Records also carry |
 |---|---|---|---|
 | constitution | `artifact=Data_cache/constitution/, pattern="*.csv"`, `units_in` (the units of `merged.csv`'s rows) | `unit` | `status`, `attempts` when rejected |
-| inputs | `artifact=folder, pattern="*/samples.csv"`, `units_in` | `sample_description`, `entry_type`, `style`, `iteration` | `ids`, `accepted`; or `status`, `attempts`; and `spec` with axes |
+| inputs | `artifact=folder, pattern="*/samples.csv"`, `units_in` | `sample_description`, `entry_type`, `iteration` | `ids`, `accepted`; or `status`, `attempts`; and `spec` with axes |
 | outputs | `artifact=output_responses.csv` | `input_id`, `iteration` | `mode`, `spec` (with axes), `accepted` |
 | paraphrase | `artifact=paraphrases_<target>.csv` | `input_id`, `iteration` (inputs); `response_id`, `iteration` (outputs) | `paraphrase_model`, `status`; `input_id` (outputs); `reason`, `min_words` when `skipped` |
 | jailbreaks, per kind | `artifact=jailbreaks.csv` or `variations.csv` | `input_id`, `iteration` | |

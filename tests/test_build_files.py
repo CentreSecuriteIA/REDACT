@@ -39,9 +39,9 @@ and the benign roles there were two, ``to_lowercase`` on a text in lower
 case already the other; the three request families dealt with the others
 gave that input ``to_code_comment``, and a dual-use benign input a benign
 role, ``to_benign_role_task_assistant``, which no harmful input of the run
-draws. That input was one of the five an earlier call wrote in another
-style, which the run no longer holds (below), so no variation of the run is
-``to_code_comment`` now. Before the plan drew a technique only for the
+draws. That input was one of the five an earlier call wrote from another
+template, which the run no longer holds (below), so no variation of the run
+is ``to_code_comment`` now. Before the plan drew a technique only for the
 inputs it applies to, the two no-ops were ``to_abbreviations`` on a text
 with none of its words and ``to_stripped_accents`` on a text with no accent.
 The training type answers each input twice
@@ -51,7 +51,7 @@ paraphrases, of 11 inputs and 20 responses, 28 accepted. The build holds 11
 inputs, 11 jailbreaks, 10 variations, 20 responses and 28 paraphrases, and
 leaves nothing out: its count is 80, where it was 86 with one response per
 input and three responses equal to variations, and 116 with the five inputs
-of another style.
+of another template.
 
 The eval run is not that commit's: its inputs are seeded from a small
 constitution of placeholder entries, as every run's are.
@@ -59,11 +59,13 @@ constitution of placeholder entries, as every run's are.
 The merged inputs file of the training run ends in an ``iteration`` column
 and one column per input generation axis (``length`` to ``focus``), since
 each entry is a unit per sample, each dealt a spec; its other cells are as
-before. The earlier call makes the inputs of the first two entries in the
-run's own style, and the run resumes them and generates for the other two
-only: the merged file holds the run's 11 inputs, where it held 16 when the
-earlier call wrote its five in another style, which the run's record did not
-count (it said 11) and the build took. The training type deals the inputs'
+before. The earlier call makes the inputs of the first two entries, and
+the run resumes them and generates for the other two only: the merged file
+holds the run's 11 inputs, where it held 16 when the earlier call wrote its
+five from another template, which the run's record did not count (it said
+11) and the build took. Since the inputs stage has one template, the merged
+file and the complete datasets have no column naming it; their other cells
+are as before. The training type deals the inputs'
 weights log-scaled, and so does the earlier call, since a resume deals as
 the folder's plan file says; on these groups of three the deal is the one
 the table's weights gave.
@@ -118,7 +120,6 @@ _INPUTS = pd.DataFrame({
     "source": ["constitution"] * 3,
     "subcategory": ["phishing", "", "cards"],
     "entry_type": ["harmful", "benign", "harmful"],
-    "template_style": ["long", "long", "short"],
 })
 
 _JAILBREAKS = pd.DataFrame({
@@ -130,7 +131,6 @@ _JAILBREAKS = pd.DataFrame({
     "source": ["constitution"] * 4,
     "subcategory": ["phishing", "", "cards", "phishing"],
     "entry_type": ["harmful", "benign", "harmful", "harmful"],
-    "template_style": ["long", "long", "short", "long"],
     "input_id": ["in-1", "in-2", "in-3", "in-1"],
     "jailbreak": ["FIRST INPUT, WITH A COMMA", "tupni dnoces", _TEXTS[2],
                   "First input?\nAnswer in a list."],
@@ -153,7 +153,6 @@ _VARIATIONS = pd.DataFrame({
     "source": ["constitution"] * 3,
     "subcategory": ["phishing", "", "cards"],
     "entry_type": ["harmful", "benign", "harmful"],
-    "template_style": ["long", "long", "short"],
     "input_id": ["in-1", "in-2", "in-3"],
     "jailbreak": ["first input, with a comma!!", "SECOND INPUT\nOF TWO LINES",
                   'Summarize: third "quoted" input, é'],
@@ -230,7 +229,7 @@ def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = T
     if inputs == "merged":
         _INPUTS.to_csv(datasets / "constitution_inputs_merged.csv", index=False)
     else:
-        tree = _INPUTS.drop(columns=["subcategory", "entry_type", "template_style"])
+        tree = _INPUTS.drop(columns=["subcategory", "entry_type"])
         tree = tree.assign(accepted=[True, False, True])
         for category, part in tree.groupby("category"):
             path = paths.category_csv(category,
@@ -979,16 +978,17 @@ _MODELS = {"gen": "gen-model", "check": "check-model", "paraphraser": "para-mode
            "paraphrase_check": "check-model"}
 
 
-def _stub_models(monkeypatch) -> dict[tuple[str, str], int]:
+def _stub_models(monkeypatch) -> dict[str, int]:
     """Stub every model call of a run; a reply depends only on its request,
-    and an input's on how many requests of its entry and style came before.
-    Returns those counts, by entry token and style, as the run makes them.
+    and an input's on how many requests of its entry came before. Returns
+    those counts, by entry token, as the run makes them.
 
-    A sample reads ``<style> <ordinal> zqN sample``, the ordinal of the
-    entry's unit. A response reads ``<mode> answer to the <sample>
-    (<length>)``, its answer mode and the length its spec dealt, so no two
-    responses of one input share a text; any other request is answered
-    ``answer to the <sample>``, and a paraphrase reads ``reworded: <text>``.
+    A sample reads ``long <ordinal> zqN sample``, the ordinal of the entry's
+    unit (the word ``long`` keeps the ids the fixture holds). A response
+    reads ``<mode> answer to the <sample> (<length>)``, its answer mode and
+    the length its spec dealt, so no two responses of one input share a
+    text; any other request is answered ``answer to the <sample>``, and a
+    paraphrase reads ``reworded: <text>``.
     The third sample of ``zq1`` is rejected as an input, the answers to a
     second sample of ``zq0`` are rejected as outputs, and the paraphrases of a
     first sample of ``zq2`` are rejected.
@@ -996,15 +996,13 @@ def _stub_models(monkeypatch) -> dict[tuple[str, str], int]:
     from redact.llms import ModelClient
     from tests.test_pipelines import _TokenBackend
 
-    units: dict[tuple[str, str], int] = {}
+    units: dict[str, int] = {}
 
     def write(token, text):
-        made = re.search(r"MAKE-INPUTS-(\w+)", text)
-        if made:
-            style = made.group(1).lower()
-            n = units[token, style] = units.get((token, style), 0) + 1
+        if "MAKE-INPUTS" in text:
+            n = units[token] = units.get(token, 0) + 1
             ordinal = ("first", "second", "third")[n - 1]
-            return f"1. {style} {ordinal} {token} sample\n[END]"
+            return f"1. long {ordinal} {token} sample\n[END]"
         sample = re.search(r"\w+ \w+ zq\d+ sample", text).group()
         answered = re.search(r"ANSWER-(HARMFUL|HELPFUL)", text)
         if answered:
@@ -1051,14 +1049,12 @@ def _counts(recipe: dict, before=None, params=None) -> dict:
 def _overlay(folder: Path) -> Path:
     """A prompt overlay whose generation templates the stub model knows."""
     overlay = folder / "prompts"
-    for style in ("long", "short"):
-        template = overlay / "input" / "generation" / "from_constitution" / style
-        template.mkdir(parents=True)
-        (template / "template.json").write_text(json.dumps({
-            "system_prompt": "sys",
-            "template": (f"MAKE-INPUTS-{style.upper()} about {{sample_description}}"
-                         "\n\n{sample_spec}"),
-        }), encoding="utf-8")
+    template = overlay / "input" / "generation"
+    template.mkdir(parents=True)
+    (template / "template.json").write_text(json.dumps({
+        "system_prompt": "sys",
+        "template": "MAKE-INPUTS about {sample_description}\n\n{sample_spec}",
+    }), encoding="utf-8")
     for mode in ("harmful", "helpful"):
         template = overlay / "output" / "generation" / mode
         template.mkdir(parents=True)
@@ -1111,8 +1107,8 @@ def _training_run(folder: Path, monkeypatch, before=None) -> dict:
         "models": _MODELS, "augmentations": _PURE,
     }, before, params={"paraphrase": {"target": "both"}})   # the opt-in, too
     # The run generated inputs only for the two entries the earlier call left.
-    assert {token for (token, style), n in units.items()
-            if n > made_before.get((token, style), 0)} == {"zq2", "zq3"}
+    assert {token for token, n in units.items()
+            if n > made_before.get(token, 0)} == {"zq2", "zq3"}
     merged = "constitution_inputs_merged.csv"
     return {"counts": counts, merged: _files(paths.datasets(folder))[merged]}
 

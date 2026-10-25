@@ -174,15 +174,15 @@ class TestFileCounts:
         from redact.driver import file_counts
 
         self._write(tmp_path / "a.csv", [True, True, False, True],
-                    template_style=["long", "short", "long", "long"])
-        keep = {"accepted": True, "template_style": "long"}
+                    entry_type=["harmful", "benign", "harmful", "harmful"])
+        keep = {"accepted": True, "entry_type": "harmful"}
         assert file_counts([tmp_path / "a.csv"], keep) == {"rows": 2, "accepted": 2}
 
     def test_keep_does_not_limit_a_file_without_the_column(self, tmp_path):
         from redact.driver import file_counts
 
         self._write(tmp_path / "a.csv", [True, False, True])
-        keep = {"accepted": True, "template_style": "long"}
+        keep = {"accepted": True, "entry_type": "harmful"}
         assert file_counts([tmp_path / "a.csv"], keep) == {"rows": 2, "accepted": 2}
 
     def test_rows_that_are_all_dropped_still_report_the_accepted_count(self, tmp_path):
@@ -276,8 +276,7 @@ def test_an_eval_run_seeds_its_inputs_from_its_constitution(
 
     def inputs(**kwargs):
         handed.append(kwargs)
-        write_inputs(paths.constitution_inputs_dir(tmp_path), texts,
-                     extra={"template_style": "long"})
+        write_inputs(paths.constitution_inputs_dir(tmp_path), texts)
         return pd.DataFrame()
 
     monkeypatch.setattr(redact, "generate_inputs", inputs)
@@ -1198,6 +1197,35 @@ def test_the_training_type_deals_the_log_scaled_weights_and_eval_the_tables(
     assert "axes_weighting" not in stage_params("outputs", dataset_type)
     check_dimensions({}, load_recipe({"dataset_type": dataset_type})["augmentations"],
                      dataset_type=dataset_type)
+
+
+@pytest.mark.parametrize("dataset_type", ["training", "eval"])
+def test_the_documented_short_inputs_pass_the_load_and_the_dimension_check(
+        dataset_type):
+    """configuration.md's short inputs: the long lengths at weight 0. A
+    params file's inputs.axes replaces the type's whole, so an eval run
+    writes the type's directness pin again, as the page shows it."""
+    from redact.content_moderation import axes as A
+    from redact.recipe import check_dimensions, load_params, stage_params
+
+    axes = {"length": {"long": 0, "very_long": 0}}
+    if dataset_type == "eval":
+        axes = {"directness": {"explicit": 1, "implicit": 0, "euphemistic": 0},
+                **axes}
+    params = load_params({"inputs": {"axes": axes}})
+    check_dimensions(params, load_recipe({"dataset_type": dataset_type})[
+        "augmentations"], dataset_type=dataset_type)
+    given = stage_params("inputs", dataset_type, params)
+    dealt = A.resolve("inputs", given["axes"],
+                      weighting=given.get("axes_weighting", "table"))
+
+    def kept(axis):
+        return [value for value, entry in dealt[axis]["values"].items()
+                if entry["weight"]]
+
+    assert kept("length") == ["fragment", "one_liner", "short"]
+    if dataset_type == "eval":
+        assert kept("directness") == ["explicit"]
 
 
 def test_a_type_param_the_front_does_not_take_is_refused(monkeypatch):

@@ -155,13 +155,15 @@ prompt. A placeholder may not share a name with a parameter of
 `source`, `is_override`, `prompt_dir`), nor, through `PromptTemplate.load`,
 with `pipeline` or `category`.
 
-**A new input style** needs only a file:
-`prompts/input/generation/from_constitution/<style>/template.json`, then
-`"style": "<style>"` under `inputs` in the params file. The seeded inputs
-stage renders it with `Category`, `sample_description`,
-`constitution_subcategory`, `entry_type`, `sample_spec` (the unit's dealt
-generation axes; empty without axes) and `num_samples`, and appends the
-`numbered` format instruction.
+**A different input template** needs only a file in the overlay:
+`<prompt_dir>/input/generation/template.json`, read in place of the
+packaged one. The seeded inputs stage renders it with `Category`,
+`sample_description`, `constitution_subcategory`, `entry_type`,
+`sample_spec` (the unit's dealt generation axes; empty without axes) and
+`num_samples`, and appends the `numbered` format instruction. To vary the
+samples' length, register and the rest, change the
+[generation axes](configuration.md#the-generation-axes) rather than the
+template.
 
 **To change a prompt for your runs** without editing the library, use the
 overlay: `scripts/scaffold_prompts.py ./my_prompts`, keep the files you
