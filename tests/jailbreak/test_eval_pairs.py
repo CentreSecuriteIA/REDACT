@@ -205,13 +205,14 @@ def test_the_record_gives_back_every_pair_and_only_those():
         "admitted": [refused[0]]}
 
 
-def test_four_family_pairs_are_mixed_and_each_admits_the_letter_spacing_alone(recorded):
+def test_four_family_pairs_are_mixed_and_each_admits_the_letter_spacing_alone():
     """Of the 22 families' 253 family pairs (250 with a pair: a family of
     one technique has none with itself), the rules admit all or none of the
     pairs of all but four: the letter spacing, the light encoding the pool
     holds, joins ASCII art and the three manipulation families, which refuse
     its five heavy full-text encodings."""
-    mixed = {key: verdict for key, verdict in recorded["family_pairs"].items()
+    current = record(snapshot(), _families(_eval_pool()))
+    mixed = {key: verdict for key, verdict in current["family_pairs"].items()
              if isinstance(verdict, dict)}
     assert mixed == {
         "ascii_art|encode": {"admitted": ["to_ascii_art|to_letter_spacing"]},
@@ -224,7 +225,7 @@ def test_four_family_pairs_are_mixed_and_each_admits_the_letter_spacing_alone(re
             "to_fsh_random_long", "to_fsh_random_short", "to_fsh_selected_long",
             "to_fsh_selected_short")]},
     }
-    assert len(recorded["family_pairs"]) == 250   # noqa: PLR2004
+    assert len(current["family_pairs"]) == 250   # noqa: PLR2004
 
 
 def test_eval_pool_v2_holds_the_first_pool_whose_pairs_did_not_move(recorded):

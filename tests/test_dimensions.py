@@ -217,6 +217,38 @@ class TestTheCheck:
         assert set(_FAMILY_TAGS["role_framing"]) <= drawn
         check_dimensions({}, augmentations_of({}))
 
+    def test_eval_pool_v2_needs_no_input_axis_pinned(self):
+        """Eval pool v2's families vary all eight augmentation dimensions
+        (``surface_noise`` new with its published suffixes), and none of them
+        relates to an axis the eval type varies: the inputs' length,
+        register, writer (``authorship``, ruled distinct from
+        ``role_framing`` above), framing (``request_intent``) and domain, and
+        the outputs' three. ``directness`` stays pinned at ``explicit`` and
+        ``focus`` is dealt one value, as before, so the eval inputs are dealt
+        as they were and the check passes with no axis pinned for v2."""
+        from redact.recipe import load_recipe, stage_params
+
+        evals = load_recipe({"dataset_type": "eval"})["augmentations"]
+        families = load_spec()["families"]
+        tags = {families[family]["dimension"]
+                for fn in JPool.technique_pool(evals["adversarial"])
+                for family in fn.families}
+        varied = {}
+        for stage in A.STAGES:
+            given = stage_params(stage, "eval")
+            varied.update({f"{stage}.{axis}": tag for axis, tag in A.varied(A.resolve(
+                stage, given.get("axes"),
+                weighting=given.get("axes_weighting", "table"))).items()})
+        assert sorted(varied) == [
+            "inputs.domain", "inputs.framing", "inputs.length", "inputs.register",
+            "inputs.writer", "outputs.format", "outputs.length", "outputs.register"]
+        assert tags == set(_FAMILY_TAGS)
+        assert [(axis, tag) for axis, axis_tag in varied.items() for tag in tags
+                if dimensions.relation(axis_tag, tag) is not None] == []
+        assert stage_params("inputs", "eval")["axes"] == {
+            "directness": {"explicit": 1, "implicit": 0, "euphemistic": 0}}
+        _check_dimensions({}, evals, dataset_type="eval")
+
     def test_synonym_substitution_and_directness_are_left_unmarked(self):
         """The ruling that added no ninth tag: ``to_synonym_substitution``
         swaps the words a model marks for synonyms, which can name a subject
