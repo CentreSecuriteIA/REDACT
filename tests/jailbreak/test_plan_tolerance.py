@@ -625,8 +625,10 @@ SPEC_1_4_ADDED = {"persona_template": 12, "suffixes": 24, "translation": 1,
                   "code_switching": 10, "romanization": 10, "dialect": 6}
 
 #: What spec 1.5 added to the attack pool, by family: three unicode_smuggling
-#: techniques (two full-prompt hidings and one invisible suffix).
-SPEC_1_5_ADDED = {"unicode_smuggling": 3}
+#: techniques (two full-prompt hidings and one invisible suffix) and eight
+#: char_injection techniques (a bidi reversal, upside-down, and deletion and
+#: zalgo at three densities each).
+SPEC_1_5_ADDED = {"unicode_smuggling": 3, "char_injection": 8}
 
 
 def _by_family(names: list[str]) -> dict[str, int]:
@@ -642,9 +644,9 @@ def _growth_since_1_2(key: str, pool: list) -> tuple[list[str], list[str]] | Non
 
 
 def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
-    """The attack pool of a plan made at 1.2 differs from today's by 110
+    """The attack pool of a plan made at 1.2 differs from today's by 118
     names, none retired: 36 dated 1.3 (the four translations switched on
-    among them), the 71 dated 1.4 (:data:`SPEC_1_4_ADDED`) and the three
+    among them), the 71 dated 1.4 (:data:`SPEC_1_4_ADDED`) and the eleven
     dated 1.5 (:data:`SPEC_1_5_ADDED`). The library added them after the
     plan, so the plan is kept and the run warns."""
     added, retired = _growth_since_1_2(
@@ -655,7 +657,7 @@ def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
         for version in {by_name[name].since for name in added}}
     assert retired == []
     assert {version: len(names) for version, names in by_version.items()} == {
-        "1.3": 36, "1.4": 71, "1.5": 3}
+        "1.3": 36, "1.4": 71, "1.5": 11}
     assert set(_FOUR_TRANSLATIONS) <= set(by_version["1.3"])
     assert _by_family(by_version["1.4"]) == SPEC_1_4_ADDED
     assert _by_family(by_version["1.5"]) == SPEC_1_5_ADDED

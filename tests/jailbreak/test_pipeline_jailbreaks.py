@@ -33,7 +33,7 @@ _PURE_KIND = {"pure_only": True,
 #: hidings), so a count round cannot reach a second obfuscation pick beside
 #: one of them in an obfuscation-only pool. A test that asserts an exact count
 #: of two leaves them out of its pool.
-_EXCLUSIVE_OBFUSCATIONS = ["unicode_smuggling"]
+_EXCLUSIVE_OBFUSCATIONS = ["unicode_smuggling", "char_injection"]
 
 
 def _pure(**kind) -> dict:

@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 318 active techniques in 5 layers and 42
+The jailbreak stage draws from 326 active techniques in 5 layers and 43
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -77,10 +77,10 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 47 | at most 1 |
-| `obfuscation` | 19 | 169 | no cap |
+| `obfuscation` | 20 | 177 | no cap |
 | `requests` | 13 | 71 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| all | 42 | 318 | |
+| all | 43 | 326 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -121,6 +121,7 @@ that call a model call the generation model.
 | obfuscation | `unicode_smuggling` | `encoding` | 73 | 3 | no | no | `to_variation_selector_smuggling`, `to_invisible_suffix`, `to_unicode_tag_smuggling` |
 | obfuscation | `neutral_container` | `container` | 80 | 6 | no | no | `to_code_comment`, `to_yaml_document`, `to_csv_row`, `to_email_message`, `to_transcript_line`, `to_log_entry` |
 | obfuscation | `structural` | `container` | 80 | 3 | no | no | `to_json`, `to_xml`, `to_markdown` |
+| obfuscation | `char_injection` | `surface_noise` | 85 | 8 | no | no | `to_bidi_override`, `to_upside_down`, `to_deletion_chars_low`, `to_deletion_chars_medium`, `to_deletion_chars_high`, `to_zalgo_low`, `to_zalgo_medium`, `to_zalgo_high` |
 | obfuscation | `ascii_art` | `encoding` | 90 | 1 | no | no | `to_ascii_art` |
 | requests | `answer_format` | `answer_shape` |  | 12 | no | no | `to_refusal_then_comply`, `to_apology_prevention`, `to_prefix_injection`, `to_answer_in_markdown`, `to_answer_as_tutorial`, `to_answer_as_code`, `to_answer_as_dialogue`, `to_answer_as_story`, `to_answer_as_structured_data`, `to_dual_answer`, `to_tagged_prefix`, `to_answer_in_encoding` |
 | requests | `answer_language` | `language` |  | 26 | no | no | `to_ask_answer_in_french`, `to_ask_answer_in_japanese`, `to_ask_answer_in_russian`, `to_ask_answer_in_spanish`, `to_ask_answer_in_german`, `to_ask_answer_in_arabic`, `to_ask_answer_in_turkish`, `to_ask_answer_in_czech`, `to_ask_answer_in_vietnamese`, `to_ask_answer_in_greek`, `to_ask_answer_in_croatian`, `to_ask_answer_in_swahili`, `to_ask_answer_in_thai`, `to_ask_answer_in_khmer`, `to_ask_answer_in_maori`, `to_ask_answer_in_nepali`, `to_ask_answer_in_zulu`, `to_ask_answer_in_scots_gaelic`, `to_ask_answer_in_bengali`, `to_ask_answer_in_javanese`, `to_ask_answer_in_hmong`, `to_ask_answer_in_guarani`, `to_ask_answer_in_chinese`, `to_ask_answer_in_hindi`, `to_ask_answer_in_yoruba`, `to_ask_answer_in_amharic` |
@@ -1179,6 +1180,22 @@ eval pool v2.
   every other obfuscation and the manipulation layer; it still joins the
   hacking layer and a request. No carrier holds an invisible character of its
   own, so the trailing invisible run is the payload alone.
+- `char_injection` (8, spec version 1.5, attack only) reorders, flips, deletes
+  or marks characters so a reader still reads the prompt while a classifier
+  reading the raw code points meets something else (Boucher 2106.09898,
+  Hackett 2504.11168). `to_bidi_override` stores the prompt reversed inside a
+  right-to-left override (`U+202E` ... `U+202C`), so the Unicode
+  bidirectional algorithm renders it in order. `to_upside_down` maps each
+  character to its upside-down look-alike and reverses the string.
+  `to_deletion_chars_low/medium/high` inject a junk letter and a backspace
+  control character (`U+0008`) between characters, so a terminal that honours
+  the backspace deletes the junk; the raw text keeps it.
+  `to_zalgo_low/medium/high` stack combining diacritical marks
+  (`U+0300`-`U+036F`) on each visible character. All are pure. The bidi
+  reversal decodes under the bidi algorithm, and the deletion and zalgo
+  injections strip back to the prompt. As a whole-text reorder or injection
+  the family refuses every other obfuscation family; it still joins the
+  hacking, request and manipulation layers.
 
 **Requests.** These change how a request is posed, not its text, and call no
 model. Each technique picks one of its named template variants from a JSON

@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from .ascii_art import get_ascii_art_functions
 from .casual_writing import get_casual_writing_functions
+from .char_injection import get_char_injection_functions
 from .code_switching import get_code_switching_functions
 from .dialect import get_dialect_functions
 from .encoding import get_encoding_functions
@@ -45,4 +46,5 @@ def get_all_obfuscation_functions() -> list[Callable]:
         + get_romanization_functions()
         + get_dialect_functions()
         + get_unicode_smuggling_functions()
+        + get_char_injection_functions()
     )

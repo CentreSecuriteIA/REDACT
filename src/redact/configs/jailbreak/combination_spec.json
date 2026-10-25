@@ -172,6 +172,13 @@
       "within_layer_order": 73,
       "cross_incompatible_with": ["translation", "dialect", "code_switching", "transliteration", "romanization", "typos", "casual_writing", "noise", "sensitive_words", "wording", "tokenbreak", "word_art", "suffixes", "payload_split", "encode", "structural", "neutral_container", "ascii_art", "fsh", "dap", "fake_turns"]
     },
+    "char_injection": {
+      "description": "Characters reordered, flipped, deleted or marked so a reader still reads the prompt while a classifier reading the raw code points meets something else (jailbreak/obfuscation/char_injection.py; Boucher 2106.09898 bad characters, Hackett 2504.11168 char injections): a right-to-left-override reversal, upside-down look-alikes, junk-then-backspace deletion pairs and stacked combining marks (zalgo), the last two at three densities. A whole-text reorder or injection: it refuses every other obfuscation family (one would corrupt or be corrupted by the injected or reordered characters), but still joins the hacking, request and manipulation layers, which frame or wrap the finished text around it. Attack only",
+      "layer": "obfuscation",
+      "dimension": "surface_noise",
+      "within_layer_order": 85,
+      "cross_incompatible_with": ["translation", "dialect", "code_switching", "transliteration", "romanization", "typos", "casual_writing", "noise", "sensitive_words", "wording", "tokenbreak", "word_art", "suffixes", "payload_split", "encode", "structural", "neutral_container", "ascii_art", "unicode_smuggling"]
+    },
     "casual_writing": {
       "description": "Casing, spacing, punctuation, abbreviations or accents as a person typing quickly writes them",
       "layer": "obfuscation",
@@ -401,6 +408,15 @@
     "to_variation_selector_smuggling": {"families": ["unicode_smuggling"], "complexity": 3, "requires_llm": false, "since": "1.5"},
     "to_invisible_suffix": {"families": ["unicode_smuggling"], "complexity": 1, "requires_llm": false, "since": "1.5"},
     "to_unicode_tag_smuggling": {"families": ["unicode_smuggling"], "complexity": 3, "requires_llm": false, "since": "1.5"},
+
+    "to_bidi_override": {"families": ["char_injection"], "complexity": 2, "requires_llm": false, "since": "1.5"},
+    "to_upside_down": {"families": ["char_injection"], "complexity": 2, "requires_llm": false, "since": "1.5"},
+    "to_deletion_chars_low": {"families": ["char_injection"], "complexity": 1, "requires_llm": false, "since": "1.5"},
+    "to_deletion_chars_medium": {"families": ["char_injection"], "complexity": 2, "requires_llm": false, "since": "1.5"},
+    "to_deletion_chars_high": {"families": ["char_injection"], "complexity": 3, "requires_llm": false, "since": "1.5"},
+    "to_zalgo_low": {"families": ["char_injection"], "complexity": 1, "requires_llm": false, "since": "1.5"},
+    "to_zalgo_medium": {"families": ["char_injection"], "complexity": 2, "requires_llm": false, "since": "1.5"},
+    "to_zalgo_high": {"families": ["char_injection"], "complexity": 3, "requires_llm": false, "since": "1.5"},
 
     "_comment": "encode_weight applies only to encode-family members. 'light' = model-readable after decoding; 'heavy' = opaque, blocked when manipulation is selected unless function also has sensitive_words family. needs_latin marks a technique that changes only Latin text (the Latin-only ciphers and transforms of encode, their sensitive-word forms, and the noise of random capitals, scrambled letters and keyboard typos). No rule reads it: a translation refuses encode and noise outright, and a test asserts that every needs_latin technique is refused beside every translation into another script. Morse and braille are marked too: braille leaves a text of another script as it is, and morse leaves its characters unencoded, spaced out as it spaces its codes; as no rule reads the tag, marking them moved no draw, pair or pin of the eval pool. The ten heavy full-text encodings (base64, unicode_escape, ascii_ordinal, hex, binary, html_entities, base32, base85, morse, braille) each name ascii_art in their own cross_incompatible_with: a code for every character lengthens the text, so its drawing often runs past the cap (a text of unicode escapes is rejected from about 140 characters of input, of ASCII ordinals 230, of morse 250), and both disguise the whole text, so one is enough. The three heavy to_sensitive_words_encode_* encode only the marked words, so ascii_art still joins them, and the light encodings unless their output has a character no font draws.",
 
