@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 319 active techniques in 5 layers and 44
+The jailbreak stage draws from 321 active techniques in 5 layers and 45
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -78,9 +78,9 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 5 | 49 | at most 1 |
 | `obfuscation` | 18 | 166 | no cap |
-| `requests` | 14 | 72 | at most 1 |
+| `requests` | 15 | 74 | at most 1 |
 | `manipulation` | 4 | 16 | at most 1 |
-| all | 44 | 319 | |
+| all | 45 | 321 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -126,6 +126,7 @@ that call a model call the generation model.
 | requests | `answer_language` | `language` |  | 26 | no | no | `to_ask_answer_in_french`, `to_ask_answer_in_japanese`, `to_ask_answer_in_russian`, `to_ask_answer_in_spanish`, `to_ask_answer_in_german`, `to_ask_answer_in_arabic`, `to_ask_answer_in_turkish`, `to_ask_answer_in_czech`, `to_ask_answer_in_vietnamese`, `to_ask_answer_in_greek`, `to_ask_answer_in_croatian`, `to_ask_answer_in_swahili`, `to_ask_answer_in_thai`, `to_ask_answer_in_khmer`, `to_ask_answer_in_maori`, `to_ask_answer_in_nepali`, `to_ask_answer_in_zulu`, `to_ask_answer_in_scots_gaelic`, `to_ask_answer_in_bengali`, `to_ask_answer_in_javanese`, `to_ask_answer_in_hmong`, `to_ask_answer_in_guarani`, `to_ask_answer_in_chinese`, `to_ask_answer_in_hindi`, `to_ask_answer_in_yoruba`, `to_ask_answer_in_amharic` |
 | requests | `asking` | `request_shape` |  | 3 | no | no | `to_innocuous_question`, `to_ask_for_details`, `to_ask_with_urgency` |
 | requests | `benign_role` | `role_framing` |  | 3 | no | no | `to_benign_role_subject_helper`, `to_benign_role_tutor`, `to_benign_role_task_assistant` |
+| requests | `code_framing` | `request_shape` |  | 2 | no | no | `to_code_completion`, `to_decrypt_function` |
 | requests | `continuation` | `request_shape` |  | 4 | no | no | `to_continue_passage`, `to_complete_story`, `to_fill_in_blank`, `to_continue_instructions` |
 | requests | `distractor_prefix` | `request_shape` |  | 3 | no | no | `to_distractor_prefix_related`, `to_distractor_prefix_unrelated`, `to_distractor_prefix_task` |
 | requests | `distractor_suffix` | `request_shape` |  | 3 | no | no | `to_distractor_suffix_related`, `to_distractor_suffix_unrelated`, `to_distractor_suffix_task` |
@@ -1275,6 +1276,25 @@ request-layer family it is drawn once per combination (the layer cap), so a
 row carries one request frame; it has no cross rule beyond the cap, since the
 frame wraps the finished request and chokes on nothing an obfuscation does.
 It is not in the eval pool (a new family, which `eval.json` does not allow).
+
+Spec version 1.5 also adds the request family `code_framing`, two pure
+techniques. `to_code_completion` (CodeAttack, Ren 2403.07865) embeds the
+request as the task of a code-completion stub, one of nine variants over
+languages (Python, JavaScript, C, Java, Go, Ruby, Rust, SQL, Bash), the info
+`directive=code_completion;variant=<name>`. `to_decrypt_function`
+(CodeChameleon, Lv 2402.16717) transforms the prompt by one of three
+reversible transforms drawn from the unit's rng — the whole string reversed,
+the word order reversed, or each word reversed — and shows a Python decrypt
+function that inverts it, the ciphertext set into one of eight framing
+variants, the info `transform=<slug>;variant=<name>`. The transforms are
+involutions, so the shown decrypt is the same operation; a test runs each
+shown decrypt on the transformed text in a restricted `exec` and checks it
+returns the original. The codes shown live in the template file's `_decrypt`
+map (not Python), so no technique text sits in code. The frames and the
+`_decrypt` map are in `requests/code_framing_templates.json` (both pools at
+floor 8). Both are request-layer frames (dimension `request_shape`, one
+request per combination), with no cross rule beyond the layer cap; they are
+attack only and not in the eval pool (a new family).
 
 Three request families of spec version 1.2 are for natural variations only
 (their `kinds` are `["natural"]`, so no attack draws them): ordinary,

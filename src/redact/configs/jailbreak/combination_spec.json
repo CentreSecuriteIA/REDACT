@@ -367,6 +367,14 @@
       "within_layer_order": 0,
       "cross_incompatible_with": []
     },
+    "code_framing": {
+      "_comment": "Spec 1.5. Two pure request-layer frames. to_code_completion (CodeAttack, Ren 2403.07865) embeds the request as the task of a code-completion stub, one variant per language. to_decrypt_function (CodeChameleon, Lv 2402.16717) transforms the prompt by a reversible transform (reverse the whole string, the word order, or each word) and shows a Python decrypt function that inverts it, the ciphertext inside a framing variant; the transforms are involutions so the shown decrypt is the same operation, and a test executes each on the transformed text and checks it returns the original. Both reshape the finished request, so the dimension is request_shape and one request is drawn per combination (layer_max_picks). No cross rule beyond the layer cap: a code stub or a decrypt framing wraps whatever the request is; a later obfuscation stacking on it only scrambles the payload further, as elsewhere.",
+      "description": "The request embedded in a code-completion stub, or transformed and shown with a decrypt function (CodeAttack, CodeChameleon)",
+      "layer": "requests",
+      "dimension": "request_shape",
+      "within_layer_order": 0,
+      "cross_incompatible_with": []
+    },
     "policy_framing": {
       "_comment": "Spec 1.5. Two pure hacking-layer frames: to_policy_puppetry (HiddenLayer 2025) sets the prompt inside a fake policy or config file (XML/INI/JSON/YAML) with role-play that redefines the assistant's output rules; to_skeleton_key (Microsoft 2024, single-turn form) wraps the prompt in a request to augment the guidelines and warn instead of refuse. A role_framing family, as persona/framing/cognitive: it sets up a role and a rule-set around the request. One hacking technique per combination (layer_max_picks). cross_incompatible_with fsh, dap, fake_turns and impersonation (bound from this family's side), the same reason as persona/cognitive: a hacking-layer social-engineering frame and a manipulation-layer one (few-shot examples or invented turns) are two frames around one prompt, so an attack carries one; and a redefined-identity policy frame plus an impersonation claim would assert two conflicting identities. It does not refuse the obfuscations: a policy wrapper tolerates an obfuscated or request-framed payload inside it.",
       "description": "The prompt set inside a fake policy/config file with role-play, or wrapped in a request to augment the rules and warn not refuse (Policy Puppetry, Skeleton Key)",
@@ -648,6 +656,9 @@
     "to_guardrail_security_override": { "families": ["guardrail_address"], "complexity": 1, "requires_llm": false, "since": "1.4" },
 
     "to_fallacy_failure": { "families": ["fallacy"], "complexity": 2, "requires_llm": false, "since": "1.5" },
+
+    "to_code_completion":  { "families": ["code_framing"], "complexity": 2, "requires_llm": false, "since": "1.5" },
+    "to_decrypt_function": { "families": ["code_framing"], "complexity": 2, "requires_llm": false, "since": "1.5" },
 
     "to_smalltalk_prefix": { "families": ["smalltalk_prefix"], "complexity": 0, "requires_llm": false, "since": "1.2" },
     "to_smalltalk_suffix": { "families": ["smalltalk_suffix"], "complexity": 0, "requires_llm": false, "since": "1.2" },

@@ -25,7 +25,8 @@ _FAMILY_TAGS = {
     "request_shape": ["indirect", "distractor_prefix", "distractor_suffix",
                       "continuation", "asking", "temporal", "smalltalk_prefix",
                       "smalltalk_suffix", "guardrail_address", "fallacy",
-                      "persuasion", "tense_rewrite", "model_distractors"],
+                      "code_framing", "persuasion", "tense_rewrite",
+                      "model_distractors"],
     "answer_shape": ["answer_format"],
     "example_priming": ["fsh", "dap", "fake_turns", "reasoning_injection"],
 }
@@ -162,7 +163,7 @@ class TestTheCheck:
             check_dimensions(_MIXED, augmentations_of({}))
         message = str(raised.value)
         assert "the axis inputs.focus (focus) and the request_shape families" in message
-        assert "adversarial: asking, continuation" in message
+        assert "adversarial: asking, code_framing, continuation" in message
         # The natural kind draws neither continuation, temporal nor
         # structural; the attacks draw no small talk.
         assert ("natural: asking, indirect, smalltalk_prefix, smalltalk_suffix)"

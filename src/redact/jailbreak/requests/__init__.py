@@ -6,6 +6,7 @@ from .answer import get_answer_functions
 from .answer_language import get_answer_language_functions
 from .asking import get_asking_functions
 from .benign_role import get_benign_role_functions
+from .code_framing import get_code_framing_functions
 from .continuation import get_continuation_functions
 from .distractor import get_distractor_functions
 from .fallacy import get_fallacy_functions
@@ -28,6 +29,7 @@ def get_all_request_functions() -> list[Callable]:
         + get_temporal_functions()
         + get_asking_functions()
         + get_fallacy_functions()
+        + get_code_framing_functions()
         + get_guardrail_address_functions()
         + get_smalltalk_functions()
         + get_benign_role_functions()
