@@ -67,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--width", type=int, default=3)
     parser.add_argument("--beam", type=int, default=2)
     parser.add_argument("--depth", type=int, default=2)
+    parser.add_argument("--max-candidates", type=int, default=8,
+                        help="candidates tried per input per round (0 = no cap)")
     parser.add_argument("--default-pool", action="store_true",
                         help="search the whole packaged adversarial pool")
     parser.add_argument("--resume", action="store_true", help="reuse saved rows")
@@ -83,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         inputs, target_model=args.target, judge_model=args.judge,
         gen_model=args.gen, pool=pool, data_dir=args.root,
         width=args.width, beam=args.beam, depth=args.depth,
+        max_candidates=args.max_candidates or None,
         resume=args.resume, verbose=True, read_back=True)
 
     rows = result["rows"]

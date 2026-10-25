@@ -6,9 +6,19 @@ from __future__ import annotations
 
 import pytest
 
+from redact.dataset import content_id
 from redact.jailbreak import best_combinations, search_combinations
+from redact.jailbreak.search import _beam, _draw_round0, _mutations
 
-from ._search_fakes import POOL, PROMPT, applied_text, inputs, make_resolve
+from ._search_fakes import (
+    POOL,
+    PROMPT,
+    applied_for,
+    applied_text,
+    inputs,
+    make_resolve,
+    pure_pool,
+)
 
 
 def test_prompt_too_long_gives_a_failed_row_not_a_crash(tmp_path):
@@ -62,6 +72,48 @@ def test_resume_after_a_kill_gives_the_same_rows(tmp_path):
     assert got_ids == ref_ids                        # the same rows as a clean run
     assert (best_combinations(resumed["rows"]).keys()
             == best_combinations(ref["rows"]).keys())
+
+
+def test_resume_after_a_mid_round_kill_matches_a_clean_run(tmp_path):
+    # With a full pure pool, one input's round 1 holds well over 32 candidates,
+    # so the commit buffer flushes mid-round: a success is acked while later
+    # candidates of the same round are still pending. A round's plan must read
+    # only the rounds before it, or a resume would skip the rest of the round
+    # (the F1 resume bug). The earlier test kills in round 0 and misses this.
+    pool = pure_pool()
+    seeds = inputs(PROMPT)
+    kw = dict(pool=pool, width=4, beam=2, depth=2, max_candidates=None,
+              target_model="target", judge_model="judge", verbose=False)
+
+    probe = search_combinations(
+        seeds, out_path=tmp_path / "probe.csv",
+        resolve=make_resolve("target", "judge", set()), **kw)
+    r1 = probe["rows"][probe["rows"]["round"] == 1]["candidate"].astype(str)
+    pair = next(c for c in r1 if len(c.split("+")) == 2)
+    win = applied_for(PROMPT, pair.split("+"))
+
+    ref = search_combinations(
+        seeds, out_path=tmp_path / "ref.csv",
+        resolve=make_resolve("target", "judge", {win}), **kw)
+    ref_ids = sorted(ref["rows"]["sample_id"].astype(str))
+    assert ref["best"][content_id(PROMPT)].success
+
+    for k in (34, 40, 46, 52, 58):
+        d = tmp_path / f"k{k}"
+        d.mkdir()
+        out_path = d / "s.csv"
+        try:
+            search_combinations(
+                seeds, out_path=out_path,
+                resolve=make_resolve("target", "judge", {win}, kill=[k]), **kw)
+        except RuntimeError:
+            pass
+        resumed = search_combinations(
+            seeds, out_path=out_path,
+            resolve=make_resolve("target", "judge", {win}), **kw)
+        got = sorted(resumed["rows"]["sample_id"].astype(str))
+        assert len(got) == len(set(got)), f"kill {k}: duplicates"
+        assert got == ref_ids, f"kill {k}: {len(got)} rows vs {len(ref_ids)} clean"
 
 
 def test_resume_with_changed_settings_raises(tmp_path):

@@ -61,9 +61,30 @@ A **round** scores a set of candidate combinations per input.
 - **Early stop**: an input stops expanding at the first round a candidate
   succeeds (`stop_on_success`, the default).
 
-The frontier is deterministic: candidates are ranked by score (a success is 1.0,
-else 0.0), then by fewest techniques, then by the combination id, so the beam
-prefers the simpler combination on a tie.
+The frontier takes only candidates that **applied** — never the identity, nor
+one a technique discarded or an error ended — ranked by score (a success is 1.0,
+else 0.0), then by fewest techniques, then by a seeded draw per candidate. Scores
+are 0 or 1, so until a candidate succeeds the beam is a seeded pick among the
+smallest applied combinations: the search is **breadth-first over small
+combinations** rather than a ranking of equal zeros.
+
+### The candidate cap
+
+A parent has one mutation per compatible add, swap and drop. Over a full pool
+that is hundreds: with the defaults (`width` 4, `beam` 2, `depth` 2) and the
+packaged adversarial pool an uncapped search tries about **900 candidates per
+input** (round 0's 4, then ~433, then ~472), each a target call and a judge call
+plus the techniques' own model calls. So each mutation round tries at most
+`max_candidates` candidates per input (**8** by default), drawn with the seeded
+rng: each draw takes the beam's parents in rotation, a kind (add/swap/drop) at
+random among those the parent still has untried, and a mutation of that kind at
+random, so the parents and the kinds are spread evenly. `max_candidates=None`
+tries every valid mutation (the old, unbounded behaviour).
+
+With a **budget** round 0 (a `sample_kwargs` without `exact_techniques`) every
+round keeps that budget: a mutation over `max_complexity`, or with more than
+`max_obfuscations` obfuscations, is not tried, and a layer round 0 was told to
+leave out stays out of every round.
 
 ## Parameters
 
@@ -77,6 +98,7 @@ prefers the simpler combination on a tie.
 | `gen_model` | `uncensored_gen` default | applies model-calling techniques |
 | `translation_model` / `check_model` | `None` / `gen_model` | the translation model, and the technique-output check model |
 | `width` / `beam` / `depth` | 4 / 2 / 2 | round-0 candidates per input; frontier kept per input; mutation rounds after round 0 (`depth + 1` rounds in all) |
+| `max_candidates` | 8 | most candidates tried per input in each mutation round (a seeded sample over the parents and the add/swap/drop kinds); `None` tries every valid mutation |
 | `seed` | 42 | seeds the sampling, so a resume is identical |
 | `sample_kwargs` | `{"exact_techniques": 1}` | round-0 sampler settings |
 | `stop_on_success` | `True` | stop expanding an input once it succeeds |
@@ -108,15 +130,18 @@ saved frame.
 ## Resume
 
 The search is deterministic given the inputs, the seed, the pool and the
-params: round 0's draws are seeded per `(seed, input_id, i)`, the mutations
-follow from the rows already saved, and a round's beam is a pure function of the
-rows of the round before. So a resume re-derives exactly the plan the first run
-would have made and runs only the candidates the ledger has not acked. A run
-killed mid-search resumes to the same rows with no duplicates. The ledger keys a
-unit `(input_id, round, candidate)`; each round is committed before the next
-round's beam is read. The plan file beside the output records the seed, `width`,
-`beam`, `depth`, the pool names, the rules id and `sample_kwargs`; a resume with
-any of them changed raises rather than mix two trees in one file (run with
+params: round 0's draws are seeded per `(seed, input_id, i)`, and a round's plan
+(its beam and the sampled mutations) is a pure function of the rows of the
+rounds **before** it alone. So a resume re-derives exactly the plan the first
+run would have made — for each round, independent of what a killed run saved of
+that round or a later one — and runs only the candidates the ledger has not
+acked. A run killed mid-search, even after a success is saved mid-round, resumes
+to the same rows with no duplicates. The ledger keys a unit `(input_id, round,
+candidate)`; each round is committed before the next round's beam is read. The
+plan file beside the output records the seed, `width`, `beam`, `depth`,
+`max_candidates`, the pool names, the rules id, `sample_kwargs`, the target and
+judge models and their system prompts, and `stop_on_success`; a resume with any
+of them changed raises rather than mix two trees in one file (run with
 `resume=False` to search again).
 
 A prompt too long for the target or the judge on the async lane (an

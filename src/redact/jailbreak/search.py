@@ -16,6 +16,21 @@ technique, swap one for another of its family, or drop one — each mutation
 checked with :func:`~redact.jailbreak.rules.compatible`, so no round ever holds
 an invalid pair. An input stops early at the first round a candidate succeeds.
 
+The beam takes only candidates that applied (never the identity, nor one a
+technique discarded or an error ended), by score, then fewest techniques, then
+a seeded draw. Scores are 0 or 1, so until something succeeds the beam is a
+seeded pick among the smallest combinations that applied: the search is
+breadth-first over small combinations. Every parent has hundreds of mutations
+over a full pool (with the defaults and the packaged adversarial pool, an
+uncapped search tries about 900 candidates per input), so a round tries at most
+``max_candidates`` per input (8 by default), drawn with a seeded rng: each pick
+takes the beam's parents in turn, a kind of mutation (add, swap, drop) at random
+among those the parent still has, and a mutation of that kind at random. With a
+budget round 0 (``sample_kwargs`` without ``exact_techniques``), every round
+keeps its budget: a mutation over ``max_complexity`` or with more than
+``max_obfuscations`` obfuscations is not tried, and a layer round 0 leaves out
+is left out of every round.
+
 A candidate is scored by applying it (:func:`~redact.jailbreak.chain.run_chain`,
 model-calling techniques included, driven on
 :func:`~redact.llm_pipeline.drive_units`), sending the result to the target, and
@@ -24,12 +39,14 @@ the rows are the tree, and the search follows the persistence rules (``Manifest`
 ``Ledger``, ``resume_state``, ``CommitBuffer``), so a run killed mid-search
 resumes to the same rows with no duplicates. It is deterministic given the
 inputs, the seed, the pool and the params: round 0's draws are seeded per
-``(seed, input_id, i)`` and the mutations follow from the rows already saved, so
-a resume re-derives the same plan and runs only the units the ledger lacks.
+``(seed, input_id, i)``, and a round's plan follows from the saved rows of the
+rounds before it alone, so a resume re-derives the same plan, whatever a killed
+run saved of that round or later ones, and runs only the units the ledger lacks.
 """
 
 from __future__ import annotations
 
+import inspect
 import logging
 import random
 from collections.abc import Callable, Iterator
@@ -74,6 +91,10 @@ SEARCH_FILENAME = "jailbreak_search.csv"
 STAGE = "jailbreak_search"
 #: The identity combination (no technique).
 IDENTITY = "identity"
+#: The kinds of one-step mutation, in the order a parent's are listed.
+MUTATION_KINDS = ("add", "swap", "drop")
+#: The default cap of candidates per input in each mutation round.
+DEFAULT_MAX_CANDIDATES = 8
 
 #: The columns of every ``jailbreak_search.csv`` row, in order.
 SEARCH_COLUMNS = (
@@ -173,32 +194,138 @@ def _draw_round0(
     return out
 
 
-def _mutations(
-    parent: str, pool: list[Callable], registry: dict[str, Callable],
-    text: str, entry_type: str, input_id: str,
-) -> list[str]:
-    """Every valid one-step mutation of ``parent``, as sorted combination ids.
+#: The sampler's own defaults, which a round-0 ``sample_kwargs`` overlays.
+_SAMPLER_DEFAULTS = {name: p.default for name, p in
+                     inspect.signature(sample_combination).parameters.items()
+                     if p.default is not inspect.Parameter.empty}
 
-    Drop each technique; add each technique that may still join
-    (:func:`~redact.jailbreak.rules.compatible`); swap each for another of one
-    of its families that is compatible with the rest. Every result is valid by
-    construction, distinct and different from ``parent``."""
+
+@dataclass(frozen=True)
+class _Budget:
+    """What round 0 may draw, which every later round keeps: the complexity
+    and the obfuscations a budget draw may spend (``None``: no cap, as in a
+    count draw) and the layers round 0 leaves out."""
+
+    max_complexity: int | None
+    max_obfuscations: int | None
+    layers_off: frozenset[str]
+
+    def fits(self, fns: list[Callable]) -> bool:
+        """Whether a combination of ``fns`` stays within the budget."""
+        if any(getattr(fn, "layer", None) in self.layers_off for fn in fns):
+            return False
+        if (self.max_complexity is not None
+                and sum(getattr(fn, "complexity", 0) for fn in fns) > self.max_complexity):
+            return False
+        return (self.max_obfuscations is None
+                or sum(getattr(fn, "layer", None) == "obfuscation" for fn in fns)
+                <= self.max_obfuscations)
+
+
+def _budget_of(sample_kwargs: dict) -> _Budget:
+    """The budget round 0's ``sample_kwargs`` set, the sampler's defaults under
+    them. A count draw (``exact_techniques``) has no complexity or obfuscation
+    cap and draws the rewrite layer when the pool holds it; a budget draw caps
+    both and leaves the rewrite layer out unless ``include_rewrite``. Either
+    leaves out a layer whose ``include_<layer>`` is false."""
+    kw = {**_SAMPLER_DEFAULTS, **sample_kwargs}
+    off = {layer for layer in ("hacking", "manipulation", "obfuscation", "requests")
+           if not kw.get(f"include_{layer}", True)}
+    if kw.get("exact_techniques") is not None:
+        return _Budget(None, None, frozenset(off))
+    if not kw.get("include_rewrite", False):
+        off.add("rewrite")
+    return _Budget(kw["max_complexity"], kw["max_obfuscations"], frozenset(off))
+
+
+def _mutations_by_kind(
+    parent: str, pool: list[Callable], registry: dict[str, Callable],
+    text: str, entry_type: str, input_id: str, budget: _Budget | None = None,
+) -> dict[str, list[str]]:
+    """Every valid one-step mutation of ``parent``, by kind
+    (:data:`MUTATION_KINDS`), each a sorted list of combination ids.
+
+    ``add`` each technique that may still join
+    (:func:`~redact.jailbreak.rules.compatible`); ``swap`` each for another of
+    one of its families that is compatible with the rest; ``drop`` each
+    technique. Every result is valid by construction and different from
+    ``parent``; with a ``budget``, only those that fit it are kept."""
     applicable = _applicable(pool, text, entry_type, input_id)
     fns = [registry[n] for n in _names_of(parent) if n in registry]
-    out: set[str] = set()
-    for i in range(len(fns)):
-        out.add(_combo_id(_ordered(fns[:i] + fns[i + 1:])))
+    out: dict[str, dict[str, list[Callable]]] = {kind: {} for kind in MUTATION_KINDS}
+
+    def keep(kind: str, combo: list[Callable]) -> None:
+        out[kind][_combo_id(_ordered(combo))] = combo
+
     for cand in compatible(fns, applicable):
         if cand not in fns:
-            out.add(_combo_id(_ordered(fns + [cand])))
+            keep("add", fns + [cand])
     for i, fn in enumerate(fns):
         rest = fns[:i] + fns[i + 1:]
         fam = set(getattr(fn, "families", ()))
         for cand in compatible(rest, applicable):
             if cand is not fn and fam & set(getattr(cand, "families", ())):
-                out.add(_combo_id(_ordered(rest + [cand])))
-    out.discard(parent)
-    return sorted(out)
+                keep("swap", rest + [cand])
+    for i in range(len(fns)):
+        keep("drop", fns[:i] + fns[i + 1:])
+    return {kind: sorted(cid for cid, combo in found.items()
+                         if cid != parent and (budget is None or budget.fits(combo)))
+            for kind, found in out.items()}
+
+
+def _mutations(
+    parent: str, pool: list[Callable], registry: dict[str, Callable],
+    text: str, entry_type: str, input_id: str, budget: _Budget | None = None,
+) -> list[str]:
+    """Every valid one-step mutation of ``parent`` (:func:`_mutations_by_kind`,
+    all kinds), as sorted combination ids, distinct."""
+    kinds = _mutations_by_kind(parent, pool, registry, text, entry_type, input_id,
+                               budget)
+    return sorted(set().union(*kinds.values()))
+
+
+def _pick_mutations(
+    parents: list[tuple[str, dict[str, list[str]]]], tried: set[str],
+    cap: int | None, rng: random.Random,
+) -> dict[str, str]:
+    """The candidates of one input's round, ``{candidate: parent}``.
+
+    ``parents`` is the beam in order, each paired with its mutations by kind.
+    Without a ``cap`` every mutation not in ``tried`` is kept (sorted per kind,
+    kinds in :data:`MUTATION_KINDS` order, parents in beam order). With a
+    ``cap`` at most that many are drawn with ``rng``: each draw picks the next
+    parent in rotation, a kind at random among those the parent still has
+    untried, and a mutation of that kind at random, so the parents and the
+    kinds are spread evenly and the pick is deterministic given the seed."""
+    if cap is None:
+        chosen: dict[str, str] = {}
+        for parent, by_kind in parents:
+            for kind in MUTATION_KINDS:
+                for cand in by_kind.get(kind, []):
+                    if cand not in tried and cand not in chosen:
+                        chosen[cand] = parent
+        return chosen
+
+    # A pool of (parent, kind, [untried candidates]) the draw thins as it goes.
+    buckets: list[list] = []
+    for parent, by_kind in parents:
+        for kind in MUTATION_KINDS:
+            left = [c for c in by_kind.get(kind, []) if c not in tried]
+            if left:
+                buckets.append([parent, kind, left])
+    chosen = {}
+    i = 0
+    while buckets and len(chosen) < cap:
+        bucket = buckets[i % len(buckets)]
+        parent, _kind, left = bucket
+        cand = left.pop(rng.randrange(len(left)))
+        if cand not in tried and cand not in chosen:
+            chosen[cand] = parent
+        if left:
+            i += 1
+        else:
+            buckets.pop(i % len(buckets))
+    return chosen
 
 
 # --- rows ------------------------------------------------------------------
@@ -247,6 +374,7 @@ def _typed(row: dict) -> dict:
     row["round"] = int(row["round"])
     row["num_techniques"] = int(row["num_techniques"])
     row["success"] = bool(row["success"])
+    row["applied"] = bool(row.get("applied", True))
     row["score"] = float(row["score"])
     return row
 
@@ -261,6 +389,7 @@ def _rows_of(frame: pd.DataFrame) -> list[dict]:
         row["round"] = int(row.get("round", 0))
         row["num_techniques"] = int(row.get("num_techniques", 0) or 0)
         row["success"] = str(row.get("success", "")).strip().lower() == "true"
+        row["applied"] = str(row.get("applied", "True")).strip().lower() == "true"
         row["score"] = 1.0 if row["success"] else 0.0
         out.append(row)
     return out
@@ -321,12 +450,22 @@ def _candidate_unit(
 
 # --- beam, tree, best ------------------------------------------------------
 
-def _beam(rows: list[dict], input_id: str, round_idx: int, beam: int) -> list[str]:
-    """The ``beam`` best candidates of ``input_id`` in ``round_idx``, by score
-    (high first), then fewest techniques, then the candidate id."""
+def _beam(rows: list[dict], input_id: str, round_idx: int, beam: int,
+          *, seed: int = 0) -> list[str]:
+    """The ``beam`` best parents of ``input_id`` in ``round_idx`` to mutate.
+
+    Only candidates that applied are eligible — never the identity, nor one a
+    technique discarded or an error ended, which are not parents worth growing.
+    Ordered by score (high first), then fewest techniques, then a seeded draw
+    per candidate, so with 0/1 scores (nothing succeeded yet) the beam is a
+    seeded pick among the smallest applied combinations, not an alphabetical
+    one."""
     frontier = [r for r in rows
-                if r["input_id"] == input_id and r["round"] == round_idx]
-    frontier.sort(key=lambda r: (-r["score"], r["num_techniques"], r["candidate"]))
+                if r["input_id"] == input_id and r["round"] == round_idx
+                and r.get("candidate") != IDENTITY and r.get("applied", True)]
+    frontier.sort(key=lambda r: (
+        -r["score"], r["num_techniques"],
+        stable_seed(seed, input_id, round_idx, r["candidate"])))
     return [r["candidate"] for r in frontier[:beam]]
 
 
@@ -453,6 +592,7 @@ def search_combinations(
     width: int = 4,
     beam: int = 2,
     depth: int = 2,
+    max_candidates: int | None = DEFAULT_MAX_CANDIDATES,
     seed: int = 42,
     sample_kwargs: dict | None = None,
     stop_on_success: bool = True,
@@ -490,6 +630,11 @@ def search_combinations(
         width: Candidates drawn per input in round 0.
         beam: Candidates kept per input to mutate into the next round.
         depth: Mutation rounds after round 0 (``depth + 1`` rounds in all).
+        max_candidates: Most candidates tried per input in each mutation round;
+            over a full pool a parent has hundreds of one-step mutations, so the
+            cap (8 by default) draws a seeded sample spread over the beam's
+            parents and the add/swap/drop kinds. ``None`` tries every valid
+            mutation (the old, unbounded behaviour).
         seed: Seeds the sampling, so a resume is identical.
         sample_kwargs: Passed to
             :func:`~redact.jailbreak.sampling.sample_combination` for round 0.
@@ -512,6 +657,8 @@ def search_combinations(
         raise ValueError("search_combinations requires a judge_model (no default).")
     if width < 1 or beam < 1 or depth < 0:
         raise ValueError("width and beam must be >= 1, depth >= 0.")
+    if max_candidates is not None and max_candidates < 1:
+        raise ValueError("max_candidates must be >= 1 or None (no cap).")
 
     from redact.llms.client import ModelClient
     resolve = resolve or ModelClient.create
@@ -540,6 +687,9 @@ def search_combinations(
     done = resume_state(ledger, resume=resume, artifact=out, manifest=manifest)
     _check_plan(manifest, resume, {
         "seed": seed, "width": width, "beam": beam, "depth": depth,
+        "max_candidates": max_candidates, "target_model": target_model,
+        "judge_model": judge_model, "judge_system": judge_system,
+        "target_system": target_system, "stop_on_success": stop_on_success,
         "pool": sorted(fn.__name__ for fn in pool), "rules": rules,
         "sample_kwargs": sample_kwargs}, ledger)
 
@@ -568,6 +718,7 @@ def search_combinations(
         with CommitBuffer(append=_append, ledger=ledger) as buf:
             _run_rounds(inputs, pool, cfg, done, rows, manifest, manifest_rows, buf,
                         width=width, beam=beam, depth=depth, seed=seed,
+                        max_candidates=max_candidates,
                         sample_kwargs=sample_kwargs, stop_on_success=stop_on_success,
                         batch_size=batch_size, clients=clients, resolve=resolve,
                         verbose=verbose)
@@ -584,11 +735,12 @@ def search_combinations(
 
 def _run_rounds(
     inputs, pool, cfg, done, rows, manifest, manifest_rows, buf, *,
-    width, beam, depth, seed, sample_kwargs, stop_on_success, batch_size,
-    clients, resolve, verbose,
+    width, beam, depth, seed, max_candidates, sample_kwargs, stop_on_success,
+    batch_size, clients, resolve, verbose,
 ) -> None:
     """Run every round in turn, committing each before the next's beam is read."""
     input_rows = {str(r["sample_id"]): r for r in inputs.to_dict("records")}
+    budget = _budget_of(sample_kwargs)
     live: dict = {}
 
     def on_done(key, row):
@@ -611,7 +763,8 @@ def _run_rounds(
     for r_idx in range(depth + 1):
         plan = _plan_round(r_idx, input_rows, pool, cfg.registry, rows, beam=beam,
                            width=width, seed=seed, sample_kwargs=sample_kwargs,
-                           stop_on_success=stop_on_success)
+                           stop_on_success=stop_on_success,
+                           max_candidates=max_candidates, budget=budget)
         for iid, parent, cand in plan:
             manifest_rows.append({
                 "sample_id": content_id(f"search:{iid}:{r_idx}:{cand}"),
@@ -636,22 +789,32 @@ def _run_rounds(
                         resolve=resolve,
                         progress=f"{STAGE} round {r_idx}" if verbose else None)
             buf.flush()
-        if stop_on_success and all(_succeeded(rows, iid) for iid in input_rows):
+        # Whether every input has succeeded through this round decides the next
+        # round. Read only rounds up to this one, so a resume whose saved file
+        # holds a partial later round makes the same decision a clean run did.
+        through = [r for r in rows if r["round"] <= r_idx]
+        if stop_on_success and all(_succeeded(through, iid) for iid in input_rows):
             break
 
 
 def _plan_round(
     r_idx, input_rows, pool, registry, rows, *, beam, width, seed, sample_kwargs,
-    stop_on_success,
+    stop_on_success, max_candidates, budget,
 ) -> list[tuple[str, str, str]]:
     """The ``(input_id, parent, candidate)`` units of one round.
 
     Round 0 draws ``width`` combinations per input. A later round mutates the
-    beam of the round before, dropping candidates already tried for the input.
-    An input that already succeeded (with ``stop_on_success``) is skipped."""
+    beam of the round before, dropping candidates already tried for the input,
+    at most ``max_candidates`` per input (:func:`_pick_mutations`). An input
+    that succeeded in an earlier round (with ``stop_on_success``) is skipped.
+
+    Only the rows of the rounds *before* ``r_idx`` are read, so the plan this
+    round would make on a resume is the one a clean run made — independent of
+    what a killed run saved of this round or a later one."""
     plan: list[tuple[str, str, str]] = []
+    prev = [r for r in rows if r["round"] < r_idx]
     for iid, input_row in input_rows.items():
-        if stop_on_success and _succeeded(rows, iid):
+        if stop_on_success and _succeeded(prev, iid):
             continue
         text = str(input_row.get("prompt", ""))
         entry_type = str(input_row.get("entry_type", ""))
@@ -660,11 +823,11 @@ def _plan_round(
                                      width=width, sample_kwargs=sample_kwargs):
                 plan.append((iid, "", cand))
             continue
-        tried = _tried(rows, iid)
-        chosen: dict[str, str] = {}
-        for parent in _beam(rows, iid, r_idx - 1, beam):
-            for cand in _mutations(parent, pool, registry, text, entry_type, iid):
-                if cand not in tried and cand not in chosen:
-                    chosen[cand] = parent
+        tried = _tried(prev, iid)
+        parents = [(parent, _mutations_by_kind(parent, pool, registry, text,
+                                               entry_type, iid, budget))
+                   for parent in _beam(prev, iid, r_idx - 1, beam, seed=seed)]
+        rng = random.Random(stable_seed(seed, iid, r_idx, "mutate"))
+        chosen = _pick_mutations(parents, tried, max_candidates, rng)
         plan.extend((iid, parent, cand) for cand, parent in chosen.items())
     return plan

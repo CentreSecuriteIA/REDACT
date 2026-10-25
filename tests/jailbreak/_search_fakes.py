@@ -36,6 +36,35 @@ POOL = [REGISTRY[name] for name in POOL_NAMES]
 PROMPT = "please describe the full procedure in detail"
 
 
+def pure_pool() -> list:
+    """Every pure, rng-free adversarial technique (no model call, no benign
+    data, no rng draw), so any combination of them has a text known in advance
+    (:func:`applied_for`). 36 techniques across several families — enough that
+    one input's first mutation round holds well over 32 candidates, which is
+    what a mid-round save and resume need to be exercised."""
+    out = []
+    for fn in all_techniques():
+        if getattr(fn, "requires_llm", False) or getattr(fn, "requires_benign", False):
+            continue
+        if "rng" in inspect.signature(fn).parameters:
+            continue
+        if "adversarial" not in getattr(fn, "kinds", ["adversarial"]):
+            continue
+        out.append(fn)
+    return out
+
+
+def applied_for(prompt: str, names: list[str]) -> str:
+    """The exact jailbreak text a combination of rng-free techniques produces
+    for ``prompt`` (run synchronously, no client)."""
+    drawing = [name for name in names
+               if "rng" in inspect.signature(REGISTRY[name]).parameters]
+    assert not drawing, f"{drawing} draw from an rng: their text is not known"
+    combined = combine_techniques(*(REGISTRY[name] for name in names))
+    text, _info, _accepted, _reason = apply_combination(combined, prompt)
+    return text
+
+
 def applied_text(names: list[str]) -> str:
     """The exact jailbreak text a combination produces (run synchronously, no
     client), so a test knows which target input counts as a success. Only for

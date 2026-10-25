@@ -678,19 +678,30 @@ model, not a recipe stage (call `search_combinations`; the user-facing side is
 [stages/combination-search.md](../stages/combination-search.md)). It reuses the
 engine's parts rather than adding rules of its own: round 0 draws `width` valid
 combinations per input with `sample_combination` over the techniques that
-`applies` admits; a later round takes the `beam` best of the round before and
+`applies` admits; a later round takes the `beam` best of the round before (only
+candidates that applied — not the identity, nor a discarded or error row — by
+score, then fewest techniques, then a seeded draw, so with 0/1 scores it is a
+seeded pick among the smallest applied combinations, breadth-first) and
 `_mutations` adds, swaps or drops one technique, each result run through
-`rules.compatible`, so no candidate is ever an invalid pair. A candidate is
+`rules.compatible`, so no candidate is ever an invalid pair, and kept within
+round 0's budget. A round tries at most `max_candidates` candidates per input (8
+by default; over a full pool a parent has hundreds of mutations, ~900 per input
+with the defaults), drawn with the seeded rng spread over the beam's parents and
+the add/swap/drop kinds (`None` tries all). A candidate is
 applied with `run_chain` and driven on `drive_units`, exactly as the stage
 drives a unit; the target reply is scored by a judge read with `is_accepted`,
 the `multi_turn` judge pattern (default criterion `SUCCESS_JUDGE_SYSTEM`). Every
 tried candidate is a row of `jailbreak_search.csv`, keyed in the ledger by
 `(input_id, round, candidate)`; a round is committed before the next round's
-beam is read, so a kill resumes to the same rows. The search is a pure function
+beam is read. The search is a pure function
 of the inputs, the seed, the pool and the params — round 0's draws are seeded
-per `(seed, input_id, i)` and a round's beam follows from the saved rows — so a
-resume re-derives the same plan and runs only the units the ledger lacks. The
-plan file records the seed, `width`/`beam`/`depth`, the pool names, the
-`rules_id` and `sample_kwargs`; a resume with any of them changed raises. The
-module imports `augmentation` lazily (only to build the default pool), so it
+per `(seed, input_id, i)` and a round's plan is a function of the rows of the
+rounds **before** it alone — so a resume re-derives the same plan, whatever a
+killed run saved of that round or a later one, and runs only the units the
+ledger lacks; a kill mid-search, even after a success is saved mid-round,
+resumes to the same rows. The
+plan file records the seed, `width`/`beam`/`depth`, `max_candidates`, the pool
+names, the `rules_id`, `sample_kwargs`, the target and judge models and their
+system prompts, and `stop_on_success`; a resume with any of them changed raises.
+The module imports `augmentation` lazily (only to build the default pool), so it
 adds no import-time cycle.
