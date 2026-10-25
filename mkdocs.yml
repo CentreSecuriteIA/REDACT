@@ -91,6 +91,7 @@ nav:
       - Outputs: stages/outputs.md
       - Paraphrase: stages/paraphrase.md
       - Jailbreaks: stages/jailbreaks.md
+      - Flip tokens (EchoGram): stages/flip-tokens.md
       - Combination search: stages/combination-search.md
       - Conversations: stages/conversations.md
       - Build: stages/build.md

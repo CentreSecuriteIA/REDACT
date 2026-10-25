@@ -48,7 +48,9 @@ families apply in the order of their `within_layer_order`, numbered in tens
 so a family added later slots in between: the whole-text rewrites first
 (`translation` 10 and the spec 1.4 language-mix families `dialect` 11, `code_switching` 12, `transliteration` 13 and `romanization` 14, then `typos` 20, `casual_writing` 30, `noise` 35), then the word-level
 steps (`sensitive_words` 40, `wording` 45, `tokenbreak` 50, `word_art` 55), so a rewrite cannot undo a
-split, an encoded word or a code name, then `suffixes` 60, `payload_split` 65, `encode` 70, `structural` and
+split, an encoded word or a code name, then `suffixes` 60, `payload_split` 65, `encode` 70,
+`flip_tokens` 75 (a guard flip token, appended literally after the encodings and before the wrappers,
+see [Flip tokens](stages/flip-tokens.md); the packaged family ships with no technique), `structural` and
 `neutral_container` 80 (each excludes the other, so they share the place)
 and `ascii_art` 90, the outermost obfuscation. A plan made before this order applied
 `sensitive_words` and `tokenbreak` first; a kept plan replays the order its

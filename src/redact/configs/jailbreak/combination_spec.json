@@ -129,6 +129,15 @@
       "within_layer_order": 60,
       "cross_incompatible_with": []
     },
+    "flip_tokens": {
+      "description": "A token string a guard-in-the-loop search (EchoGram) found to flip one guard's verdict, appended to the prompt; one technique per row of obfuscation/flip_tokens.json, attack only",
+      "_rules": "Like a published suffix, the tokens work only as the literal string the guard was searched with, at the end of the text it reads. So the family applies at 75, after every obfuscation that rewrites the text's characters (payload_split 65, encode 70), which would otherwise rewrite the tokens, and before the wrappers (structural and neutral_container 80), which keep them literal inside the wrapper as they keep a suffix; it refuses ascii_art (90), which would draw them as art, and a translation drawn as the request obfuscation (request_obfuscation_refuses), which would translate them, both as the published suffixes do.",
+      "layer": "obfuscation",
+      "dimension": "surface_noise",
+      "within_layer_order": 75,
+      "kinds": ["adversarial"],
+      "cross_incompatible_with": ["ascii_art"]
+    },
     "payload_split": {
       "description": "The prompt cut into two to four parts, each named by a letter, with a request to join them in order (a cut at word boundaries, or one a model makes where the meaning allows). Its refusal of fake_turns (an invented turn is a conversation already) is kept as it was: the manipulation layer now applies last and the parts sit inside the turn, so that reason no longer holds, and the manipulation block refuses the pair too",
       "layer": "obfuscation",
@@ -371,7 +380,7 @@
 
   "request_obfuscation_refuses": {
     "_comment": "For a family a request obfuscation is drawn from, the families it then keeps out of the combination. The request obfuscation applies right after the request, to the finished request (only the manipulation layer, which never meets a translation, comes after it), so a translation drawn as one translates what the obfuscations before it wrote: an adversarial suffix, the keys of a JSON, XML or Markdown wrapper, the lines of a neutral container. The sampler draws it before the obfuscations (jailbreak/sampling.py) and narrows their pool by this table. A translation drawn as an ordinary obfuscation runs before those steps and meets none of them. An encoding is kept from a translation by the families' own rule. The translation family refuses ten of the other thirteen obfuscation families (ascii_art, encode, sensitive_words, tokenbreak, word_art, wording, typos, casual_writing, noise, payload_split) and this table the last three, so a translation drawn as the request obfuscation is the unit's only obfuscation, and the max_obfuscations slots it leaves go unused.",
-    "translation": ["suffixes", "structural", "neutral_container"]
+    "translation": ["suffixes", "structural", "neutral_container", "flip_tokens"]
   },
 
   "generators": {
@@ -380,6 +389,8 @@
     "answer_language": { "file": "languages.json", "where": "answer_language", "name": "to_ask_answer_in_{slug}", "requires_llm": false },
     "_suffixes": "The adversarial suffixes published in the literature (obfuscation/suffix_strings.json; jailbreak/obfuscation/suffixes.py builds the functions and refuses a row without its suffix, source, optimized_against or since), after the family's four noise suffixes; attack only. Each refuses ascii_art, for another reason than the unicode and emoji noise suffixes (whose characters the fonts lack): a published suffix is plain ASCII, which the fonts draw, but it works only as the literal token string it was optimized as, at the end of the prompt, and ascii_art, applied after it, would draw it as art with the prompt and remove that string.",
     "suffixes":        { "file": "obfuscation/suffix_strings.json", "name": "to_adversarial_suffix_{slug}", "complexity": 1, "requires_llm": false, "kinds": ["adversarial"], "cross_incompatible_with": ["ascii_art"] },
+    "_flip_tokens": "The flip tokens a guard-in-the-loop search found against one guard (obfuscation/flip_tokens.json; jailbreak/obfuscation/flip_tokens.py builds the functions and refuses a row without its tokens, guard, flips, n_harmful, n_benign or since). The file ships with no row: the family registers with no technique until rows found on a pod are copied in. Attack only; its refusals are the family's (ascii_art, and the translation request obfuscation), for the reasons its _rules gives.",
+    "flip_tokens":     { "file": "obfuscation/flip_tokens.json", "name": "to_flip_tokens_{slug}", "complexity": 1, "requires_llm": false, "kinds": ["adversarial"] },
     "code_switching":  { "file": "code_switch_languages.json", "name": "to_code_switch_{slug}", "requires_llm": true, "complexity": 2 },
     "romanization":    { "file": "romanization_languages.json", "name": "to_romanize_{slug}", "requires_llm": true, "complexity": 2 },
     "dialect":         { "file": "dialect_variants.json", "name": "to_dialect_{slug}", "requires_llm": true, "complexity": 2 }

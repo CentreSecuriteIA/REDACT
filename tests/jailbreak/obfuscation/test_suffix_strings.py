@@ -48,16 +48,18 @@ def _write_rows(folder: Path, rows: list[dict]) -> None:
 
 
 def _copy_spec_and_data(folder: Path) -> None:
-    """The packaged spec and every top-level data file its generators read
-    (languages.json and the spec 1.4 language-mix files) into ``folder``, so
-    ``read_spec`` there finds them; the suffix file is written by the test."""
+    """The packaged spec and every other data file its generators read
+    (languages.json, the spec 1.4 language-mix files, the flip-token file),
+    at their places, into ``folder``, so ``read_spec`` there finds them; the
+    suffix file is written by the test."""
     configs = paths.jailbreak_configs_dir()
     shutil.copy(configs / "combination_spec.json", folder)
     spec = json.loads((configs / "combination_spec.json").read_text(encoding="utf-8"))
     for generator in spec.get("generators", {}).values():
         name = generator.get("file", "") if isinstance(generator, dict) else ""
-        if name and "/" not in name and (configs / name).exists():
-            shutil.copy(configs / name, folder)
+        if name and name != S.SUFFIX_FILE and (configs / name).exists():
+            (folder / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(configs / name, folder / name)
 
 
 def _package_with(tmp_path: Path, rows: list[dict]) -> Path:
