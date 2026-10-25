@@ -113,10 +113,11 @@ def test_each_row_registers_an_attack_only_technique_when_the_package_imports(tm
     assert (beta["complexity"], beta["kinds"]) == (2, ["adversarial"])
     made = ["to_adversarial_suffix_alpha", "to_adversarial_suffix_beta_2"]
     assert set(made) <= set(report["pools"]["adversarial"])
-    # The natural kind keeps its two noise suffixes; the eval type draws no suffix.
+    # The natural kind keeps its two noise suffixes; the eval type (eval pool
+    # v2) draws the published ones, a row added later too, and no noise suffix.
     assert report["pools"]["natural"] == ["to_adversarial_suffix_emoji",
                                           "to_adversarial_suffix_punctuation"]
-    assert report["pools"]["eval"] == []
+    assert report["pools"]["eval"] == made
 
 
 def test_a_row_without_its_source_fails_the_import_naming_the_row(tmp_path):

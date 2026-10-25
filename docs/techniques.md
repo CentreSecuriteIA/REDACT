@@ -33,13 +33,13 @@ A combination applies its techniques in layer order: `rewrite`, then
 request obfuscation, when allowed (the packaged attacks allow it, for half their units, all
 among those that drew a request; the eval type does not), comes right after the request,
 before the manipulation layer; a combination without a request takes none.
-The manipulation layer comes last since the eval release: `fsh`, `dap` and
+The manipulation layer comes last since the first eval release: `fsh`, `dap` and
 `fake_turns` put the finished question, obfuscated and with its request
 around it, among their examples or after their invented turn, so the
 obfuscations, the request and the model steps (a typo rewrite, a marking
 call) read and change the question alone, and the examples stay as written.
 A selected `fsh` or `dap` variant picks its examples on the clean input
-([below](#what-the-families-do)). A plan made before the eval release
+([below](#what-the-families-do)). A plan made before the first eval release
 applied the manipulation layer second; a kept plan replays the order its
 manifest recorded, and its resume warns that the rules changed (the plan
 file's `rules` id holds the layer order). Within the obfuscation layer,
@@ -53,8 +53,9 @@ and `ascii_art` 90, the outermost obfuscation. A plan made before this order app
 `sensitive_words` and `tokenbreak` first; a kept plan replays the order its
 manifest recorded, and a fresh plan applies translation, typos, casual
 writing and noise before the word-level steps (a fresh plan never pairs a
-translation with the other three, which a kept plan may hold). The families the eval type draws
-(`translation`, `encode`, `structural`, `ascii_art`) keep their order. The
+translation with the other three, which a kept plan may hold). The obfuscation families the eval type draws
+(`translation`, `transliteration`, `suffixes`, `encode`, `structural`,
+`neutral_container`, `ascii_art`) keep their order. The
 obfuscation layer has no cap: a combination takes up to `max_obfuscations`
 of its families in budget mode, the request obfuscation, when allowed,
 among them.
@@ -375,7 +376,7 @@ technique is picked first. A technique may not join a combination when:
   `translation`, `ascii_art`, `payload_split`, `word_art` and `wording` families and
   the `heavy` `encode` techniques, except those also in `sensitive_words`. The
   block was written when the manipulation layer applied before the
-  obfuscations, which then changed the examples too; since the eval release
+  obfuscations, which then changed the examples too; since the first eval release
   the layer applies last and an obfuscation changes the question alone, and
   the block is kept as it was (lifting it would admit 104 eval pairs, each
   `fsh` or `dap` technique beside a translation or a heavy encoding, a change
@@ -413,11 +414,15 @@ question alone and the turn stays outside it), `ascii_art` with `fsh` and
 `payload_split` with `fake_turns` (an invented turn was a conversation
 already; the parts now sit inside the turn). Lifting them is a decision of
 its own, not made here. `fake_turns` beside the nine wrappers would add 27
-pairs of the default attack kind and none of the eval pool, which holds no
-`fake_turns`. `ascii_art` with `fsh` and `dap`, and `payload_split` with
-`fake_turns`, are each refused by the manipulation block as well, so a lift
-takes both rules; no pair of the eval pool's 291 holds `ascii_art` with `fsh`
-or `dap`, and lifting both rules would admit 8.
+pairs of the default attack kind and, since eval pool v2 holds `fake_turns`
+and all nine wrappers, 27 of the eval pool (none before). `ascii_art` with
+`fsh` and `dap`, and `payload_split` with `fake_turns`, are each refused by
+the manipulation block as well, so a lift takes both rules; no pair of the
+eval pool's 5,613 holds `ascii_art` with `fsh` or `dap`, and lifting both
+rules would admit 8. Lifting the manipulation block alone would admit 146
+eval pairs: the 104 of the first pool (each `fsh` or `dap` technique beside
+a translation or a heavy encoding) and 42 of `fake_turns` beside a
+translation, a heavy encoding or `ascii_art`.
 
 `combine_techniques` does not check these rules. It only sorts techniques
 into layer order. [internals/jailbreak.md](internals/jailbreak.md) explains
@@ -427,46 +432,69 @@ Adding a technique: [extending.md](extending.md#add-a-jailbreak-technique).
 
 ## The eval pool
 
-The `eval` dataset type's attacks draw from 36 techniques in 10 families:
-hard ones (complexity 2 or 3 but for `to_noble_goal`, and the low-resource
-languages) whose harmful content stays certain, since the technique carries
-the text unchanged or reversibly, or a check accepts the result.
+The `eval` dataset type's attacks draw from 126 techniques in 22 families
+(eval pool v2): ones whose harmful content stays certain, since the
+technique carries the text unchanged or reversibly in a fixed template,
+wrapper or table, or a check accepts the result. The first eval pool held
+36 of them in 10 families (complexity 2 or 3 but for `to_noble_goal`, and
+the low-resource languages); eval pool v2 kept them and admitted the pure
+families the eval never drew ([the release note](configuration.md#release-notes)
+says what was admitted, what was not, and why).
 
-The pool is **pinned**: its 36 names, its two count rounds and the text each
-technique draws for a seed stay the same from release to release, so the
-results of an eval run stay comparable. `tests/fixtures/eval_pool.json` pins
-the names, `tests/fixtures/eval_pairs.json` the pairs of them the
-[rules](#compatibility-rules) admit, and a digest pins the draws; a change to
-the pool, to those pairs, or to the text or info of one of its techniques, is
-made on purpose in a review of the eval type (a new spec version, where a
-technique is added or retired, and new fixtures) and fails the tests until
-then. This
-page and the others say *pinned*, or *unchanged*, where it matters; *the next
-eval review* is that deliberate change.
+The pool is **pinned**: its 126 names, its two count rounds and the text
+each technique draws for a seed stay the same from release to release, so
+the results of an eval run stay comparable. `tests/fixtures/eval_pool.json`
+pins the names, `tests/fixtures/eval_pairs.json` the pairs of them the
+[rules](#compatibility-rules) admit (5,613 of 7,875, per family pair, with
+the 291 of the first pool one per line), and a digest pins the draws; a
+change to the pool, to those pairs, or to the text or info of one of its
+techniques, is made on purpose in a review of the eval type (new fixtures,
+and a new spec version where a technique is added or retired) and fails the
+tests until then. This page and the others say *pinned*, or *unchanged*,
+where it matters; *the next eval review* is that deliberate change. Eval
+pool v2 was one: eval files built before it are not comparable with those
+built after.
 
 | Family | Techniques |
 |---|---|
 | `translation` | the eight low-resource languages, weighted 3 |
-| `encode` | the five `heavy` ones: `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`, `to_morse`, `to_braille` |
-| `fsh`, `dap` | the eight `short` and `long` ones |
-| `framing` | all five |
+| `transliteration` | all four (since v2) |
+| `suffixes` | the 24 published ones (since v2; the four noise suffixes are denied) |
+| `encode` | the five `heavy` ones: `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`, `to_morse`, `to_braille`; and `to_letter_spacing` (since v2) |
 | `structural` | `to_json`, `to_xml`, `to_markdown` |
+| `neutral_container` | all six (since v2) |
 | `ascii_art` | `to_ascii_art` |
+| `framing` | all five |
+| `persona_template` | all 23 (since v2) |
 | `continuation` | all four |
+| `indirect` | all six (since v2) |
+| `distractor_prefix`, `distractor_suffix` | all three each (since v2) |
+| `impersonation`, `asking`, `guardrail_address` | all three each (since v2) |
 | `temporal` | `to_use_past_tense` |
 | `answer_format` | `to_refusal_then_comply` |
+| `answer_language` | the eight of the translations: `to_ask_answer_in_swahili`, `_thai`, `_khmer`, `_nepali`, `_zulu`, `_scots_gaelic`, `_bengali`, `_javanese` (since v2) |
+| `fsh`, `dap` | the eight `short` and `long` ones |
+| `fake_turns` | all three (since v2) |
 
-Model rewrites (`cognitive`, `persona`, `typos`, `sensitive_words`,
-`tokenbreak`) are left out while the eval pool is pinned; a technique of
-this pool that has a model write the prompt must carry a spec `check`. The fifteen spec 1.2 encodings
-are not drawn here either: `eval.json` denies each in `techniques.deny`, so the
-`encode` row keeps its five `heavy` members while the eval pool is pinned. The
-four spec 1.2 many-shot variants of `fsh` and `dap` are denied the same way.
-`temporal` is not allowed as a family: `eval.json` names `to_use_past_tense`
-under `techniques.allow`, so neither spec 1.3 member of the family
-(`to_use_future_tense`, `to_use_historical_era`) nor a later one reaches the
-pool. With
-`"adversarial": {"translation": false}` the pool keeps the other 28.
+Model rewrites and marking steps (`cognitive`, `persona`, `typos`,
+`sensitive_words`, `tokenbreak`, `wording`, `word_art`, `code_switching`,
+`romanization`, `dialect` and the `rewrite` layer) are left out while the
+eval pool is pinned, and so are `payload_split`, `casual_writing` and
+`noise` (the release note gives each reason); a technique of this pool that has a model write the
+prompt must carry a spec `check`, and none of the 90 techniques v2 added
+calls a model. The fifteen spec 1.2 encodings and the seven light ones of
+before are not drawn here either: `eval.json` denies each in
+`techniques.deny`, so the `encode` row keeps its five `heavy` members and the
+letter spacing while the eval pool is pinned. The four spec 1.2 many-shot
+variants of `fsh` and `dap`, and the four noise suffixes, are denied the same
+way. `temporal`, `answer_format` and `answer_language` are not allowed as
+families: `eval.json` names their techniques under `techniques.allow`, so
+neither spec 1.3 member of `temporal` (`to_use_future_tense`,
+`to_use_historical_era`) nor a later member of the three reaches the pool.
+The families allowed whole (eleven of them since v2) take a technique the
+library adds to them, unless `eval.json` denies it: the test of the pinned
+names fails until that is decided. With `"adversarial": {"translation":
+false}` the pool keeps the other 118 (the answer languages stay).
 [configuration.md](configuration.md#dataset-types) gives the type file.
 
 `to_ascii_art` keeps its 5,000-character cap in this pool too, so its eval
@@ -480,7 +508,7 @@ keeps ASCII art from those encodings, so a fresh eval plan no longer draws
 the pairs. An eval plan kept across the change mixes the two renderings. [What the families do](#what-the-families-do) has the
 figures.
 
-The eval release also put the manipulation layer last. The 40 pairs that
+The first eval release also put the manipulation layer last. The 40 pairs that
 hold one of the eight `fsh` and `dap` techniques, each beside `to_json`,
 `to_xml`, `to_markdown`, `to_refusal_then_comply` or `to_use_past_tense`,
 now wrap or reframe the question alone and insert it among the examples,
@@ -662,7 +690,8 @@ generation model.
   by the frame's `display_name`. The frames and mechanics are in
   `configs/jailbreak/hacking/persona_templates.json`; a frame is its
   technique's own text, so the variant floor counts the six mechanics
-  alone. The family is attack-only, and the eval type does not draw it.
+  alone. The family is attack-only, and the eval type draws all 23 since
+  eval pool v2.
 
 **Manipulation.** `fsh` and `dap` build on benign question-and-answer pairs
 of the subcategories of the benign taxonomy. The `random` variants pick a
@@ -683,7 +712,7 @@ its model the clean input instead, the text the unit started from, which
 `run_chain` passes the techniques that take it as `source_prompt`: it picks
 the subcategory on what the question is about, not on its cipher or its
 wrapper, then inserts the finished question. In a plan kept from before the
-eval release, where `fsh` or `dap` ran first, the clean input is the text
+first eval release, where `fsh` or `dap` ran first, the clean input is the text
 the variant read, so it picks as it did; the exception is a rewrite
 technique (in a kind that allows the rewrite layer), which runs first in
 both orders: the variant is now shown the input before the rewrite, where
@@ -725,7 +754,8 @@ the variant (`variant=<name>`). Being of the manipulation layer, they take
 `fsh` and `dap`'s place in a combination (one manipulation at most) and
 their obfuscation block, and refuse the same hacking and request families,
 the persona templates, and the `structural` and `neutral_container`
-wrappers. The family is attack-only, and the eval type does not draw it.
+wrappers. The family is attack-only, and the eval type draws all three since
+eval pool v2.
 
 **Obfuscation.**
 
@@ -847,7 +877,9 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   letters change, and several letters share one target letter, so the text
   cannot be turned back. It changes only Latin letters, so it is tagged
   `needs_latin`, and a fresh plan draws it only for a text that holds a
-  Latin letter. No reader of those scripts has checked the tables.
+  Latin letter. No reader of those scripts has checked the tables. Being
+  pure, it is the one language-mix family the eval type draws (since eval
+  pool v2).
 - `romanization` (10, `to_romanize_<slug>`) has the generation model rewrite
   the prompt in a non-Latin language spelled in the Latin alphabet (Hinglish,
   Arabizi and the like): Hindi, Urdu, Bengali, Marathi, Tamil, Telugu,
@@ -941,7 +973,9 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   optimized here (that needs a gradient search against a white-box model for
   each target). The published ones are attack only, as the generator's
   `kinds` say whatever a row gives, so the natural kind draws only the
-  punctuation and emoji suffixes.
+  punctuation and emoji suffixes. The eval type draws the published ones
+  since eval pool v2 (a row added later joins it unless `eval.json` denies
+  it), and denies the four noise ones by name.
 - `payload_split` (spec version 1.3) cuts the text into two to four parts,
   names them A, B, C ..., and writes them, one per line as `A: "..."` (a
   quote or a backslash in a part is escaped as a JSON string does, so the
@@ -992,8 +1026,8 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   would set a mark apart from its letter. It spaces out any script, so it
   has no `needs_latin`, and like every encoding it is kept from a
   translation; it may sit with ASCII art (spaces draw) and with fsh, dap and
-  the fake turns (it is light). It is an attack only, and the eval type
-  denies it by name, so the pinned eval pool does not draw it.
+  the fake turns (it is light). It is an attack only; the eval type denied
+  it by name until eval pool v2, which admitted it.
   Spec version 1.3 gives 21 of the 27 encodings *decode hints*, the
   second eval release the five heavy encodings of the eval pool too, and
   spec 1.4's letter spacing has four, 27 of the 28 in all: at the spec's
@@ -1061,7 +1095,8 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   template against a list of such words, a starting list to extend. The
   transcript and log containers come closest to a chat turn: a transcript
   holds the one speaker's line and no other speaker's, and a log message
-  follows at most one neutral entry of the same log.
+  follows at most one neutral entry of the same log. The natural kind and,
+  since eval pool v2, the eval type draw all six.
 - `ascii_art` draws the text in a pyfiglet font, drawn from those of the 16
   that have a glyph for every character of the text and draw it in at most
   `MAX_RENDERED_CHARS` (5,000) characters, the `max_chars` keyword's
@@ -1126,7 +1161,10 @@ model. Each technique picks one of its named template variants from a JSON
 file under `configs/jailbreak/requests/`. The `answer_language` techniques
 are generated from the rows of `configs/jailbreak/languages.json` marked
 `answer_language` ([the language table](#the-language-table)), so a new
-language is one row. `to_impersonate_good_person` has eight
+language is one row; the eval type draws, since eval pool v2, the eight of
+the languages it translates into, and `indirect`, the distractors,
+`impersonation`, `asking` and `guardrail_address` whole.
+`to_impersonate_good_person` has eight
 profession variants and `to_use_past_tense` eight historical framings, each
 asking for the account in the past. Each continuation variant gives the
 prompt the place its text speaks of: `to_fill_in_blank` leaves a blank to
@@ -1154,7 +1192,8 @@ family's form, `type=<directive>;variant=<name>`. All are attack-only but
 `to_ask_with_urgency`: `asking` is natural, and an urgent ask is a natural
 variation, so it takes its family's kinds. The
 `eval` type names `to_use_past_tense` alone of `temporal`, not the family,
-so its pool does not change.
+so neither temporal member reaches its pool; eval pool v2 admitted the
+other three families whole, and their five new members with them.
 
 Spec version 1.4 adds the request family `guardrail_address` (BELLS audit
 M4): a sentence or block addressed to a content classifier or supervisor,
@@ -1180,7 +1219,8 @@ dimension is `request_shape`, as the distractors', which also place text
 before or after the prompt; being a request-layer family, one is drawn per
 combination (the layer cap), competing with the other requests through the
 dealer as the distractors do, so a row carries one request frame. The eval
-type does not allow the family, so the pinned eval pool does not draw one.
+type allows the family since eval pool v2, and every eval attack input
+(harmful) takes it.
 
 Three request families of spec version 1.2 are for natural variations only
 (their `kinds` are `["natural"]`, so no attack draws them): ordinary,

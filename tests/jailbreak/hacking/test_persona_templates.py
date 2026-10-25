@@ -167,14 +167,18 @@ def test_a_kind_counts_the_mechanic_each_row_drew(tmp_path):
     assert set(table["variant"]) == {variant["name"] for variant in _MECHANICS}
 
 
-def test_neither_the_natural_kind_nor_the_eval_type_draws_them():
+def test_the_attacks_and_the_eval_type_draw_them_and_the_natural_kind_does_not():
+    """Eval pool v2 admitted the family whole, the twelve frames of spec 1.4
+    with the eleven of 1.3."""
     from redact.recipe import load_dataset_type
 
     eval_section = load_dataset_type("eval")["augmentations"]
-    for pool in (technique_pool(resolve(None, "natural")),
+    natural = technique_pool(resolve(None, "natural"))
+    assert not [fn for fn in natural if "persona_template" in fn.families]
+    for pool in (technique_pool(resolve(None, "adversarial")),
                  technique_pool(resolve(eval_section, "adversarial"))):
-        assert not [fn for fn in pool if "persona_template" in fn.families]
-    assert set(_FNS) <= set(technique_pool(resolve(None, "adversarial")))
+        assert [fn for fn in pool if "persona_template" in fn.families] == list(_FNS)
+    assert len(_FNS) == 23      # noqa: PLR2004
 
 
 class TestTheFramesOfSpec1_4:

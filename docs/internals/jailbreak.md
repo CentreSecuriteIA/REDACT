@@ -186,7 +186,7 @@ the chain, returning the text before that technique, with the info
 (`in_layer_order`), and runs it with blocking calls. It does not check the
 rules. A caller that combines techniques itself (a notebook, a transform for
 the multi-turn crescendo) gets the layer order of the library it runs on: the
-manipulation layer last since the eval release, as `sample_exact_combination`,
+manipulation layer last since the first eval release, as `sample_exact_combination`,
 which sorts the same way.
 
 ## Plan, then drive
@@ -310,7 +310,7 @@ The apply order is the layers' (`rewrite`, `hacking`, `obfuscation`,
 manipulation technique last), except the request obfuscation, which goes
 right after the request (`sample_combination` inserts it there, so it still
 precedes a manipulation technique). The manipulation layer comes last since
-the eval release: it inserts the finished question among its examples or
+the first eval release: it inserts the finished question among its examples or
 after its invented turn, so the obfuscations, the request and the model
 steps change the question alone. Within the obfuscation layer it is each
 family's `within_layer_order`, in tens: `translation` 10, `typos` 20,
@@ -321,7 +321,7 @@ rewrites come before the word-level steps, which they would otherwise undo;
 a family added later takes a number between two, as `noise` did. The manifest records the order a
 combination applies in and a replay keeps it (`combination_of`), so a plan
 made before the renumbering, when `sensitive_words` and `tokenbreak` came
-first, still runs as it was made, and one made before the eval release
+first, still runs as it was made, and one made before the first eval release
 still applies its manipulation technique second. `rules_id` holds the
 spec's `layer_order`, so the resume of such a plan warns that the rules
 changed. A technique above the remaining complexity is
@@ -419,7 +419,7 @@ order.
   `assign_combination` passes `heavy_apart` for a budget draw only. Dealt
   as encode's members, a heavy one fitted only a unit with 3 points left,
   and the light members kept encode's count high, so encode was seldom the
-  family dealt on such a unit: after the eval release's rules the ten were
+  family dealt on such a unit: after the first eval release's rules the ten were
   drawn 8 to 16 times in 3,000 units of the default attacks (three groups,
   seeds 42 to 46). With the slot at 0.25 they are drawn 37 to 40 times
   (seeds 42 to 46, in one, three or ten groups), about a quarter of a

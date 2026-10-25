@@ -39,7 +39,7 @@ Contents:
 | Pool `adversarial_no_translation` | 255 |
 | Pool `natural` | 96 |
 | Pool `natural_translation` | 126 |
-| Pool `eval.adversarial` | 36 |
+| Pool `eval.adversarial` | 126 |
 | Pool `training.adversarial` | 285 |
 | Pool `training.natural` | 96 |
 
@@ -269,29 +269,29 @@ Refused partners, where few:
 | `to_someone_from_the_future_persona` | `persona` | adv | 2 | 3-9 (scenario) |  |  | 3 | A | 1.0 | 249 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F) |
 | `to_underground_hacker_persona` | `persona` | adv | 2 | 3-9 (scenario) |  |  | 3 | A | 1.3 | 249 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F) |
 | `to_very_advanced_ai_persona` | `persona` | adv | 2 | 3-9 (scenario) |  |  | 3 | A | 1.0 | 249 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_aim_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_caring_grandma_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_character_reset_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_dan_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_developer_mode_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_dude_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_evil_confidant_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_game_engine_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_liberated_model_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_licensed_professional_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_loyal_friend_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_maintenance_mode_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_official_investigator_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_opposite_mode_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_penalty_game_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_research_scientist_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_rogue_ai_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_simulation_rules_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_stan_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_tagged_speaker_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_terminal_simulator_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_unfiltered_oracle_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
-| `to_worried_parent_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_aim_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_caring_grandma_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_character_reset_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_dan_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_developer_mode_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_dude_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_evil_confidant_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_game_engine_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_liberated_model_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_licensed_professional_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_loyal_friend_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_maintenance_mode_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_official_investigator_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_opposite_mode_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_penalty_game_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_research_scientist_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_rogue_ai_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_simulation_rules_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_stan_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_tagged_speaker_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_terminal_simulator_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_unfiltered_oracle_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.3 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
+| `to_worried_parent_persona_template` | `persona_template` | adv | 2 |  |  | 6 |  | A E | 1.4 | 245 | rest of `hacking` (L), `ascii_art` (F), `impersonation` (F), `dap` (F), `fake_turns` (F), `fsh` (F), some `answer_format` (4 of 12, T) |
 
 ### Layer `obfuscation`
 
@@ -337,10 +337,10 @@ Refused partners, where few:
 | `to_code_switch_russian` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 186 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
 | `to_code_switch_spanish` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 186 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
 | `to_code_switch_swahili` | `code_switching` | adv nat | 2 | 2-4 (meaning) | applies |  | 2 | A N | 1.4 | 186 | `translation` (F), `dialect` (F), `transliteration` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_arabic_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N | 1.4 | 186 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_cyrillic_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N | 1.4 | 186 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_devanagari_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N | 1.4 | 186 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
-| `to_greek_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N | 1.4 | 186 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_arabic_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N E | 1.4 | 186 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_cyrillic_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N E | 1.4 | 186 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_devanagari_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N E | 1.4 | 186 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
+| `to_greek_transliteration` | `transliteration` | adv nat | 2 |  | latin applies |  |  | A N E | 1.4 | 186 | `translation` (F), `dialect` (F), `code_switching` (F), `romanization` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
 | `to_romanize_arabic` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 186 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
 | `to_romanize_bengali` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 186 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
 | `to_romanize_gujarati` | `romanization` | adv nat | 2 | 2-4 (meaning) |  |  | 2 | A N | 1.4 | 186 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `typos` (F), `casual_writing` (F), `noise` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `word_art` (F), `payload_split` (F), `encode` (F), `ascii_art` (F) |
@@ -400,30 +400,30 @@ Refused partners, where few:
 | `to_word_art` | `word_art` | adv | 3 | 1 (word_list) |  | 8 | 1 | A | 1.3 | 187 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `sensitive_words` (F), `wording` (F), `tokenbreak` (F), `payload_split` (F), `encode` (F), `neutral_container` (F), `structural` (F), `ascii_art` (F), `dap` (M), `fake_turns` (FM), `fsh` (M) |
 | `to_adversarial_suffix_emoji` | `suffixes` | adv nat | 1 |  |  |  |  | A N | 1.0 | 286 | `ascii_art` (T) |
 | `to_adversarial_suffix_fragments` | `suffixes` | adv | 1 |  |  |  |  | A | 1.0 | 287 |  |
-| `to_adversarial_suffix_gcg_jbb_llama2_65` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_llama2_75` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_2` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_26` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_32` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_38` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_45` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_54` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_6` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_76` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_77` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_90` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_95` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_97` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_1` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_48` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_78` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_86` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_repo_demo_llama2` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_site_example` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_smoothllm_llama2_1` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_smoothllm_llama2_2` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_smoothllm_vicuna_1` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
-| `to_adversarial_suffix_gcg_smoothllm_vicuna_2` | `suffixes` | adv | 1 |  |  |  |  | A | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_llama2_65` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_llama2_75` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_2` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_26` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_32` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_38` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_45` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_54` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_6` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_76` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_77` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_90` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_95` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_97` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_1` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_48` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_78` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_86` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_repo_demo_llama2` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_site_example` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_smoothllm_llama2_1` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_smoothllm_llama2_2` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_smoothllm_vicuna_1` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
+| `to_adversarial_suffix_gcg_smoothllm_vicuna_2` | `suffixes` | adv | 1 |  |  |  |  | A E | 1.4 | 286 | `ascii_art` (T) |
 | `to_adversarial_suffix_punctuation` | `suffixes` | adv nat | 1 |  |  |  |  | A N | 1.0 | 287 |  |
 | `to_adversarial_suffix_unicode` | `suffixes` | adv | 1 |  |  |  |  | A | 1.0 | 286 | `ascii_art` (T) |
 | `to_payload_split` | `payload_split` | adv | 2 |  |  | 8 |  | A | 1.3 | 204 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `encode` (F), `ascii_art` (F), `dap` (M), `fake_turns` (FM), `fsh` (M), some `sensitive_words` (10 of 13, F) |
@@ -442,7 +442,7 @@ Refused partners, where few:
 | `to_leetspeak_advanced` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.0 | 219 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
 | `to_leetspeak_basic` | `encode` | adv nat | 1 |  | light latin |  |  | A N | 1.0 | 219 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
 | `to_leetspeak_intermediate` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.0 | 219 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_letter_spacing` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.4 | 219 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
+| `to_letter_spacing` | `encode` | adv | 2 |  | light | 4 opt |  | A E | 1.4 | 219 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
 | `to_lookalike_letters` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.2 | 218 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
 | `to_math_styled` | `encode` | adv | 2 |  | light latin | 4 opt |  | A | 1.2 | 218 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
 | `to_morse` | `encode` | adv | 3 |  | heavy latin | 4 opt |  | A E | 1.0 | 203 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
@@ -456,12 +456,12 @@ Refused partners, where few:
 | `to_unicode_escape` | `encode` | adv | 3 |  | heavy | 4 opt |  | A E | 1.0 | 203 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), `ascii_art` (T), `dap` (M), `fake_turns` (M), `fsh` (M), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
 | `to_url_encoding` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.2 | 219 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `word_art` (F), `payload_split` (F), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
 | `to_zero_width_noise` | `encode` | adv | 2 |  | light | 4 opt |  | A | 1.2 | 215 | `translation` (F), `dialect` (F), `code_switching` (F), `transliteration` (F), `romanization` (F), `tokenbreak` (T), `word_art` (F), `payload_split` (F), `ascii_art` (T), some `sensitive_words` (10 of 13, S), some `answer_format` (1 of 12, T) |
-| `to_code_comment` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N | 1.2 | 301 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_csv_row` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N | 1.2 | 301 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_email_message` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N | 1.2 | 301 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_log_entry` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N | 1.2 | 301 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_transcript_line` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N | 1.2 | 301 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
-| `to_yaml_document` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N | 1.2 | 301 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_code_comment` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 301 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_csv_row` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 301 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_email_message` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 301 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_log_entry` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 301 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_transcript_line` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 301 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
+| `to_yaml_document` | `neutral_container` | adv nat | 1 |  |  | 8 |  | A N E | 1.2 | 301 | `word_art` (F), `structural` (F), `ascii_art` (F), `fake_turns` (F) |
 | `to_json` | `structural` | adv | 2 |  |  | 10 |  | A E | 1.0 | 301 | `word_art` (F), `neutral_container` (F), `ascii_art` (F), `fake_turns` (F) |
 | `to_markdown` | `structural` | adv | 2 |  |  | 9 |  | A E | 1.0 | 301 | `word_art` (F), `neutral_container` (F), `ascii_art` (F), `fake_turns` (F) |
 | `to_xml` | `structural` | adv | 2 |  |  | 9 |  | A E | 1.0 | 301 | `word_art` (F), `neutral_container` (F), `ascii_art` (F), `fake_turns` (F) |
@@ -497,7 +497,7 @@ Refused partners, where few:
 | `to_tagged_prefix` | `answer_format` | adv | 2 |  |  | 8 |  | A | 1.3 | 221 | rest of `requests` (L), `persona_template` (T) |
 | `to_ask_answer_in_amharic` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.2 | 244 | rest of `requests` (L) |
 | `to_ask_answer_in_arabic` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_bengali` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
+| `to_ask_answer_in_bengali` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
 | `to_ask_answer_in_chinese` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.2 | 244 | rest of `requests` (L) |
 | `to_ask_answer_in_croatian` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
 | `to_ask_answer_in_czech` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
@@ -508,22 +508,22 @@ Refused partners, where few:
 | `to_ask_answer_in_hindi` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.2 | 244 | rest of `requests` (L) |
 | `to_ask_answer_in_hmong` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.2 | 244 | rest of `requests` (L) |
 | `to_ask_answer_in_japanese` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_javanese` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_khmer` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
+| `to_ask_answer_in_javanese` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
+| `to_ask_answer_in_khmer` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
 | `to_ask_answer_in_maori` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_nepali` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
+| `to_ask_answer_in_nepali` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
 | `to_ask_answer_in_russian` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_scots_gaelic` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
+| `to_ask_answer_in_scots_gaelic` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
 | `to_ask_answer_in_spanish` | `answer_language` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_swahili` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_thai` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
+| `to_ask_answer_in_swahili` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
+| `to_ask_answer_in_thai` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
 | `to_ask_answer_in_turkish` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
 | `to_ask_answer_in_vietnamese` | `answer_language` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
 | `to_ask_answer_in_yoruba` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.2 | 244 | rest of `requests` (L) |
-| `to_ask_answer_in_zulu` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_for_details` | `asking` | adv nat | 1 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
-| `to_ask_with_urgency` | `asking` | adv nat | 1 |  |  | 8 |  | A N | 1.3 | 244 | rest of `requests` (L) |
-| `to_innocuous_question` | `asking` | adv nat | 0 |  |  | 8 |  | A N | 1.0 | 244 | rest of `requests` (L) |
+| `to_ask_answer_in_zulu` | `answer_language` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
+| `to_ask_for_details` | `asking` | adv nat | 1 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
+| `to_ask_with_urgency` | `asking` | adv nat | 1 |  |  | 8 |  | A N E | 1.3 | 244 | rest of `requests` (L) |
+| `to_innocuous_question` | `asking` | adv nat | 0 |  |  | 8 |  | A N E | 1.0 | 244 | rest of `requests` (L) |
 | `to_benign_role_subject_helper` | `benign_role` | nat | 1 |  | applies | 12 |  | N | 1.2 | 244 | rest of `requests` (L) |
 | `to_benign_role_task_assistant` | `benign_role` | nat | 1 |  | applies | 12 |  | N | 1.2 | 244 | rest of `requests` (L) |
 | `to_benign_role_tutor` | `benign_role` | nat | 1 |  | applies | 12 |  | N | 1.2 | 244 | rest of `requests` (L) |
@@ -531,24 +531,24 @@ Refused partners, where few:
 | `to_continue_instructions` | `continuation` | adv | 3 |  |  | 8 |  | A E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
 | `to_continue_passage` | `continuation` | adv | 3 |  |  | 8 |  | A E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
 | `to_fill_in_blank` | `continuation` | adv | 3 |  |  | 8 |  | A E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_distractor_prefix_related` | `distractor_prefix` | adv | 2 |  |  | 8 |  | A | 1.0 | 242 | rest of `requests` (L), `model_distractors` (F) |
-| `to_distractor_prefix_task` | `distractor_prefix` | adv | 2 |  |  | 8 |  | A | 1.3 | 242 | rest of `requests` (L), `model_distractors` (F) |
-| `to_distractor_prefix_unrelated` | `distractor_prefix` | adv | 2 |  |  | 8 |  | A | 1.0 | 242 | rest of `requests` (L), `model_distractors` (F) |
-| `to_distractor_suffix_related` | `distractor_suffix` | adv | 2 |  |  | 8 |  | A | 1.0 | 242 | rest of `requests` (L), `model_distractors` (F) |
-| `to_distractor_suffix_task` | `distractor_suffix` | adv | 2 |  |  | 8 |  | A | 1.3 | 242 | rest of `requests` (L), `model_distractors` (F) |
-| `to_distractor_suffix_unrelated` | `distractor_suffix` | adv | 2 |  |  | 8 |  | A | 1.0 | 242 | rest of `requests` (L), `model_distractors` (F) |
-| `to_guardrail_block_question` | `guardrail_address` | adv | 1 |  | applies | 8 |  | A | 1.4 | 244 | rest of `requests` (L) |
-| `to_guardrail_classify_benign` | `guardrail_address` | adv | 1 |  | applies | 8 |  | A | 1.4 | 244 | rest of `requests` (L) |
-| `to_guardrail_security_override` | `guardrail_address` | adv | 1 |  | applies | 8 |  | A | 1.4 | 244 | rest of `requests` (L) |
-| `to_impersonate_authority` | `impersonation` | adv | 1 |  |  | 8 |  | A | 1.3 | 190 | rest of `requests` (L), `persuasion` (F), `cognitive` (F), `persona` (F), `persona_template` (F) |
-| `to_impersonate_developer` | `impersonation` | adv | 1 |  |  | 8 |  | A | 1.3 | 190 | rest of `requests` (L), `persuasion` (F), `cognitive` (F), `persona` (F), `persona_template` (F) |
-| `to_impersonate_good_person` | `impersonation` | adv | 1 |  |  | 8 |  | A | 1.0 | 190 | rest of `requests` (L), `persuasion` (F), `cognitive` (F), `persona` (F), `persona_template` (F) |
-| `to_critique` | `indirect` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_explain_to_child` | `indirect` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_proofread` | `indirect` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_rewrite` | `indirect` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_summarize` | `indirect` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
-| `to_translate_task` | `indirect` | adv nat | 2 |  |  | 8 |  | A N | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_distractor_prefix_related` | `distractor_prefix` | adv | 2 |  |  | 8 |  | A E | 1.0 | 242 | rest of `requests` (L), `model_distractors` (F) |
+| `to_distractor_prefix_task` | `distractor_prefix` | adv | 2 |  |  | 8 |  | A E | 1.3 | 242 | rest of `requests` (L), `model_distractors` (F) |
+| `to_distractor_prefix_unrelated` | `distractor_prefix` | adv | 2 |  |  | 8 |  | A E | 1.0 | 242 | rest of `requests` (L), `model_distractors` (F) |
+| `to_distractor_suffix_related` | `distractor_suffix` | adv | 2 |  |  | 8 |  | A E | 1.0 | 242 | rest of `requests` (L), `model_distractors` (F) |
+| `to_distractor_suffix_task` | `distractor_suffix` | adv | 2 |  |  | 8 |  | A E | 1.3 | 242 | rest of `requests` (L), `model_distractors` (F) |
+| `to_distractor_suffix_unrelated` | `distractor_suffix` | adv | 2 |  |  | 8 |  | A E | 1.0 | 242 | rest of `requests` (L), `model_distractors` (F) |
+| `to_guardrail_block_question` | `guardrail_address` | adv | 1 |  | applies | 8 |  | A E | 1.4 | 244 | rest of `requests` (L) |
+| `to_guardrail_classify_benign` | `guardrail_address` | adv | 1 |  | applies | 8 |  | A E | 1.4 | 244 | rest of `requests` (L) |
+| `to_guardrail_security_override` | `guardrail_address` | adv | 1 |  | applies | 8 |  | A E | 1.4 | 244 | rest of `requests` (L) |
+| `to_impersonate_authority` | `impersonation` | adv | 1 |  |  | 8 |  | A E | 1.3 | 190 | rest of `requests` (L), `persuasion` (F), `cognitive` (F), `persona` (F), `persona_template` (F) |
+| `to_impersonate_developer` | `impersonation` | adv | 1 |  |  | 8 |  | A E | 1.3 | 190 | rest of `requests` (L), `persuasion` (F), `cognitive` (F), `persona` (F), `persona_template` (F) |
+| `to_impersonate_good_person` | `impersonation` | adv | 1 |  |  | 8 |  | A E | 1.0 | 190 | rest of `requests` (L), `persuasion` (F), `cognitive` (F), `persona` (F), `persona_template` (F) |
+| `to_critique` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_explain_to_child` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_proofread` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_rewrite` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_summarize` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
+| `to_translate_task` | `indirect` | adv nat | 2 |  |  | 8 |  | A N E | 1.0 | 229 | rest of `requests` (L), `dap` (F), `fake_turns` (F), `fsh` (F) |
 | `to_smalltalk_prefix` | `smalltalk_prefix` | nat | 0 |  |  | 20 |  | N | 1.2 | 244 | rest of `requests` (L) |
 | `to_smalltalk_suffix` | `smalltalk_suffix` | nat | 0 |  |  | 20 |  | N | 1.2 | 244 | rest of `requests` (L) |
 | `to_use_future_tense` | `temporal` | adv | 3 |  |  | 8 |  | A | 1.3 | 242 | rest of `requests` (L), `tense_rewrite` (F) |
@@ -565,9 +565,9 @@ Refused partners, where few:
 | `to_dap_selected_long` | `dap` | adv | 3 | 1 | benign |  | 1 | A E | 1.0 | 203 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
 | `to_dap_selected_many` | `dap` | adv | 3 | 1 | benign |  | 1 | A | 1.2 | 199 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `typos` (T), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
 | `to_dap_selected_short` | `dap` | adv | 3 | 1 | benign |  | 1 | A E | 1.0 | 203 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_fake_assistant_turn` | `fake_turns` | adv | 2 |  |  | 8 |  | A | 1.3 | 194 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (FM), `payload_split` (FM), `neutral_container` (F), `structural` (F), `ascii_art` (M), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_fake_history` | `fake_turns` | adv | 2 |  |  | 8 |  | A | 1.3 | 194 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (FM), `payload_split` (FM), `neutral_container` (F), `structural` (F), `ascii_art` (M), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
-| `to_fake_system_turn` | `fake_turns` | adv | 2 |  |  | 8 |  | A | 1.3 | 194 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (FM), `payload_split` (FM), `neutral_container` (F), `structural` (F), `ascii_art` (M), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_fake_assistant_turn` | `fake_turns` | adv | 2 |  |  | 8 |  | A E | 1.3 | 194 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (FM), `payload_split` (FM), `neutral_container` (F), `structural` (F), `ascii_art` (M), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_fake_history` | `fake_turns` | adv | 2 |  |  | 8 |  | A E | 1.3 | 194 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (FM), `payload_split` (FM), `neutral_container` (F), `structural` (F), `ascii_art` (M), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
+| `to_fake_system_turn` | `fake_turns` | adv | 2 |  |  | 8 |  | A E | 1.3 | 194 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (FM), `payload_split` (FM), `neutral_container` (F), `structural` (F), `ascii_art` (M), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
 | `to_fsh_random_long` | `fsh` | adv | 2 |  | benign |  |  | A E | 1.0 | 203 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
 | `to_fsh_random_many` | `fsh` | adv | 3 |  | benign |  |  | A | 1.2 | 199 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `typos` (T), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
 | `to_fsh_random_short` | `fsh` | adv | 2 |  | benign |  |  | A E | 1.0 | 203 | rest of `manipulation` (L), `cognitive` (F), `framing` (F), `persona` (F), `persona_template` (F), `translation` (M), `wording` (M), `word_art` (M), `payload_split` (M), `ascii_art` (FM), `continuation` (F), `indirect` (F), some `encode` (10 of 38, M) |
@@ -584,7 +584,7 @@ Refused partners, where few:
 | `adversarial_no_translation` | adversarial |  | `{"translation": false}` | yes | 255 | 32 |
 | `natural` | natural |  |  | yes | 96 | 16 |
 | `natural_translation` | natural |  | `{"translation": true}` | yes | 126 | 18 |
-| `eval.adversarial` | adversarial | eval | `eval.json` | yes | 36 | 10 |
+| `eval.adversarial` | adversarial | eval | `eval.json` | yes | 126 | 22 |
 | `eval.natural` | natural | eval | `eval.json` | no | 0 | 0 |
 | `training.adversarial` | adversarial | training | `training.json` | yes | 285 | 34 |
 | `training.natural` | natural | training | `training.json` | yes | 96 | 16 |
@@ -764,14 +764,26 @@ Rounds:
 ### Pool `eval.adversarial`
 
 - `framing` (5): `to_fictional_world`, `to_noble_goal`, `to_nefarious_goal`, `to_high_stake`, `to_no_moral_constraints`
+- `persona_template` (23): `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template`, `to_caring_grandma_persona_template`, `to_worried_parent_persona_template`, `to_loyal_friend_persona_template`, `to_licensed_professional_persona_template`, `to_official_investigator_persona_template`, `to_research_scientist_persona_template`, `to_game_engine_persona_template`, `to_terminal_simulator_persona_template`, `to_simulation_rules_persona_template`, `to_penalty_game_persona_template`, `to_tagged_speaker_persona_template`, `to_character_reset_persona_template`
 - `translation` (8): `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`
-- `encode` (5): `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`, `to_morse`, `to_braille`
+- `transliteration` (4): `to_cyrillic_transliteration`, `to_greek_transliteration`, `to_devanagari_transliteration`, `to_arabic_transliteration`
+- `suffixes` (24): `to_adversarial_suffix_gcg_site_example`, `to_adversarial_suffix_gcg_repo_demo_llama2`, `to_adversarial_suffix_gcg_smoothllm_llama2_1`, `to_adversarial_suffix_gcg_smoothllm_llama2_2`, `to_adversarial_suffix_gcg_smoothllm_vicuna_1`, `to_adversarial_suffix_gcg_smoothllm_vicuna_2`, `to_adversarial_suffix_gcg_jbb_llama2_65`, `to_adversarial_suffix_gcg_jbb_llama2_75`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_78`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt4_86`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_1`, `to_adversarial_suffix_gcg_jbb_vicuna_gpt35_48`, `to_adversarial_suffix_gcg_jbb_vicuna_2`, `to_adversarial_suffix_gcg_jbb_vicuna_6`, `to_adversarial_suffix_gcg_jbb_vicuna_26`, `to_adversarial_suffix_gcg_jbb_vicuna_32`, `to_adversarial_suffix_gcg_jbb_vicuna_38`, `to_adversarial_suffix_gcg_jbb_vicuna_45`, `to_adversarial_suffix_gcg_jbb_vicuna_54`, `to_adversarial_suffix_gcg_jbb_vicuna_76`, `to_adversarial_suffix_gcg_jbb_vicuna_77`, `to_adversarial_suffix_gcg_jbb_vicuna_90`, `to_adversarial_suffix_gcg_jbb_vicuna_95`, `to_adversarial_suffix_gcg_jbb_vicuna_97`
+- `encode` (6): `to_base64`, `to_unicode_escape`, `to_ascii_ordinal`, `to_morse`, `to_braille`, `to_letter_spacing`
+- `neutral_container` (6): `to_code_comment`, `to_yaml_document`, `to_csv_row`, `to_email_message`, `to_transcript_line`, `to_log_entry`
 - `structural` (3): `to_json`, `to_xml`, `to_markdown`
 - `ascii_art` (1): `to_ascii_art`
 - `answer_format` (1): `to_refusal_then_comply`
+- `answer_language` (8): `to_ask_answer_in_swahili`, `to_ask_answer_in_thai`, `to_ask_answer_in_khmer`, `to_ask_answer_in_nepali`, `to_ask_answer_in_zulu`, `to_ask_answer_in_scots_gaelic`, `to_ask_answer_in_bengali`, `to_ask_answer_in_javanese`
+- `asking` (3): `to_innocuous_question`, `to_ask_for_details`, `to_ask_with_urgency`
 - `continuation` (4): `to_continue_passage`, `to_complete_story`, `to_fill_in_blank`, `to_continue_instructions`
+- `distractor_prefix` (3): `to_distractor_prefix_related`, `to_distractor_prefix_unrelated`, `to_distractor_prefix_task`
+- `distractor_suffix` (3): `to_distractor_suffix_related`, `to_distractor_suffix_unrelated`, `to_distractor_suffix_task`
+- `guardrail_address` (3): `to_guardrail_block_question`, `to_guardrail_classify_benign`, `to_guardrail_security_override`
+- `impersonation` (3): `to_impersonate_good_person`, `to_impersonate_authority`, `to_impersonate_developer`
+- `indirect` (6): `to_summarize`, `to_proofread`, `to_critique`, `to_translate_task`, `to_explain_to_child`, `to_rewrite`
 - `temporal` (1): `to_use_past_tense`
 - `dap` (4): `to_dap_random_short`, `to_dap_random_long`, `to_dap_selected_short`, `to_dap_selected_long`
+- `fake_turns` (3): `to_fake_system_turn`, `to_fake_assistant_turn`, `to_fake_history`
 - `fsh` (4): `to_fsh_random_short`, `to_fsh_random_long`, `to_fsh_selected_short`, `to_fsh_selected_long`
 
 Rounds:
@@ -1137,8 +1149,8 @@ No unit draws two families.
 | Groups | 3 |
 | Entry types | `harmful` |
 | Seed | 42 |
-| Pool size | 36 |
-| Techniques drawn | 36 |
+| Pool size | 126 |
+| Techniques drawn | 126 |
 | Never drawn |  |
 | Mean techniques per unit | 1.5 |
 
@@ -1149,34 +1161,34 @@ No unit draws two families.
 
 | Layers touched | Units |
 |---|---|
-| 1 | 1634 |
-| 2 | 1366 |
+| 1 | 1590 |
+| 2 | 1410 |
 
 | Layer | Units |
 |---|---|
 | `rewrite` | 0 |
-| `hacking` | 427 |
-| `obfuscation` | 1986 |
-| `requests` | 1276 |
-| `manipulation` | 677 |
+| `hacking` | 377 |
+| `obfuscation` | 1594 |
+| `requests` | 1875 |
+| `manipulation` | 564 |
 
 | Family pair | Units |
 |---|---|
-| `framing` + `translation` | 211 |
-| `continuation` + `translation` | 150 |
-| `ascii_art` + `continuation` | 111 |
-| `temporal` + `translation` | 100 |
-| `structural` + `translation` | 97 |
-| `encode` + `framing` | 88 |
-| `dap` + `structural` | 84 |
-| `answer_format` + `translation` | 83 |
-| `fsh` + `structural` | 81 |
-| `answer_format` + `fsh` | 75 |
-| `answer_format` + `dap` | 67 |
-| `dap` + `temporal` | 62 |
-| `fsh` + `temporal` | 57 |
-| `ascii_art` + `temporal` | 54 |
-| `answer_format` + `ascii_art` | 50 |
+| `indirect` + `translation` | 39 |
+| `asking` + `translation` | 34 |
+| `distractor_suffix` + `translation` | 34 |
+| `continuation` + `translation` | 31 |
+| `impersonation` + `translation` | 28 |
+| `guardrail_address` + `translation` | 27 |
+| `temporal` + `translation` | 26 |
+| `distractor_prefix` + `translation` | 24 |
+| `answer_format` + `translation` | 23 |
+| `answer_language` + `translation` | 23 |
+| `distractor_prefix` + `fake_turns` | 21 |
+| `framing` + `translation` | 21 |
+| `ascii_art` + `continuation` | 18 |
+| `answer_format` + `fsh` | 17 |
+| `continuation` + `framing` | 17 |
 
 ## Rules
 

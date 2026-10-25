@@ -103,9 +103,12 @@ def test_every_hinted_encoding_draws_from_its_own_optional_pool():
     check_pools(REGISTERED[name].variant_pool for name in HINTED)
 
 
-def test_the_eval_pool_s_five_encodings_have_hints_and_the_natural_one_has_none():
+def test_the_eval_pool_s_encodings_have_hints_and_the_natural_one_has_none():
+    """The eval pool's five heavy encodings, and the letter spacing eval
+    pool v2 admitted: all six hinted."""
     eval_pool = set(json.loads(_EVAL_POOL.read_text(encoding="utf-8")))
-    assert eval_pool & set(REGISTERED) == set(EVAL_FIVE)
+    assert eval_pool & set(REGISTERED) == {*EVAL_FIVE, "to_letter_spacing"}
+    assert eval_pool & set(REGISTERED) <= set(E._HINTS)
     assert set(EVAL_FIVE) <= set(E._HINTS)
     assert set(REGISTERED) >= UNHINTED
     assert not UNHINTED & set(E._HINTS)

@@ -14,7 +14,7 @@ Augment the accepted inputs with technique combinations, in two kinds:
 
 These are the packaged defaults, which a `training` run takes: both kinds
 are on. An `eval` run's dataset type attacks the harmful inputs only, with
-36 hard techniques in two count-driven rounds, one technique then two, and
+126 techniques in 22 families (eval pool v2) in two count-driven rounds, one technique then two, and
 switches the natural kind off
 ([configuration.md](../configuration.md#dataset-types)). The recipe's
 `augmentations` section, over the dataset type's, or the front's
@@ -268,7 +268,7 @@ type's pool included, and changes the text a seed draws: the font changes for so
 texts from about 40 characters and for most from about 90, a text of about
 830 characters or more is rejected where it used to be drawn, and so were
 most inputs a `heavy` encoding lengthened first, a pairing a fresh plan no
-longer draws since the eval release
+longer draws since the first eval release
 ([techniques.md](../techniques.md#what-the-families-do) has the figures).
 A plan kept across this change mixes rows drawn without the cap, saved
 before, and rows drawn with it, run after: a replayed plan gives the same
@@ -332,7 +332,12 @@ transliterations, ten romanizations). An
 adversarial plan kept from an earlier spec resumes with the growth WARNING
 naming them; a natural plan names the 24 transliteration, code-switching and
 romanization techniques, and Yoruba and the six dialects only when its
-`translation` switch is on, and the eval type's pool does not change.
+`translation` switch is on, and the eval type's pool did not change with
+spec 1.4. Eval pool v2, an eval review after it, admitted the persona
+templates, the published suffixes, the letter spacing, the guardrail
+address and the transliterations, among others
+([the release note](../configuration.md#release-notes)); a kept eval plan
+raises on resume, naming `pool`, and runs again with `resume=False`.
 
 ## Rejected and failed units
 
@@ -353,7 +358,7 @@ returns `(text, info, accepted, reasoning)`. It loads the benign data when a
 technique needs it, generating what the cache lacks with `client`; its
 `prompt_dir` reaches the techniques and the benign data. `combine_techniques` sorts the techniques into layer
 order (the manipulation layer last, around the finished question, since the
-eval release) but does not check the compatibility rules.
+first eval release) but does not check the compatibility rules.
 
 ```python
 from redact.jailbreak import apply_combination, combine_techniques

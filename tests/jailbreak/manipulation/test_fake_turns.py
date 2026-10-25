@@ -88,11 +88,13 @@ def test_a_plan_of_them_needs_no_benign_data(tmp_path):
     assert table["rows"].sum() == 6 and len(table) == 3 * 8     # noqa: PLR2004
 
 
-def test_neither_the_natural_kind_nor_the_eval_type_draws_them():
+def test_the_attacks_and_the_eval_type_draw_them_and_the_natural_kind_does_not():
+    """Eval pool v2 admitted the family whole."""
     from redact.recipe import load_dataset_type
 
     eval_section = load_dataset_type("eval")["augmentations"]
-    for pool in (technique_pool(resolve(None, "natural")),
+    natural = technique_pool(resolve(None, "natural"))
+    assert not [fn for fn in natural if "fake_turns" in fn.families]
+    for pool in (technique_pool(resolve(None, "adversarial")),
                  technique_pool(resolve(eval_section, "adversarial"))):
-        assert not [fn for fn in pool if "fake_turns" in fn.families]
-    assert set(_FNS) <= set(technique_pool(resolve(None, "adversarial")))
+        assert [fn for fn in pool if "fake_turns" in fn.families] == list(_FNS)

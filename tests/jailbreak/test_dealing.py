@@ -774,7 +774,17 @@ def test_a_planned_request_obfuscation_that_translates_holds_nothing_to_translat
 # round-2 units that hold fsh or dap beside to_json, to_xml, to_markdown,
 # to_refusal_then_comply or to_use_past_tense (40 of the 291 pairs) name it
 # last; a plan of 3,000 inputs holds 858 such units of its 3,000 round-2 ones.
-_PINNED_EVAL_DRAWS = "83b556e3453a5b709b14907db5d649e4b7e289a4e61796af2be771ddbc76d221"
+# Eval pool v2 (the third eval release, an eval review) moved it on purpose:
+# eval.json admits eleven pure families (persona_template, indirect, the two
+# distractors, impersonation, asking, guardrail_address, neutral_container,
+# transliteration, fake_turns, and suffixes less its four noise suffixes),
+# to_letter_spacing and the eight answer languages of its translations, so
+# the pool goes from 36 techniques in 10 families to 126 in 22 and its pairs
+# from 291 of 630 to 5,613 of 7,875 (no rule changed: the 291 are among
+# them). Every group deals among 22 families instead of 10, so round 1 deals
+# 281 of its 300 units another technique (19 draw what they drew) and round 2
+# all 300 units another pair.
+_PINNED_EVAL_DRAWS = "f075952d32211b4dc4a831be81e1c312c9145ac020634086eeaa195b45d14e1c"
 
 
 def _eval_draws(section: dict) -> list[list[str]]:
@@ -797,3 +807,24 @@ def test_a_count_round_ignores_the_request_obfuscation():
     """The eval type's rounds draw an exact count, which never reads the
     switch: on, they draw what they draw off."""
     assert _eval_draws({"allow_request_obfuscation": True}) == _eval_draws({})
+
+
+def test_every_eval_technique_is_drawn_in_3000_units_and_its_families_evenly():
+    """Eval pool v2 deals 22 families: in 1,500 inputs (3,000 units of its
+    two rounds) in three groups at its seed every one of its 126 techniques
+    is drawn (5 times at the least), each family but translation, weighted
+    3, holds an even share of the rows, and translation three times one."""
+    from redact.recipe import load_dataset_type
+
+    base = load_dataset_type("eval")["augmentations"]
+    dealt, pool = simulate.deal_kind({}, 1500, groups=3, seed=43, base=base)
+    drawn = Counter(name for names in dealt for name in names)
+    assert sorted(drawn) == sorted(fn.__name__ for fn in pool)
+    assert len(drawn) == 126 and min(drawn.values()) >= 5   # noqa: PLR2004
+    family_of = {fn.__name__: fn.families[0] for fn in pool}
+    rows = Counter(family for names in dealt
+                   for family in {family_of[name] for name in names})
+    even = len(dealt) * 3 / 2 / 24      # 1.5 picks a unit over 24 weights
+    assert {family for family, count in rows.items()
+            if abs(count / (3 if family == "translation" else 1) - even) > 0.05 * even
+            } == set()

@@ -312,11 +312,16 @@ contract.
      The same file checks the attack pool's 285 techniques in 34 families.
    - **The eval pool.** `configs/dataset_types/eval.json` allows whole
      families (`encode`, `fsh`, `dap`, `framing`, `structural`, `ascii_art`,
-     `continuation`), so a technique added to one of them joins
+     `continuation` and, since eval pool v2, `persona_template`,
+     `indirect`, `distractor_prefix`, `distractor_suffix`,
+     `impersonation`, `asking`, `guardrail_address`, `neutral_container`,
+     `transliteration`, `fake_turns`, `suffixes`), so a technique added to
+     one of them (a new persona frame, a published suffix row) joins
      the eval attacks unless `eval.json` denies it under
-     `techniques.deny`; of `temporal` and `answer_format` it names single
-     techniques under `techniques.allow`, so a new member of those does not
-     join. `tests/fixtures/eval_pool.json` pins the 36 names the
+     `techniques.deny`; of `temporal`, `answer_format` and
+     `answer_language` it names single techniques under
+     `techniques.allow`, so a new member of those does not join.
+     `tests/fixtures/eval_pool.json` pins the 126 names the
      eval type draws, and `tests/jailbreak/test_pool.py` fails until you
      decide: deny the technique in `eval.json` (the eval pool is pinned, so
      this is the usual answer), or add its name to the fixture in an eval
@@ -337,9 +342,11 @@ contract.
    a technique refused where its family's others are not, changes a line:
    regenerate with `PYTHONPATH=src python -m tests.jailbreak.test_family_pairs`.
    `tests/jailbreak/test_eval_pairs.py` pins, in
-   `tests/fixtures/eval_pairs.json`, which pairs of the eval pool's 36
-   techniques the rules admit: a rule that moves the eval type's draws shows
-   as a diff of that file, regenerated with
+   `tests/fixtures/eval_pairs.json`, which pairs of the eval pool's 126
+   techniques the rules admit (each family's techniques, then per family
+   pair all, none or the shorter list of pairs admitted or refused, then the
+   pairs of the first pool's 36 one per line): a rule that moves the eval
+   type's draws shows as a diff of that file, regenerated with
    `PYTHONPATH=src python -m tests.jailbreak.test_eval_pairs` in an eval
    review.
    A technique that draws a variant from a pool (it has a `variant_pool`)

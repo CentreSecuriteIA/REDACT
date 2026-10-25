@@ -273,6 +273,42 @@ def test_a_stale_eval_copy_names_what_it_adds_to_the_eval_pool(tmp_path, caplog)
     assert "overwrite=True" in record.getMessage()
 
 
+def _eval_before_v2() -> dict:
+    """The packaged eval.json as a copy made before eval pool v2 held it: the
+    first pool's seven families, no answer language or suffix, the letter
+    spacing denied."""
+    data = json.loads((paths.configs_dir() / "dataset_types" / "eval.json")
+                      .read_text(encoding="utf-8"))
+    adversarial = data["augmentations"]["adversarial"]
+    adversarial["families"]["allow"] = [
+        "encode", "fsh", "dap", "framing", "structural", "ascii_art", "continuation"]
+    adversarial["techniques"]["allow"] = [
+        name for name in adversarial["techniques"]["allow"]
+        if not name.startswith("to_ask_answer_in_")]
+    adversarial["techniques"]["deny"] = [
+        *(name for name in adversarial["techniques"]["deny"]
+          if not name.startswith("to_adversarial_suffix_")), "to_letter_spacing"]
+    return data
+
+
+def test_a_copy_from_before_eval_pool_v2_keeps_the_first_pool_and_is_not_warned_about(
+        tmp_path, caplog):
+    """The check names what a copy draws beyond the packaged eval type, not
+    what it lacks, so a copy of the release before keeps the first 36
+    techniques silently (the release note says so)."""
+    from redact.jailbreak.pool import technique_pool
+    from tests.jailbreak.test_eval_pairs import FIRST_POOL
+
+    _write(tmp_path / "dataset_types" / "eval.json", _eval_before_v2())
+    base = load_dataset_type("eval", tmp_path)["augmentations"]
+    pool = technique_pool(resolve(None, "adversarial", base=base, config_dir=tmp_path))
+    assert sorted(fn.__name__ for fn in pool) == sorted(FIRST_POOL)
+    assert extra_eval_techniques(tmp_path) == []
+    with caplog.at_level("WARNING", logger="redact.config_overlay"):
+        report_config_sources(tmp_path, verbose=False, dataset_type="eval")
+    assert caplog.records == []
+
+
 def test_only_an_eval_run_is_warned_about_its_eval_copy(tmp_path, caplog):
     _write(tmp_path / "dataset_types" / "eval.json", _eval_before_growth())
     with caplog.at_level("WARNING", logger="redact.config_overlay"):

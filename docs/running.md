@@ -442,6 +442,21 @@ in its pool, is skipped with a WARNING and cleared the same way.
 - `eval_outputs.csv`'s `label` is now `<entry_type>_<output_label>`, while
   the other eval files keep the entry types ([build](stages/build.md#eval-mode)).
 
+**Eval runs from before eval pool v2.** The eval type's attacks draw 126
+techniques in 22 families, where they drew 36 in 10
+([the release note](configuration.md#release-notes)).
+
+- A kept eval jailbreak plan stops a resume with a `ValueError` naming
+  `['pool']`: the eval section admits families older than the plan. Run the
+  jailbreak stage with `"resume": false`; the other stages and the eval
+  inputs are as they were. Eval files built before are not comparable with
+  those built after.
+- A `config_dir` written by `scaffold_setup` before the change holds a copy
+  of the former `dataset_types/eval.json`, read in place of the packaged
+  one: its eval runs keep the first pool, and nothing warns. Write the
+  folder again with `scaffold_setup(..., overwrite=True)`, delete the file,
+  or copy the packaged adversarial lists into it.
+
 ## What lands on disk
 
 A training run of all six stages, under `<data_dir>`:
@@ -617,7 +632,7 @@ rate. [internals/telemetry.md](internals/telemetry.md) lists the events.
 | WARNING `.../jailbreak/augmentations.json: adversarial has unknown key(s) [...], which are ignored ...` (or `adversarial.layers`, the file itself) | A `config_dir` copy of `augmentations.json` holds a key the section does not have, such as a typo | Correct or remove the key; until then it does nothing |
 | `ValueError: .../jailbreak/augmentations.json: natural lacks [...]` (or `lacks natural_only_families`, `must be an object`, `gives exact_techniques`) | A `config_dir` copy of `augmentations.json` that cannot be read as a default section | Write the key as the library's file does, delete the copy, or `scaffold_setup(..., overwrite=True)`, which replaces your edits |
 | INFO `configs: the natural kind of jailbreak/augmentations.json in ... does not allow ..., which the library's allows ...` | A `config_dir` copy of `augmentations.json` made before the library allowed those natural families; its variations do not draw them | Add them to the copy's natural `families.allow`, delete the copy, or `scaffold_setup(..., overwrite=True)`, which replaces your edits ([configuration.md](configuration.md#your-own-config-folder)) |
-| WARNING `configs: the eval attacks of ... draw N technique(s) the library's eval type does not: ...` | An eval run whose `config_dir` holds a copy of `dataset_types/eval.json` made before the library added those techniques to a family it allows (21 for a copy of the previous release); the eval pool is wider than the pinned 36 | Delete the copy, `scaffold_setup(..., overwrite=True)`, which replaces your edits, or add the names to its adversarial `techniques.deny` ([configuration.md](configuration.md#release-notes)) |
+| WARNING `configs: the eval attacks of ... draw N technique(s) the library's eval type does not: ...` | An eval run whose `config_dir` holds a copy of `dataset_types/eval.json` made before the library added those techniques to a family it allows (21 for a copy of the previous release); the eval pool is wider than the pinned 126 | Delete the copy, `scaffold_setup(..., overwrite=True)`, which replaces your edits, or add the names to its adversarial `techniques.deny` ([configuration.md](configuration.md#release-notes)) |
 | WARNING `Variations: left out N benign or dual-use benign rows made with a technique the natural kind does not draw (...)` | `variations.csv` holds rows of a natural plan made before the `kinds` gate; the build leaves the benign ones out | Run the natural kind with `"resume": false` and build again |
 | `ValueError: The plan names the technique '...', which no registered technique implements` | A kept plan names a technique that was renamed or removed | Run the jailbreak stage with `"resume": false` |
 | `ValueError: Benign data not found and no client provided for generation ...` | `auto_generate_benign` is false and there is no benign file | Run once with it on, or set `benign_path` |

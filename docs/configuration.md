@@ -59,30 +59,39 @@ types: a recipe naming one stops when it loads, before any stage runs.
 | `augmentations` | none: the packaged default | the adversarial kind below; `natural` off |
 
 The eval adversarial kind attacks the harmful inputs only, with a pool of
-hard techniques whose label stays certain: the families `encode` (less the
-22 encodings `techniques.deny` names, the seven light ones of before spec 1.2
-and the fifteen it added, which leaves its five original `heavy` ones; and
-less `sensitive_words`), `fsh` and `dap` (less
-their four many-shot variants), `framing`, `structural`, `ascii_art`,
-`continuation`; the eight low-resource
-translations (`to_swahili`, `to_thai`, `to_khmer`, `to_nepali`,
-`to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`), with
-`"translation": true` and `family_weights` `{"translation": 3}`; and
-`to_refusal_then_comply` and `to_use_past_tense`, named under
-`techniques.allow` rather than their families, so a technique the library
-adds to `answer_format` or `temporal` does not reach the eval pool (the
-families it allows whole name each later member under `techniques.deny`).
+techniques whose label stays certain (eval pool v2, 126 techniques in 22
+families; [the release note](#release-notes) says what each release
+admitted): the families `encode` (less the 22 encodings `techniques.deny`
+names, the seven light ones of before spec 1.2 and the fifteen it added,
+which leaves its five original `heavy` ones and spec 1.4's
+`to_letter_spacing`; and less `sensitive_words`), `fsh` and `dap` (less their four many-shot
+variants), `framing`, `structural`, `ascii_art`, `continuation`, and since
+eval pool v2 `persona_template`, `indirect`, `distractor_prefix`,
+`distractor_suffix`, `impersonation`, `asking`, `guardrail_address`,
+`neutral_container`, `transliteration`, `fake_turns` and `suffixes` (less
+its four noise suffixes, which `techniques.deny` names, so the 24 published
+strings stay); the eight low-resource translations (`to_swahili`,
+`to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`,
+`to_bengali`, `to_javanese`), with `"translation": true` and
+`family_weights` `{"translation": 3}`; the eight answer languages of those
+translations (`to_ask_answer_in_swahili` ... `to_ask_answer_in_javanese`,
+since v2); and `to_refusal_then_comply` and `to_use_past_tense`. The answer
+languages and these two are named under `techniques.allow` rather than
+their families, so a technique the library adds to `answer_language`,
+`answer_format` or `temporal` does not reach the eval pool (the families it
+allows whole name each later member under `techniques.deny`).
 It runs two count-driven rounds, one technique
 then two (`rounds` `[{"exact_techniques": 1}, {"exact_techniques": 2}]`),
 with `allow_request_obfuscation` false, written out since the packaged
 attacks have it true; a count round never reads it, so either way its draws
 are those made before the packaged attacks turned it on.
 
-The eval attacks are *pinned*: the 36 techniques, the two rounds and the text
-each technique draws for a seed stay the same from release to release, so the
-results of an eval run stay comparable; a test fails if one changes
+The eval attacks are *pinned*: the 126 techniques, the two rounds and the
+text each technique draws for a seed stay the same from release to release,
+so the results of an eval run stay comparable; a test fails if one changes
 ([techniques.md](techniques.md#the-eval-pool) says what is pinned and how it
-changes).
+changes). They move only in an eval review: eval pool v2 was one, and eval
+files built before it are not comparable with those built after.
 
 Every eval input is explicit (`inputs.axes`: `{"directness": {"explicit": 1,
 "implicit": 0, "euphemistic": 0}}`): an implicit or euphemistic request is
@@ -693,6 +702,139 @@ the default) and in `params["jailbreaks"]`.
 
 ### Release notes
 
+**Release note: eval pool v2 (the third eval release).** An eval review
+widens the `eval` type's attacks from 36 techniques in 10 families to 126 in
+22 (`tests/fixtures/eval_pool.json`), admitting the pure families the eval
+never drew. Only the adversarial lists of `eval.json` change
+(`families.allow`, `techniques.allow`, `techniques.deny`): no rule, no
+technique and no spec version (it stays 1.4), and the 36 of the first pool
+stay. None of the 90 techniques added calls a model or needs the benign
+pairs, and each keeps the harmful request in its text, so the label stays
+certain. Admitted, and why:
+
+- `persona_template` (23): a persona's fixed frame with one of six
+  mechanics; the eval held no persona row, since the `persona` family has a
+  model write a scene.
+- `indirect` (6), `distractor_prefix` (3), `distractor_suffix` (3),
+  `impersonation` (3), `asking` (3): the request families the eval never
+  drew, each a template around the request.
+- `guardrail_address` (3): a line addressed to the classifier itself, the
+  attack aimed at what an eval measures; it applies to every eval input
+  (the attacks take the harmful ones only).
+- `neutral_container` (6): the request inside a code comment, a YAML
+  document, a CSV row, an email, a transcript line or a log entry, beside
+  `structural`'s three wrappers (the two families refuse each other).
+- `transliteration` (4): the English prompt written in Cyrillic, Greek,
+  Devanagari or Arabic letters by a fixed table; refused beside a
+  translation.
+- `fake_turns` (3): an invented system turn, assistant turn or earlier
+  exchange; no benign data.
+- `suffixes`: the 24 published adversarial suffixes of
+  `suffix_strings.json`; `techniques.deny` names the family's four noise
+  suffixes (random characters, not published attacks; two of them are the
+  natural kind's).
+- `to_letter_spacing` (`encode`, light, any script, hinted): taken out of
+  `techniques.deny`.
+- The eight answer languages of the eval's translations,
+  `to_ask_answer_in_swahili`, `_thai`, `_khmer`, `_nepali`, `_zulu`,
+  `_scots_gaelic`, `_bengali` and `_javanese`, named under
+  `techniques.allow` (not the whole `answer_language` family): the answer
+  asked for in the low-resource languages the eval already translates into.
+
+Not admitted, and why:
+
+- `sensitive_words`, `tokenbreak`, `wording`, `word_art`, `payload_split`:
+  a model marks the words or cuts the text, and 56 to 74% of their draws
+  were measured discarded, so what an eval holds would follow the marking
+  model.
+- `typos`, `casual_writing`, `noise`: surface noise, a natural variation
+  more than an attack (`typos` is also a model rewrite).
+- `cognitive`, `persona`: a model writes the scene, 26 to 32% discarded;
+  `persona_template` stands in for them.
+- `code_switching`, `romanization`, `dialect`: model-written, and their
+  quality cannot be checked offline (no native speaker reads them).
+- The `rewrite` layer: model rewrites, off in every packaged kind.
+- The natural-only families (`smalltalk_prefix`, `smalltalk_suffix`,
+  `benign_role`): no attack may draw them.
+- The many-shot `fsh` and `dap` variants: denied already.
+- The other ten `answer_format` and two `temporal` techniques: the eval
+  keeps naming `to_refusal_then_comply` and `to_use_past_tense` alone; the
+  review did not take up the others.
+- The other 18 answer languages, the four noise suffixes and the 22 other
+  encodings stay out as before.
+
+| Family | Techniques, v1 → v2 | Rows per technique, v1 → v2 | Share of the rows, v1 → v2 |
+|---|---|---|---|
+| `translation` | 8 → 8 | 25-26 → 13-15 | 33.8% → 18.7% |
+| `encode` | 5 → 6 | 13-14 → 6-7 | 11.3% → 6.3% |
+| `fsh`, `dap` | 4, 4 → 4, 4 | 16-18 → 9-10 | 11.3% each → 6.3% each |
+| `framing` | 5 → 5 | 17 → 7-8 | 14.2% → 6.2% |
+| `structural` | 3 → 3 | 28-29 → 12-13 | 14.2% → 6.3% |
+| `ascii_art` | 1 → 1 | 68 → 37 | 11.3% → 6.2% |
+| `continuation` | 4 → 4 | 20-22 → 9-10 | 14.0% → 6.3% |
+| `temporal`, `answer_format` | 1, 1 → 1, 1 | 85-86 → 37-38 | 14.2-14.3% → 6.2-6.3% |
+| `persona_template` | 0 → 23 | → 1-2 | → 6.2% |
+| `suffixes` | 0 → 24 | → 1-3 | → 6.3% |
+| `answer_language` | 0 → 8 | → 4-6 | → 6.2% |
+| `indirect`, `neutral_container` | 0 → 6 each | → 6-7 | → 6.2% each |
+| `transliteration` | 0 → 4 | → 9-10 | → 6.3% |
+| `distractor_prefix`, `distractor_suffix`, `impersonation`, `asking`, `guardrail_address`, `fake_turns` | 0 → 3 each | → 12-13 | → 6.2-6.3% each |
+| All | 36 → 126 | | |
+
+The table is a plan of the packaged eval example's size, 300 harmful inputs
+in one group (one taxonomy category) at the eval's seed, 43, its two rounds
+600 rows; a round-2 row holds two families, so the shares add up to 150%.
+Each family is dealt an even share and the translation family three
+(`family_weights`), so each family goes from about an eighth of the rows to
+about a sixteenth, translation from a third to under a fifth. In 300 inputs
+two suffixes and five persona templates are not drawn when the inputs fall in
+three groups (their families have more members than picks in a group);
+every one of the 126 is drawn in 3,000 rows (1,500 inputs) at seeds 42 to
+46 in one, three or ten groups, twice at the least, and a test holds it at
+the eval's seed. No group falls short of a target: the count rounds set
+none. The plan calls a model less: of its 600 rows 273 drew a translation or
+a selected `fsh` or `dap` variant before and 150 now (45.5% to 25.0%), the
+spec's calls going from 476 to 2,506 to 262 to 1,382 (the translation
+model's from 406 to 2,436 to 224 to 1,344), and the rows that need the
+benign pairs from 136 to 76; in 3,000 inputs in three groups, 2,708 of 6,000
+rows to 1,493.
+
+Of the 7,875 pairs of the 126, the rules admit 5,613
+(`tests/fixtures/eval_pairs.json`, which records them per family pair now,
+as one per line would be too long to read), the 291 pairs of the first pool
+among them as before. Two of the rules kept as they were reach further now:
+lifting the manipulation block would admit 146 eval pairs (104 of the first
+pool and 42 of `fake_turns` beside a translation, a heavy encoding or ASCII
+art), and lifting `fake_turns`' refusal of `structural` and
+`neutral_container` 27 (none before). The text a technique draws for a seed
+is pinned for all 126 (`template_draws.json`, whose eval-pool guard now
+covers the new techniques, so a change to their templates is an eval
+review of its own).
+
+No axis is pinned for v2: `check_dimensions` passes as it did. The
+families admitted vary dimensions no axis of the eval type relates to
+(`surface_noise`, new with the suffixes, among them), the `writer` axis
+and `role_framing` stay distinct by the earlier ruling, `directness` stays
+pinned at `explicit` and `focus` is dealt one value, so the eval inputs are
+dealt as before and only the attacks move.
+
+Eval files built before this release are not comparable with those built
+after. The type's `dataset_type_hash` in the run records goes from
+`fed23bff741bd864` (`70d99166ba903f36` at the first eval release) to
+`9aa90d52e957ef31`, and the jailbreaks plan file's pool from 36 names to
+126. A kept eval plan raises on resume, naming `pool`, since the section
+admits families older than the plan, more than the library's growth: run
+the jailbreak stage of an eval run with `resume=False` (the stage starts
+over). A plan of 300 inputs in three groups at seed 43, which a digest pins,
+deals 281 of its 300 round-1 rows another technique and all 300 round-2
+rows another pair. A `config_dir` copy of `eval.json` made before this
+release (what `scaffold_setup` wrote) keeps the first pool, 36 techniques,
+and nothing warns about it: the check names what a copy draws beyond the
+packaged type, not what it lacks. Write it again with
+`scaffold_setup(..., overwrite=True)`, delete it if you did not change it, or
+copy the packaged adversarial lists into it
+([refreshing a stale copy](#your-own-config-folder)).
+
 **Spec version 1.4.** What changes for a run you already have:
 
 - **Seventy-one techniques.** Spec 1.4 adds twelve persona templates, the 24
@@ -705,7 +847,10 @@ the default) and in `params["jailbreaks"]`.
   (126 with `"translation": true`, which adds the 24 translations, Yoruba
   among them, and the six dialects), and the `eval` type's pool is
   unchanged (36: it allows none of the new families and denies
-  `to_letter_spacing` by name). An attack plan kept from 1.3 resumes with
+  `to_letter_spacing` by name; eval pool v2, above, then admitted the
+  twelve frames, the published suffixes, the letter spacing,
+  `guardrail_address` and `transliteration`). An attack plan kept from 1.3
+  resumes with
   the growth WARNING naming them and does not draw them until planned again
   with `resume=False`, and so does a natural plan (it names the 24
   language-mix techniques that need no switch, and with its `translation`
@@ -802,6 +947,20 @@ the default) and in `params["jailbreaks"]`.
   resumes with the WARNING that the rules its combinations were drawn by
   changed (its `rules` id holds the weight) and replays its combinations;
   plan it again with `resume=False` to draw at 0.25.
+- **The second eval release (text only).** The eval pool, its pairs and its
+  pinned draws stayed as they were, but the text of some eval rows moved:
+  the variants of `to_nefarious_goal`, `to_fill_in_blank`,
+  `to_continue_instructions`, `to_complete_story` and `to_use_past_tense`
+  that did not read as a coherent request were rewritten (each keeps its
+  eight variants, its purpose, its slots and its info key); the eval's
+  short pools (the five framing and four continuation directives,
+  `refusal_then_comply`, `past_tense`) reached eight variants and `to_json`
+  became a pool like `to_xml` and `to_markdown`; and the five heavy
+  encodings of the eval pool write a decode hint on about half their rows
+  (`hint=<name>` in `technique_info`). Eval files built before it are not
+  comparable with those built after; `template_draws.json` pins the new
+  texts. Eval pool v2 (the third eval release, above) then widened the
+  pool.
 - **The technique catalog.** [catalog.md](catalog.md) and `docs/catalog.json`
   list every registered technique with its tags, model calls, template
   variants, prompts and pools, the techniques it combines with and the rules
@@ -903,7 +1062,9 @@ a run you already have, and what you will see; each point has its note below.
   library's eval type does not ...`). Delete a copy you did not change, or
   write it again with `scaffold_setup(..., overwrite=True)`
   ([refreshing a stale copy](#your-own-config-folder)); to keep your edits,
-  add the 21 names to its adversarial `techniques.deny`. The packaged type
+  add the 21 names to its adversarial `techniques.deny`. (Eval pool v2,
+  above, then admitted eleven families: a copy made before it draws the
+  first pool and is not warned about.) The packaged type
   now names `to_use_past_tense` under `techniques.allow` and no longer
   allows the `temporal` family whole, so its pool, rounds and draws are the
   same but its `dataset_type_hash` in run records is another.
@@ -915,11 +1076,12 @@ a run you already have, and what you will see; each point has its note below.
   families are counted apart from the obfuscation layer's, so the attacks
   draw every technique of their pool. The default attack pool is 214
   techniques in 29 families (142 in 22 before; 178 in 24 at spec 1.2). The
-  `eval` type's pool is unchanged, at 36 techniques in 10 families, but its
+  `eval` type's pool is unchanged, at 36 techniques in 10 families (126 in
+  22 since eval pool v2, above), but its
   draws moved: the ASCII-art cap changes the font `to_ascii_art` draws for
-  texts of about 40 characters or more, and the rules of the eval release
+  texts of about 40 characters or more, and the rules of the first eval release
   (below) change which pairs of the pool one combination may hold.
-- **The eval release moves the eval type's draws.** The pool is the same 36
+- **The first eval release moves the eval type's draws.** The pool is the same 36
   techniques, but a translation now refuses every `encode` technique and
   ASCII art the heavy full-text encodings, so the pool loses 44 of its 335
   pairs, and the manipulation layer now applies last, around the finished
@@ -941,7 +1103,7 @@ a run you already have, and what you will see; each point has its note below.
   encodings in a slot of their own at the spec's `heavy_encoding_weight`,
   0.2 (0.25 since spec 1.4's retune), a quota rather than a floor (about 45
   draws of the ten in 3,000 units of the escalation's last round, where they
-  were about 121; the note on the eval release, below).
+  were about 121; the note on the first eval release, below).
 - **Stricter checks, and what they skip.** An allow list or `family_weights`
   that names a family or technique of a layer the kind leaves off raises
   (the `rewrite` layer needs `layers.allow`); a `config_dir`
@@ -984,7 +1146,7 @@ families are dealt among themselves, counted apart from the obfuscation
 layer's (the next note). The obfuscations per unit are 1.47 (1.47 to 1.48)
 with the step and 1.57 (1.56 to 1.58) without: it holds a slot rather than
 adding one, and a translation drawn this way keeps a suffix, a wrapper and a
-container out of the unit's other obfuscations (the eval release note, below).
+container out of the unit's other obfuscations (the first eval release note, below).
 The units holding a translation go from 11.9% (11.8% to 12.0%) to 23.9%,
 the light `encode` techniques per unit from 0.12 (0.12 to
 0.12) to 0.24, and the model-calling techniques per unit, translation aside,
@@ -1188,7 +1350,7 @@ it is planned again with `resume=False`. New rules bind a fresh plan:
 `fake_turns` refuses `continuation`, `indirect`, `framing`, `persona`,
 `cognitive`, `persona_template`, `structural` and `neutral_container` (the
 reason for the last two, that an invented turn is a conversation, not a
-document to wrap, no longer holds since the eval release moved the
+document to wrap, no longer holds since the first eval release moved the
 manipulation layer last; they are kept as they were, its fifth change
 below), and takes the manipulation layer's block of `translation`,
 `ascii_art` and the heavy encodings; `to_refusal_then_comply`,
@@ -1212,7 +1374,11 @@ families and, of `answer_format`, names `to_refusal_then_comply` alone; of
 under `techniques.allow`, so neither new member, nor a later one, reaches
 it (its pool, rounds, plan file and draws are those of before). The rule that keeps
 `to_refusal_then_comply` from `persona_template` does not move its eval
-draws, since the eval type draws no persona template. A copy of `eval.json`
+draws, since the eval type draws no persona template (until eval pool v2,
+the first note, which admitted `persona_template`, `fake_turns` and the
+thin request families but `temporal` whole, so the eval pool holds five of
+the seven request members above, not the two temporal ones). A copy of
+`eval.json`
 in a `config_dir`, read whole in place of the packaged one, still allows
 `temporal` whole: its eval attacks draw the two temporal members, and an
 eval run names them in a WARNING (the upgrade summary above).
@@ -1273,7 +1439,7 @@ and `payload_split`, is kept from `fsh` and `dap`, so some units of a fresh
 plan draw other techniques than they did with the same seed. The two new
 families share the units that have three points of the budget left, which the
 ten heavy encodings need too, so the heavy encodings became the rarest draws of
-the default kind; since the eval release they are dealt in a slot of their
+the default kind; since the first eval release they are dealt in a slot of their
 own (its note, the sixth change), and each is drawn 3 to 6 times in 3,000
 units in three groups (seeds 42 to 46), one unit in about 670. A plan kept from before resumes with the
 growth WARNING, which names it, and does not draw it until it is planned
@@ -1311,7 +1477,9 @@ does not draw them until it is planned again with `resume=False`. The `eval`
 type draws none of them (it denies the encodings and the many-shot variants
 in `techniques.deny` and allows none of the families), so its pool stays at
 36 and its draws do not change
-([techniques.md](techniques.md#what-the-families-do)).
+([techniques.md](techniques.md#what-the-families-do)); eval pool v2 (the
+first note) later admitted the neutral containers and eight of the answer
+languages.
 
 - *Fifteen new encodings.* The `encode` family gains fifteen pure techniques
   (reversal of the characters, each word or the word order; look-alike
@@ -1416,10 +1584,10 @@ into another script than Latin, where the encoding changed nothing; so
 some draws differ from those an earlier version made with the same seed.
 A kept plan replays as it was made. The eval pool holds none of these
 encodings, so its draws do not change
-([techniques.md](techniques.md#compatibility-rules)). The eval release has
+([techniques.md](techniques.md#compatibility-rules)). The first eval release has
 since replaced the rule: a translation refuses every `encode` technique,
 whatever its script, so the rule refused nothing more and is gone (the note
-on the eval release, below).
+on the first eval release, below).
 
 **Release note: the ASCII-art cap.** `to_ascii_art` keeps a drawing of at
 most 5,000 characters wherever it is drawn, the eval type's pool included,
@@ -1433,7 +1601,7 @@ and none from about 830. A text of about 830 characters or more is rejected
 where it used to be drawn, and so are most inputs an encoding lengthened
 first (unicode escapes from about 140 characters, ASCII ordinals from about
 230, morse from about 250); a fresh plan no longer pairs ASCII art with a
-heavy full-text encoding, since the eval release (its note, below). A kept plan resumed across the change, an eval
+heavy full-text encoding, since the first eval release (its note, below). A kept plan resumed across the change, an eval
 plan included, mixes drawings made with and without the cap, since a
 replayed plan gives the same text only within one version of the library;
 run the adversarial kind with `resume=False` for one rendering.
@@ -1568,9 +1736,10 @@ default attack kind in three groups, seed 42), 319 units (10.6%) drew both
 before the rule and none draws both since; the units holding a translation
 went from 1,037 to 801 and the obfuscations per unit from 1.72 to 1.63. A plan
 kept from before replays its recorded combinations, so a rule changes none
-of them. The eval type draws none of the three families (its pool holds only
+of them. The eval type draws none of the three families (its pool held only
 its encodings, framing, fsh, dap, structural, ascii_art, continuation,
-temporal, answer format and eight translations), and the natural kind none of
+temporal, answer format and eight translations then, and eval pool v2
+admitted none of the three), and the natural kind none of
 them either: their pools and draws are unchanged. A translation chosen as the
 request obfuscation shares the rule with the obfuscations drawn after it.
 
@@ -1592,7 +1761,7 @@ plan may still pair them. `structural`, `suffixes` and `neutral_container`
 stay allowed beside a translation: the eval type draws `structural` with its
 translations, and its pool (36 techniques) and draws are unchanged by these
 four families, since it holds no technique of them (`encode`, which it holds,
-is refused beside a translation since the eval release, below). The
+is refused beside a translation since the first eval release, below). The
 natural pool (72) is unchanged as well; the natural kind draws one technique
 per input, and takes the rules only with `exact_techniques` of 2 or more and
 `"translation": true`.
@@ -1628,7 +1797,7 @@ allows no `wording` technique and the natural kind none, so their pools
 denial. Prompts of your own (`prompt_dir`) overlay the two new ones as any
 other.
 
-**Release note: the eval release.** The eval type's pool is the same 36
+**Release note: the first eval release.** The eval type's pool is the same 36
 techniques (`tests/fixtures/eval_pool.json`), but which pairs of them one
 combination may hold has changed, and so has the text of 40 of the pairs it
 keeps (the fifth change, below), so eval files made before this release are
@@ -2063,11 +2232,17 @@ the library adds to the natural kind's `families.allow` in
 the run says so at INFO, naming the families (`configs: the natural kind of
 jailbreak/augmentations.json in ... does not allow ...`). A technique the
 library adds to a family `dataset_types/eval.json` allows, and denies there
-to keep the eval pool at its 36, is drawn through a copy made before it; an eval run
+to keep the eval pool pinned, is drawn through a copy made before it; an eval run
 says so in a WARNING, naming the techniques (`configs: the eval attacks of
-... draw ... technique(s) the library's eval type does not ...`). Add the
+... draw ... technique(s) the library's eval type does not ...`). The other
+way round nothing warns: a copy of `eval.json` made before eval pool v2
+keeps the first eval pool, 36 techniques in 10 families, where the packaged
+type draws 126 in 22 (the check names what a copy adds, not what it lacks),
+so its eval files are those of the release before (the [release
+note](#release-notes)). Add the
 names to the copy's natural `families.allow` (or its adversarial
-`techniques.deny`), delete a copy you did not change, or
+`techniques.deny`, or, for v2, copy the packaged adversarial lists into it),
+delete a copy you did not change, or
 write the folder again from the package with
 `scaffold_setup(target_dir, overwrite=True)` (or
 `python scripts/scaffold_setup.py TARGET --overwrite`). That rewrites every

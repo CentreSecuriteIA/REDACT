@@ -137,7 +137,9 @@ def test_the_spec_tags_a_pure_attack_only_request_family():
         assert not fn.requires_llm and not getattr(fn, "needs_latin", False)
 
 
-def test_the_family_is_in_the_attacks_and_in_neither_the_natural_nor_the_eval_pool():
+def test_the_family_is_in_the_attacks_and_the_eval_pool_and_not_the_natural_one():
+    """Eval pool v2 admitted the family whole: the eval attacks are on
+    harmful inputs, each of which it applies to."""
     from redact.recipe import load_dataset_type
 
     names = {fn.__name__ for fn in FUNCTIONS}
@@ -147,11 +149,12 @@ def test_the_family_is_in_the_attacks_and_in_neither_the_natural_nor_the_eval_po
         resolve(load_dataset_type("eval")["augmentations"], "adversarial"))}
     assert names <= adversarial
     assert not names & natural
-    assert not names & eval_pool
-    # The pinned eval pool is unchanged.
+    assert names <= eval_pool
     pinned = set(json.loads((Path(__file__).parents[2] / "fixtures" / "eval_pool.json")
                             .read_text(encoding="utf-8")))
-    assert not names & pinned
+    assert names <= pinned
+    assert load_dataset_type("eval")["augmentations"]["adversarial"]["entry_types"] == [
+        "harmful"]
 
 
 # --- the plan draws them where they apply --------------------------------------

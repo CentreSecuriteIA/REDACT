@@ -85,7 +85,8 @@ def test_the_urgent_ask_is_natural_as_its_family():
 def test_the_eval_type_names_to_use_past_tense_alone_of_temporal():
     """Eval names to_use_past_tense under techniques.allow and does not allow
     the temporal family, so neither new member, nor one added later, reaches
-    its pool."""
+    its pool. Eval pool v2 admitted impersonation, the two distractors and
+    asking whole, so their new members are drawn there."""
     from redact.recipe import load_dataset_type
 
     section = load_dataset_type("eval")["augmentations"]
@@ -94,6 +95,7 @@ def test_the_eval_type_names_to_use_past_tense_alone_of_temporal():
     assert "to_use_past_tense" in adversarial["techniques"]["allow"]
     pool = technique_pool(resolve(section, "adversarial"))
     drawn = {fn.__name__ for fn in pool} & set(_MEMBERS)
-    assert drawn == set()
+    assert drawn == {name for name, (family, *_) in _MEMBERS.items()
+                     if family != "temporal"}
     assert [fn.__name__ for fn in pool if "temporal" in fn.families] == [
         "to_use_past_tense"]
