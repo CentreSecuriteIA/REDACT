@@ -63,6 +63,48 @@ def test_the_stage_drives_with_the_pool_its_model_allows(tmp_path, monkeypatch):
     assert (seen["pool_size"], seen["cap"]) == (28, 4)
 
 
+def _stop_at_drive(monkeypatch):
+    """Make the stage raise before any model call, right after its warnings."""
+    import redact.jailbreak.pipeline as JPipe
+
+    def stop(source, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(JPipe, "drive_units", stop)
+
+
+def test_warns_once_when_glotlid_is_missing_for_a_langid_gate(tmp_path, monkeypatch,
+                                                              caplog):
+    import logging
+
+    import redact.stages as stages
+    _stop_at_drive(monkeypatch)
+    monkeypatch.setattr(stages.langid, "available", lambda: False)
+    kind = {"families": {"allow": ["code_switching"]},
+            "layers": {"deny": ["rewrite", "hacking", "manipulation", "requests"]}}
+    with caplog.at_level(logging.WARNING, logger="redact.stages"), \
+            pytest.raises(KeyboardInterrupt):
+        generate_jailbreaks(
+            inputs=_inputs(), output_path=tmp_path / "jailbreaks.csv",
+            augmentation={"adversarial": kind, "natural": None},
+            auto_generate_benign=False, verbose=False, seed=7)
+    hits = [r for r in caplog.records
+            if "code-switch or romanization" in r.message]
+    assert len(hits) == 1
+
+
+def test_no_langid_warning_for_a_pure_pool(tmp_path, monkeypatch, caplog):
+    import logging
+
+    import redact.stages as stages
+    monkeypatch.setattr(stages.langid, "available", lambda: False)
+    with caplog.at_level(logging.WARNING, logger="redact.stages"):
+        generate_jailbreaks(inputs=_inputs(), output_path=tmp_path / "j.csv",
+                            seed=7, **PURE_KW)
+    assert not [r for r in caplog.records
+                if "code-switch or romanization" in r.message]
+
+
 def test_plan_then_execute(tmp_path):
     out = tmp_path / "jailbreaks.csv"
     df = generate_jailbreaks(inputs=_inputs(), output_path=out, seed=7, **PURE_KW)

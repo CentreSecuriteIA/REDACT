@@ -8,9 +8,13 @@ reason it reported. Meant to be run on a GPU pod where the translation,
 generation and check models are served; the main session reads the numbers.
 
 Usage (from the repo root, PYTHONPATH=src):
-    python scripts/langmix_smoke.py --n 20 --gen-model venice-uncensored
-The families default to the four language-mix ones; --families narrows them.
-A dialect translates on the translation role's registered model.
+    python scripts/langmix_smoke.py --n 20 --gen-model venice-uncensored \
+        --families code_switching romanization
+The families default to the four language-mix ones; --families narrows them to
+any of transliteration, code_switching, romanization, dialect. A dialect
+translates on the translation role's registered model. Without the GlotLID
+model the code-switch and romanize gates cannot check the language, so a
+rewrite left in plain English passes them; the meaning check still runs.
 """
 
 import argparse
@@ -61,17 +65,48 @@ _FAMILIES = {
 }
 
 
+#: Words a model's Yes/No verdict can start with: feedback that begins with one
+#: is the meaning (or judge) check's verdict, not a code-side gate reason.
+_VERDICT_WORDS = frozenset({
+    "yes", "no", "ok", "okay", "accept", "accepted", "pass", "passed",
+    "fail", "failed", "reject", "rejected", "true", "false",
+})
+
+
 def _reason(info: str) -> str:
     """The short discard reason of a technique's ``info`` (no text), or
-    ``accepted``. ``info`` of a rejection is ``DISCARDED; ...; reason=<r>``
-    or ``...; feedback=<r>``; keep the key, not any quoted text."""
+    ``accepted``.
+
+    A rejection carries the real gate or check reason in ``feedback=``: a
+    dialect or translation piece gives ``eszett``, ``simplified``,
+    ``language=<label>``, ``length_ratio=<x>`` or ``judge=<verdict>``; a
+    code-switch or romanize gate gives a short code (``empty``, ``not``,
+    ``english``, ``fully``, ``length_ratio=``); the meaning check gives the
+    model's ``Yes``/``No`` verdict. We read ``feedback`` first (keeping only its
+    first token, so a verdict collapses to ``check:<word>`` and no feedback
+    text is printed), then the fixed code-side ``reason`` (``too short to mix``
+    and the like), then ``language``. A code-switch gate's ``no <language>``
+    starts with a verdict word, so it is grouped under ``check:no`` too."""
     if not is_discarded(info):
         return "accepted"
+    fields: dict[str, str] = {}
     for part in info.split(";"):
-        key, _, value = part.strip().partition("=")
-        if key in ("reason", "feedback", "language"):
-            # The first word only, so no sentence of feedback is printed.
-            return f"{key}:{value.strip().split()[0] if value.strip() else ''}"
+        key, sep, value = part.strip().partition("=")
+        if sep and key and key not in fields:
+            fields[key] = value.strip()
+    if fields.get("feedback"):
+        value = fields["feedback"]
+        if value.lower().startswith("judge="):
+            return "check:judge"
+        first = value.split()[0]
+        word = first.strip(".,:;!?\"'()").lower()
+        if word in _VERDICT_WORDS:
+            return f"check:{word}"
+        return first
+    if fields.get("reason"):
+        return fields["reason"].replace(" ", "_")
+    if fields.get("language"):
+        return fields["language"].split()[0]
     return "discarded"
 
 

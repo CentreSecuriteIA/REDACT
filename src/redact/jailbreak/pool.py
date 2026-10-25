@@ -30,6 +30,13 @@ TRANSLATION = "translation"
 #: translation it is an ordinary family for the allow lists (not auto-added).
 DIALECT = "dialect"
 
+#: The families whose code gate checks the written language with GlotLID: a
+#: code-switch reads word windows, a romanization checks the output is not
+#: plain English. Without GlotLID those checks fall back to pass-through, so a
+#: run that draws them warns once (:func:`uses_langid_gate`).
+CODE_SWITCHING = "code_switching"
+ROMANIZATION = "romanization"
+
 
 def all_techniques() -> list[Callable]:
     """Every registered technique, one layer after another. The rewrite
@@ -224,6 +231,15 @@ def uses_translation(pool: list[Callable]) -> bool:
 #: switching, romanization). Translation checks its own work, and a
 #: marked-word list is parsed, not checked by a model.
 MODEL_CHECKS = ("typos", "scenario", "preserve", "meaning")
+
+
+def uses_langid_gate(pool: list[Callable]) -> bool:
+    """Whether ``pool`` holds a code-switch or romanization technique, whose
+    code gate reads the written language with GlotLID. Without GlotLID those
+    gates pass plain English, so a run that draws them with no detector warns
+    once (as a machine translation does)."""
+    return any({CODE_SWITCHING, ROMANIZATION} & set(getattr(fn, "families", ()))
+               for fn in pool)
 
 
 def uses_check(pool: list[Callable]) -> bool:

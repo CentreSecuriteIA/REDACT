@@ -699,6 +699,13 @@ def generate_jailbreaks(
 
     if drawn(jailbreak_pool.uses_translation):
         _check_machine_translation(translation_model, prompt_dir)
+    if drawn(jailbreak_pool.uses_langid_gate) and not langid.available():
+        logger.warning(
+            "jailbreaks: a code-switch or romanization technique is drawn and "
+            "GlotLID is not available, so their language gate is skipped and a "
+            "rewrite the model left in plain English passes it; the meaning "
+            "check still runs. Install redact[langid] and fetch its model with "
+            "scripts/download_models.py.")
     client = ModelClient.create(model or default_model_for_role("uncensored_gen"))
     # A check model only when a technique the kinds draw has its reply
     # checked, or needs the benign pairs it checks, so a separate local one
