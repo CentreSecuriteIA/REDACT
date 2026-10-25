@@ -83,6 +83,15 @@ paraphrases of outputs carry ``response_mode``, ``output_label`` and
 complete dataset holds as further columns. ``eval_outputs.csv`` takes its
 ``label`` from ``response_label``, ``<entry_type>_<output_label>``, and gains
 an ``output_label`` column after it; its other cells are as before.
+
+The eval files carry the generation axis columns after ``source_taxonomy``:
+the six of an input (``length`` to ``focus``) in each file, and the three of
+a response (``response_length`` to ``response_register``) in
+``eval_outputs.csv``. The fixture's two eval builds write their inputs and
+responses with a spec each (``_INPUT_SPECS``, ``_RESPONSE_SPECS``); the
+training builds write none, so their files are as before. A response or an
+attack takes its input's spec, a paraphrase none; the other cells are as
+before.
 """
 
 import json
@@ -183,6 +192,22 @@ _OUTPUTS = pd.DataFrame({
     "response_label": ["harmful_harmful", "benign_benign", "harmful_harmful"],
 })
 
+# The spec each input and each response was dealt, which the eval builds'
+# stage files hold.
+_INPUT_SPECS = {
+    "length": ["short", "fragment", "very_long"],
+    "register": ["casual", "neutral", "formal"],
+    "writer": ["student", "anonymous", "journalist"],
+    "framing": ["question", "direct_request", "advice"],
+    "directness": ["explicit", "implicit", "explicit"],
+    "focus": ["single"] * 3,
+}
+_RESPONSE_SPECS = {
+    "response_length": ["brief", "medium", "long"],
+    "response_format": ["prose", "list", "steps"],
+    "response_register": ["neutral", "friendly", "technical"],
+}
+
 _PARAPHRASED_INPUTS = pd.DataFrame({
     "sample_id": ["pi-1", "pi-2", "pi-3"],
     "input_id": ["in-1", "in-2", "in-3"],
@@ -214,7 +239,8 @@ _PARAPHRASED_OUTPUTS = pd.DataFrame({
 })
 
 
-def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = True):
+def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = True,
+                       specs: bool = False):
     """Write the stage files a build reads under ``data_dir``.
 
     Args:
@@ -223,13 +249,17 @@ def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = T
             rejected.
         rows: False leaves the jailbreaks, the variations, the outputs and
             the paraphrased inputs with a header and no row.
+        specs: True writes the inputs and the outputs with their specs
+            (``_INPUT_SPECS``, ``_RESPONSE_SPECS``).
     """
     datasets = paths.datasets(data_dir)
     datasets.mkdir(parents=True)
+    in_rows = _INPUTS.assign(**_INPUT_SPECS) if specs else _INPUTS
+    out_rows = _OUTPUTS.assign(**_RESPONSE_SPECS) if specs else _OUTPUTS
     if inputs == "merged":
-        _INPUTS.to_csv(datasets / "constitution_inputs_merged.csv", index=False)
+        in_rows.to_csv(datasets / "constitution_inputs_merged.csv", index=False)
     else:
-        tree = _INPUTS.drop(columns=["subcategory", "entry_type"])
+        tree = in_rows.drop(columns=["subcategory", "entry_type"])
         tree = tree.assign(accepted=[True, False, True])
         for category, part in tree.groupby("category"):
             path = paths.category_csv(category,
@@ -239,7 +269,7 @@ def _write_stage_files(data_dir: Path, *, inputs: str = "merged", rows: bool = T
     keep = slice(None) if rows else slice(0)
     _JAILBREAKS.iloc[keep].to_csv(paths.jailbreaks_csv(data_dir), index=False)
     _VARIATIONS.iloc[keep].to_csv(paths.variations_csv(data_dir), index=False)
-    _OUTPUTS.iloc[keep].to_csv(paths.output_responses_csv(data_dir), index=False)
+    out_rows.iloc[keep].to_csv(paths.output_responses_csv(data_dir), index=False)
     paraphrased_inputs = _PARAPHRASED_INPUTS.iloc[keep]
     if not rows:
         # A column of its own, which a file without a row does not add.
@@ -253,8 +283,8 @@ _BUILDS = {
     "parts without rows": dict(mode="training", rows=False),
 }
 _EVAL_BUILDS = {
-    "eval": dict(mode="eval"),
-    "inputs tree": dict(mode="eval", inputs="tree"),
+    "eval": dict(mode="eval", specs=True),
+    "inputs tree": dict(mode="eval", inputs="tree", specs=True),
 }
 
 
@@ -555,18 +585,22 @@ def test_a_paraphrase_that_a_spreadsheet_marked_true_is_kept(tmp_path):
 
 # --- an eval build -------------------------------------------------------------
 
+_INPUT_AXES = list(_INPUT_SPECS)
+_RESPONSE_AXES = list(_RESPONSE_SPECS)
+
 _EVAL_HEADERS = {
     "eval_inputs.csv": [
         "sample_id", "text", "label", "paraphrased", "input_id", "paraphrase_model",
-        "entry_type", "category", "subcategory", "source_taxonomy", "dataset_type"],
+        "entry_type", "category", "subcategory", "source_taxonomy", *_INPUT_AXES,
+        "dataset_type"],
     "eval_jailbreaks.csv": [
         "sample_id", "text", "label", "is_jailbreak", "technique", "complexity",
         "num_techniques", "iteration", "input_id", "entry_type", "category",
-        "subcategory", "source_taxonomy", "dataset_type"],
+        "subcategory", "source_taxonomy", *_INPUT_AXES, "dataset_type"],
     "eval_outputs.csv": [
         "sample_id", "text", "label", "output_label", "paraphrased", "input_id",
         "model", "paraphrase_model", "entry_type", "category", "subcategory",
-        "source_taxonomy", "dataset_type"],
+        "source_taxonomy", *_INPUT_AXES, *_RESPONSE_AXES, "dataset_type"],
 }
 
 
@@ -680,16 +714,17 @@ def test_the_jailbreak_file_holds_the_attacks_then_the_bare_benign_inputs(tmp_pa
     build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
     header, *rows = _files(paths.datasets(tmp_path))["eval_jailbreaks.csv"]
     assert header == _EVAL_HEADERS["eval_jailbreaks.csv"]
+    no_spec = [""] * len(_INPUT_AXES)       # the inputs here have none
     assert rows == [
         ["jb-1", "FIRST INPUT, WITH A COMMA", "harmful", "True", "to_upper", "1", "1",
-         "0", "in-1", "harmful", "Cyber", "phishing", "", "jailbreak"],
+         "0", "in-1", "harmful", "Cyber", "phishing", "", *no_spec, "jailbreak"],
         ["jb-2", "tupni dnoces", "benign", "True", "to_reversed", "3", "1", "0",
-         "in-2", "benign", "Cyber", "", "", "jailbreak"],
+         "in-2", "benign", "Cyber", "", "", *no_spec, "jailbreak"],
         ["jb-4", "First input?\nAnswer in a list.", "harmful", "True",
          "to_upper+ask_for_a_list", "2", "2", "1", "in-1", "harmful", "Cyber",
-         "phishing", "", "jailbreak"],
+         "phishing", "", *no_spec, "jailbreak"],
         ["in-2", _TEXTS[1], "benign", "False", "", "", "", "", "", "benign", "Cyber",
-         "", "", "content_moderation_input"],
+         "", "", *no_spec, "content_moderation_input"],
     ]
 
 
@@ -720,6 +755,69 @@ def test_every_eval_row_carries_the_source_taxonomy_of_its_input(tmp_path):
     assert files["eval_outputs.csv"]["source_taxonomy"].tolist() == ["harmful"] * 3
     assert files["eval_jailbreaks.csv"]["source_taxonomy"].tolist() == [
         "harmful", "benign", "harmful", "benign"]
+
+
+def _specs(rows: pd.DataFrame, columns: list[str]) -> dict[str, list[str]]:
+    """Each row's cells of ``columns``, by its ``sample_id``."""
+    return {row["sample_id"]: [row[column] for column in columns]
+            for row in rows.to_dict("records")}
+
+
+def _spec_of(specs: dict, at: int) -> list[str]:
+    """The spec of the ``at``-th row of ``specs``."""
+    return [values[at] for values in specs.values()]
+
+
+def test_the_input_file_carries_each_inputs_spec_and_none_on_a_paraphrase(
+        tmp_path):
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path, specs=True)
+    build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
+    rows = _eval_files(tmp_path)["eval_inputs.csv"]
+    no_spec = [""] * len(_INPUT_AXES)
+    assert _specs(rows, _INPUT_AXES) == {
+        "in-1": _spec_of(_INPUT_SPECS, 0), "in-2": _spec_of(_INPUT_SPECS, 1),
+        "in-3": _spec_of(_INPUT_SPECS, 2), "pi-1": no_spec, "pi-3": no_spec}
+
+
+def test_the_output_file_carries_the_specs_of_the_input_and_of_the_response(
+        tmp_path):
+    """A paraphrase of a response carries neither."""
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path, specs=True)
+    build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
+    rows = _eval_files(tmp_path)["eval_outputs.csv"]
+    assert _specs(rows, [*_INPUT_AXES, *_RESPONSE_AXES]) == {
+        "out-1": _spec_of(_INPUT_SPECS, 0) + _spec_of(_RESPONSE_SPECS, 0),
+        "out-3": _spec_of(_INPUT_SPECS, 2) + _spec_of(_RESPONSE_SPECS, 2),
+        "po-2": [""] * (len(_INPUT_AXES) + len(_RESPONSE_AXES))}
+
+
+def test_an_attack_carries_its_inputs_spec_and_a_bare_input_its_own(tmp_path):
+    """The attack's values describe the input before the attack changed it."""
+    from redact import build_dataset
+
+    _write_stage_files(tmp_path, specs=True)
+    build_dataset(data_dir=tmp_path, mode="eval", verbose=False)
+    rows = _eval_files(tmp_path)["eval_jailbreaks.csv"]
+    assert _specs(rows, _INPUT_AXES) == {
+        "jb-1": _spec_of(_INPUT_SPECS, 0), "jb-2": _spec_of(_INPUT_SPECS, 1),
+        "jb-4": _spec_of(_INPUT_SPECS, 0), "in-2": _spec_of(_INPUT_SPECS, 1)}
+
+
+def test_the_eval_axis_columns_are_the_packaged_tables():
+    """The eval schema names the columns the stages write for a spec."""
+    from redact.content_moderation import axes as A
+    from redact.stages import _INPUT_AXES as EVAL_INPUT_AXES
+    from redact.stages import _RESPONSE_AXES as EVAL_RESPONSE_AXES
+
+    assert list(EVAL_INPUT_AXES) == list(A.spec_columns(A.resolve("inputs"), {}))
+    assert list(EVAL_RESPONSE_AXES) == list(A.spec_columns(
+        A.resolve("outputs"), {}, prefix="response_"))
+    assert list(EVAL_INPUT_AXES) == _INPUT_AXES
+    assert list(EVAL_RESPONSE_AXES) == _RESPONSE_AXES
 
 
 def test_an_eval_build_returns_the_rows_of_each_file(tmp_path):

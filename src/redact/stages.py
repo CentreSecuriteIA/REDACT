@@ -1306,9 +1306,15 @@ class _NaturalVariations:
 _EVAL_FILES = {"inputs": paths.eval_inputs_csv, "outputs": paths.eval_outputs_csv,
                "jailbreaks": paths.eval_jailbreaks_csv}
 
+#: The generation axis columns the eval files carry: an input's spec, and a
+#: response's (``content_moderation.axes.spec_columns`` of the packaged
+#: table's ``inputs`` and ``outputs`` sections).
+_INPUT_AXES = ("length", "register", "writer", "framing", "directness", "focus")
+_RESPONSE_AXES = ("response_length", "response_format", "response_register")
+
 #: The columns a derived eval row takes from its input when its own stage
 #: file lacks them.
-_FROM_INPUT = ("subcategory", "source_taxonomy")
+_FROM_INPUT = ("subcategory", "source_taxonomy", *_INPUT_AXES)
 
 
 def _build_eval(
@@ -1343,7 +1349,10 @@ def _eval_parts(parts: dict[str, Part]) -> dict[str, list[Part]]:
     mapped onto the file's columns.
 
     A stage part the build did not find is one without rows, so each file
-    has its columns whatever the run made.
+    has its columns whatever the run made. The generation axis columns are
+    an input's own on an input and a bare benign input, the input's on a
+    response and an attack, and a response's own on a response; a
+    paraphrase has none (the paraphraser rewrote what the spec asked for).
     """
     by_input = _by_input(parts.get("inputs"), _FROM_INPUT)
 
@@ -1355,26 +1364,32 @@ def _eval_parts(parts: dict[str, Part]) -> dict[str, list[Part]]:
               "subcategory": "subcategory", "source_taxonomy": "source_taxonomy"}
     derived = {**origin, **{column: _of_input(column, by_input[column])
                             for column in _FROM_INPUT}}
+    own_axes = {column: column for column in _INPUT_AXES}
     inputs = {"sample_id": "sample_id", "text": "sample", "label": "entry_type",
               "paraphrased": False, "input_id": None, "paraphrase_model": None,
-              **origin}
+              **origin, **own_axes}
+    # A paraphrase's own file has no axis column: without these Nones,
+    # _of_input would give it its input's spec.
     input_paraphrases = {**inputs, "paraphrased": True, "input_id": "input_id",
-                         "paraphrase_model": "paraphrase_model", **derived}
+                         "paraphrase_model": "paraphrase_model", **derived,
+                         **dict.fromkeys(_INPUT_AXES)}
     outputs = {"sample_id": "sample_id", "text": "output_response",
                "label": _response_label("Outputs"), "output_label": "output_label",
                "paraphrased": False, "input_id": "input_id", "model": "model",
-               "paraphrase_model": None, **derived}
+               "paraphrase_model": None, **derived,
+               **{column: column for column in _RESPONSE_AXES}}
     output_paraphrases = {**outputs, "text": "sample",
                           "label": _response_label("Output paraphrases"),
                           "paraphrased": True, "model": None,
-                          "paraphrase_model": "paraphrase_model"}
+                          "paraphrase_model": "paraphrase_model",
+                          **dict.fromkeys((*_INPUT_AXES, *_RESPONSE_AXES))}
     attacks = {"sample_id": "sample_id", "text": "jailbreak", "label": "entry_type",
                "is_jailbreak": True, "technique": "technique",
                "complexity": "complexity", "num_techniques": "num_techniques",
                "iteration": "iteration", "input_id": "input_id", **derived}
     negatives = {**attacks, "text": "sample", "is_jailbreak": False,
                  "technique": None, "complexity": None, "num_techniques": None,
-                 "iteration": None, "input_id": None, **origin}
+                 "iteration": None, "input_id": None, **origin, **own_axes}
     return {
         "inputs": [part("inputs", columns=inputs),
                    part("paraphrases_inputs", columns=input_paraphrases)],
