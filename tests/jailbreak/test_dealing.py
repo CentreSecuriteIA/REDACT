@@ -24,9 +24,13 @@ _LEAST_PER_FAMILY = 10
 # Units a simulated plan deals, in three groups.
 _SIMULATED = 3000
 # The most a technique's share of its family may be, over an even share, by
-# budget and in a count round.
+# budget and in a count round. The count-round bound rose from 1.2 to 1.25
+# when the spec 1.4 language-mix families joined the natural pool: with more
+# families each gets fewer of the count round's picks, so a family's members
+# complete fewer full even cycles and its top member sits a little higher
+# (casual_writing's reaches 1.215 at seeds 42 and 44).
 _TOP_OVER_EVEN = 1.5
-_COUNT_TOP_OVER_EVEN = 1.2
+_COUNT_TOP_OVER_EVEN = 1.25
 
 
 def _one_group(n: int) -> pd.DataFrame:
@@ -308,16 +312,17 @@ _HEAVY = ("to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
 
 
 def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares):
-    """3,000 units in three groups at seed 42: 45 draws of the ten, 3 to 6
-    each. The slot fixes the total, not a count for each encoding, and the
-    total grows with the number of groups, since each group's dealer starts
-    it at 0: 44 or 45 in one group, 45 in three and 46 to 50 in ten (seeds 42
-    to 50), 52 to 56 in 46 uneven groups of 30 to 100 units; the least drawn
-    of the ten is drawn 3 or 4 times in one and three groups, 0 to 3 times in
-    ten. Dealt as encode's members they got 12, two of them never; dealt as a
-    family of their own (a weight of 1), about 200."""
+    """3,000 units in three groups at seed 42: 30 draws of the ten, about 3
+    each. The slot fixes the total, not a count for each encoding; the total
+    is 30 or 31 in one group, 30 in three and ten (seeds 42 to 46); the least
+    drawn of the ten is drawn 3 times in one and three groups, 0 to 1 times in
+    ten. The four spec 1.4 language-mix families (dialect, code-switching,
+    transliteration, romanization) joined the obfuscation layer, so the
+    layer's family-first picks are shared among more families and the slot's
+    absolute count fell from 45 to 30. Dealt as encode's members the ten got
+    12, two of them never; dealt as a family of their own (weight 1), ~200."""
     counts = [default_shares[name]["count"] for name in _HEAVY]
-    assert 36 <= sum(counts) <= 60  # noqa: PLR2004
+    assert 28 <= sum(counts) <= 42  # noqa: PLR2004
     assert min(counts) >= 3  # noqa: PLR2004
 
 
@@ -538,8 +543,16 @@ _BUDGETS = [
 # among one more) moved it again: the request each unit takes and, through
 # its rng and its group's counts, the rest of its draw change (189 of the 240
 # dealt units, 19 of them holding one of the four new techniques; 46 of the
-# 200 undealt draws, 17 holding one).
-_PINNED_DRAWS = "3cac096a06fe4fcc655e516263a81dfc27e2da2092d51e049ab31bff1ee8b430"
+# 200 undealt draws, 17 holding one). Spec 1.4's four language-mix
+# obfuscation families (within_layer_order 11 to 14, complexity 2: four pure
+# transliterations, ten code-switching techniques, ten romanizations and six
+# dialects, on the translation model under the switch, which the default
+# attacks have on) moved it again: they join the obfuscation family-first
+# picks, so the group's family counts and the tie-break names change from the
+# first obfuscation pick on, and the undealt draws gain the new families (233
+# of the 240 dealt units, 96 of them holding one of the 30; 176 of the 200
+# undealt draws, 54 holding one).
+_PINNED_DRAWS = "af558c1b95335e0bd4f8ac058beebf25b0e94f5be45d8865ad46a0f223c83623"
 
 
 def test_the_budget_draws_are_the_pinned_ones():

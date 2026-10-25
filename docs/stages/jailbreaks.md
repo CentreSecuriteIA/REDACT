@@ -9,8 +9,8 @@ Augment the accepted inputs with technique combinations, in two kinds:
 
 | Kind | Writes | Default |
 |---|---|---|
-| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from 255 techniques in 30 families, the 24 translations among them: the 285 active techniques less the 16 of the `rewrite` layer (off by default), the nine `casual_writing` ones and the five natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
-| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 72 techniques (96 with `"translation": true`, which adds the 24 translations) ([techniques.md](../techniques.md#the-natural-pool)) |
+| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from 285 techniques in 34 families, the 24 translations and the six dialects among them: the 315 active techniques less the 16 of the `rewrite` layer (off by default), the nine `casual_writing` ones and the five natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
+| `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 96 techniques (126 with `"translation": true`, which adds the 24 translations and the six dialects) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds
 are on. An `eval` run's dataset type attacks the harmful inputs only, with
@@ -52,8 +52,8 @@ in [techniques.md](../techniques.md).
 | Recipe role | Registry role | Default | Calls |
 |---|---|---|---|
 | `gen` | `uncensored_gen` | `venice-uncensored` | Every technique that calls a model, the benign data, and the judge of a machine translation |
-| `check` | `uncensored_gen` | the `gen` model | Passed to each technique as `check_model`, to check what its model writes (the typo, scenario and preserve checks), and reads each benign pair the stage generates; left out, it is the `gen` model, so no other model loads; given, it is created, planned and loaded only when a kind that runs draws a technique with one of those checks or one that needs the benign data (the eval type's attacks draw `fsh` and `dap`, so it is planned for their pairs). Translation keeps its own checkers: the chat translator itself, the `gen` model as a machine translation's judge |
-| `translation` | `translation` | `translategemma-27b` | The `translation` family; resolved, planned and loaded only when a kind's pool holds a translation technique (`"translation": true`, as in the packaged attacks and the eval type's) |
+| `check` | `uncensored_gen` | the `gen` model | Passed to each technique as `check_model`, to check what its model writes (the typo, scenario, preserve and meaning checks), and reads each benign pair the stage generates; left out, it is the `gen` model, so no other model loads; given, it is created, planned and loaded only when a kind that runs draws a technique with one of those checks or one that needs the benign data (the eval type's attacks draw `fsh` and `dap`, so it is planned for their pairs). Translation keeps its own checkers: the chat translator itself, the `gen` model as a machine translation's judge |
+| `translation` | `translation` | `translategemma-27b` | The `translation` family and, since spec 1.4, the `dialect` family; resolved, planned and loaded only when a kind's pool holds a translation or dialect technique (`"translation": true`, as in the packaged attacks and the eval type's) |
 
 A chat translator (`deepseek-v3.2`, named in the recipe) makes up to 4
 rounds of two calls, a translation and its check, both to it.
@@ -321,15 +321,18 @@ two wording techniques, three personas and four translations); a natural
 plan names the urgent ask alone, and the four translations too when its
 `translation` switch is on. The sixteen techniques of the `rewrite` layer
 are off by default, in no kind's pool, so no plan names them. Spec 1.4
-adds 41 techniques to the adversarial pool: twelve more persona templates
+adds 71 techniques to the adversarial pool: twelve more persona templates
 (emotional and family appeals, legitimate experts and authorities,
 simulated systems and games, and one frame each built around a point and
 penalty system, a persona-tagged opening and a stay-in-character reset),
 the 24 published adversarial suffixes, the Yoruba translation, the letter
-spacing and the three guardrail-address techniques. An
+spacing, the three guardrail-address techniques and the 30 techniques of the
+four language-mix families (six dialects, ten code-switching techniques, four
+transliterations, ten romanizations). An
 adversarial plan kept from an earlier spec resumes with the growth WARNING
-naming them; a natural plan names Yoruba only when its `translation` switch
-is on, and the eval type's pool does not change.
+naming them; a natural plan names the 24 transliteration, code-switching and
+romanization techniques, and Yoruba and the six dialects only when its
+`translation` switch is on, and the eval type's pool does not change.
 
 ## Rejected and failed units
 

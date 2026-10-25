@@ -406,12 +406,13 @@ Natural only:
 
 The packaged natural kind allows the families `typos`, `casual_writing`,
 `noise`, `neutral_container`, `answer_language`, `answer_format`, `asking`,
-`indirect`, `smalltalk_prefix`, `smalltalk_suffix`, `benign_role`; allows the
-techniques `to_leetspeak_basic`, `to_adversarial_suffix_punctuation`,
+`indirect`, `smalltalk_prefix`, `smalltalk_suffix`, `benign_role` and, since
+spec 1.4, `transliteration`, `code_switching`, `romanization` and `dialect`;
+allows the techniques `to_leetspeak_basic`, `to_adversarial_suffix_punctuation`,
 `to_adversarial_suffix_emoji`; and denies `to_refusal_then_comply`,
 `to_apology_prevention`, `to_prefix_injection`. The spec's `kinds` narrow
-it further (step 6 below): its pool is 72 techniques
-([techniques.md](techniques.md#the-natural-pool)). A variation that leaves
+it further (step 6 below): its pool is 96 techniques
+(126 with `"translation": true`; [techniques.md](techniques.md#the-natural-pool)). A variation that leaves
 its input unchanged is rejected.
 
 ### How a kind's pool is built
@@ -500,8 +501,11 @@ type is a one-key override: its pool keeps the other 28 techniques. An allow
 list left empty by this is dropped when the other list still names
 something; when nothing but translation was allowed, the kind raises.
 
-The packaged attacks have it `true`, drawing all 24 languages, and the
-natural kind `false`; the eval type narrows its attacks to the eight
+The switch also gates the `dialect` family (spec 1.4), which runs on the
+same model: `false` removes it, but `true` does not put it in an allow list,
+so a kind with one names `dialect` itself (the packaged natural kind does).
+The packaged attacks have it `true`, drawing all 24 languages and the six
+dialects, and the natural kind `false`; the eval type narrows its attacks to the eight
 low-resource languages. They run on the `translation` role's default,
 `translategemma-27b`, a local vLLM model
 (a GPU: about 34 GiB planned, beside the FP8 24B on one 80 or 96 GB card).
@@ -509,7 +513,7 @@ It translates paragraph by paragraph; each piece is checked, then translated
 back and judged by the generation model, up to 4 rounds
 ([stages/jailbreaks.md](stages/jailbreaks.md#models) gives the calls). The
 translation model is planned and loaded only when a kind's pool holds a
-translation technique (a rewrite technique calls the generation model, as
+translation or dialect technique (a rewrite technique calls the generation model, as
 the other model-written techniques do). An allow list admits the whole family while the switch
 is on, unless `techniques.allow` names some languages: a kind meant to draw
 only the techniques it lists says `"translation": false`.
@@ -691,18 +695,23 @@ the default) and in `params["jailbreaks"]`.
 
 **Spec version 1.4.** What changes for a run you already have:
 
-- **Forty-one techniques.** Spec 1.4 adds twelve persona templates, the 24
+- **Seventy-one techniques.** Spec 1.4 adds twelve persona templates, the 24
   published adversarial suffixes, the letter spacing and the three
   techniques of a new request family, `guardrail_address`, all attack only,
-  and the Yoruba translation: the library has 285 active techniques (292
-  registered, 7 retired) in 37 families, the default attack pool goes from
-  214 to 255 techniques in 30 families, the natural pool stays at 72 (96
-  with `"translation": true`, which adds Yoruba), and the `eval` type's pool
-  is unchanged (36: it allows none of the new families and denies
+  the Yoruba translation, and the 30 techniques of four language-mix
+  families (below): the library has 315 active techniques
+  (322 registered, 7 retired) in 41 families, the default attack pool goes
+  from 214 to 285 techniques in 34 families, the natural pool from 72 to 96
+  (126 with `"translation": true`, which adds the 24 translations, Yoruba
+  among them, and the six dialects), and the `eval` type's pool is
+  unchanged (36: it allows none of the new families and denies
   `to_letter_spacing` by name). An attack plan kept from 1.3 resumes with
   the growth WARNING naming them and does not draw them until planned again
-  with `resume=False`; a fresh plan with the same seed draws differently,
-  since four families are larger and the request layer has one more.
+  with `resume=False`, and so does a natural plan (it names the 24
+  language-mix techniques that need no switch, and with its `translation`
+  switch on the dialects and Yoruba too); a fresh plan with the same seed
+  draws differently, since four families are larger, the request layer has
+  one family more and the obfuscation layer four more.
 - **Twelve persona templates.** `persona_template` has 23 frames now, each
   drawing one of the same six mechanics: three each of emotional and family
   appeals, legitimate experts and authorities, and simulated systems and
@@ -714,6 +723,32 @@ the default) and in `params["jailbreaks"]`.
   measurement the judge rejected 40.7% of its calls and 7.4% of its units
   were discarded after 4 rounds, so expect more calls and more discarded rows
   for it than for the other languages.
+- **Four language-mix families.** The obfuscation layer gains `dialect` (6),
+  `code_switching` (10), `transliteration` (4) and `romanization` (10), at
+  `within_layer_order` 11 to 14, between `translation` and `typos`; all four
+  are marked adversarial and natural, so the packaged natural kind allows
+  them. `dialect` translates the prompt into a regional variant
+  (Brazilian Portuguese, Mexican Spanish, Canadian French, Egyptian Arabic,
+  Swiss German, Traditional Chinese) on the translation model, with the
+  translation machinery and its checks, so it follows the kind's
+  `translation` switch (`false` removes it) and plans the translation model.
+  `code_switching` and `romanization` are rewrites by the generation model
+  (a second language mixed into the English prompt; a non-Latin language
+  spelled in the Latin alphabet), each checked by a code gate (script share
+  or GlotLID, and a length band) and then by the check model for meaning, a
+  rejected rewrite made again once, so they add `meaning` to the spec's
+  checks and make a run with them plan the check model.
+  `transliteration` is pure: the Latin letters written in Cyrillic, Greek,
+  Devanagari or Arabic script by a fixed table, tagged `needs_latin`. The
+  four families refuse what a translation refuses, `translation` and one
+  another. The prompts are `code_switch`, `code_switch_check`, `romanize`
+  and `romanize_check`; the languages and variants are the rows of
+  `code_switch_languages.json`, `romanization_languages.json` and
+  `dialect_variants.json`. No native speaker has checked any of them: the
+  gates and the check model are the whole check, and the dialect's region is
+  not checked at all ([techniques.md](techniques.md#what-the-families-do)).
+  A `config_dir` copy of `augmentations.json` made before does not allow the
+  four families in its natural kind, and the run says so at INFO.
 - **The benign pairs are checked.** Each pair the stage generates for `fsh`
   and `dap` is read by the `check` model (else the `gen` model) and asked for
   again when rejected; a cache written before is loaded as it is, unchecked.
@@ -763,7 +798,9 @@ a run you already have, and what you will see; each point has its note below.
 - **The natural kind's pool changed.** The spec's `kinds` narrowed it to the
   techniques marked natural, and spec 1.2 then grew it, to 71 techniques in
   13 families by default (46 in 8 before); spec 1.3 added the urgent ask, to
-  72 (95 with `"translation": true`). A
+  72 (95 with `"translation": true`); spec 1.4 then added the 24
+  transliteration, code-switching and romanization techniques, to 96 (126
+  with `"translation": true`: the 24 translations and the six dialects). A
   natural plan made before the narrowing raises on resume: run the natural
   kind with `resume=False`. One made since resumes with the WARNING above.
   A `config_dir` copy of `augmentations.json` made before spec 1.2 does not
@@ -1029,7 +1066,7 @@ them. A section that names one in `techniques.allow` draws it, with a
 
 **Release note: the natural pool.** The natural kind now draws only what
 the spec's `kinds` mark natural (46 techniques by default when this came in,
-71 since spec 1.2 and 72 since spec 1.3, below; `structural`, `continuation`, `temporal`, the high
+71 since spec 1.2, 72 since spec 1.3 and 96 since spec 1.4, below; `structural`, `continuation`, `temporal`, the high
 and insane typos and the dialogue and story answer formats left it). A
 natural-kind plan made before raises on resume, since its pool changed: run
 the natural kind with `resume=False`. A training build leaves out the benign
@@ -1411,12 +1448,12 @@ application costs 2 to 4 calls; a distractor costs 1 to 3 (a reply with no
 text is asked for again), and no check reads it. They add no model role.
 
 The layer is off, so a run that does not allow it changes nowhere: the
-default attack pool is still 255 techniques in 30 families, the natural pool
-the 72 (every rewrite technique says `["adversarial"]`), and the `eval`
+default attack pool is still 285 techniques in 34 families, the natural pool
+the 96 (every rewrite technique says `["adversarial"]`), and the `eval`
 type's pool and draws are unchanged (36 techniques; its allow lists name no rewrite
 family, so allowing the layer there adds nothing to its pool or its rounds
 until the families are allowed too). A kind that allows the layer draws them: the packaged
-adversarial kind's pool is then 271 techniques in 33 families, its rounds say
+adversarial kind's pool is then 301 techniques in 37 families, its rounds say
 `include_rewrite: true` (an adversarial plan kept from a section that allowed
 the layer before its pool held a technique raises on resume naming `rounds`), a
 budget round deals the layer at `layer_rates.rewrite` (the spec's 0, with a
@@ -2062,7 +2099,7 @@ The conversation functions, which no recipe runs (`evaluate_conversations`,
 | `input` | `generation/from_constitution/long`, `generation/from_constitution/short`, `quality_check` |
 | `output` | `generation/harmful`, `generation/helpful`, `quality_check/harmful`, `quality_check/helpful`: one generation prompt and one checker per [answer mode](stages/outputs.md#answer-modes) |
 | `paraphrase` | `generation`, `generation/<model>` (a paraphraser's own, when it has one; the directory is the registry name), `check` |
-| `jailbreak` | `scenario_generation`, `persona_invention`, `persona_scenario_generation`, `persona_construction`, `jailbreak_construction`, `payload_split_semantic`, `category_selection`, `benign_generation`, `benign_check`, `extract_harmful`, `synonym_substitution`, `pseudonym`, `word_game`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `persuasion_rewrite`, `tense_rewrite`, `model_distractor`, `preserve_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back` |
+| `jailbreak` | `scenario_generation`, `persona_invention`, `persona_scenario_generation`, `persona_construction`, `jailbreak_construction`, `payload_split_semantic`, `category_selection`, `benign_generation`, `benign_check`, `extract_harmful`, `synonym_substitution`, `pseudonym`, `word_game`, `rewrite_with_typos`, `typo_check`, `scenario_check`, `persuasion_rewrite`, `tense_rewrite`, `model_distractor`, `preserve_check`, `translate`, `translate_retry`, `translate_check`, `translate_mt` (a machine translator's format: one user message, no system prompt; checked at the stage's start), `translate_check_back`, `code_switch`, `code_switch_check`, `romanize`, `romanize_check` (the language-mix techniques' rewrite and meaning check: worked examples as few-shot turns, one language named per turn, the check's verdict first) |
 | `conversation` | `judge`, `success_judge`, `pair_attacker` |
 | `format_instructions` | `numbered`, `structured_qa` |
 

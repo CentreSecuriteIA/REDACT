@@ -21,8 +21,14 @@ from .requests import get_all_request_functions
 from .rewrite import get_all_rewrite_functions
 from .technique import DEFAULT_KINDS, load_spec
 
-#: The family a kind's ``translation`` switch decides.
+#: The family a kind's ``translation`` switch admits (its allow semantics).
 TRANSLATION = "translation"
+
+#: The dialect family: like translation, it runs on the translation model, so
+#: a kind's ``translation`` switch also gates it (off removes it), and it makes
+#: the run plan the translation model (:func:`uses_translation`). Unlike
+#: translation it is an ordinary family for the allow lists (not auto-added).
+DIALECT = "dialect"
 
 
 def all_techniques() -> list[Callable]:
@@ -119,10 +125,12 @@ def technique_pool(resolved: dict) -> list[Callable]:
             allowed.add(TRANSLATION)
         pool = [fn for fn in pool if fn.__name__ in named
                 or allowed.intersection(getattr(fn, "families", ()))]
-    # The switch, not the lists, decides the translation family.
+    # The switch, not the lists, decides the translation family; it also gates
+    # the dialect family, which needs the translation model.
     denied = set(families["deny"]) - {TRANSLATION}
     if not resolved["translation"]:
         denied.add(TRANSLATION)
+        denied.add(DIALECT)
     pool = [fn for fn in pool if fn.__name__ not in techniques["deny"]
             and not denied.intersection(getattr(fn, "families", ()))]
     if resolved["pure_only"]:
@@ -204,16 +212,18 @@ def chain_tags(chain: str, techniques: dict[str, Callable]) -> tuple[str, str]:
 
 
 def uses_translation(pool: list[Callable]) -> bool:
-    """Whether ``pool`` holds a translation technique, which the translation
-    model serves. Any other technique that calls a model, a rewrite among
-    them, calls the generation model."""
-    return any(TRANSLATION in getattr(fn, "families", ()) for fn in pool)
+    """Whether ``pool`` holds a technique the translation model serves: a
+    translation or a dialect. Any other technique that calls a model, a
+    rewrite among them, calls the generation model."""
+    return any({TRANSLATION, DIALECT} & set(getattr(fn, "families", ()))
+               for fn in pool)
 
 
 #: The spec ``check`` values whose check the stage's check model makes: the
-#: typo check, the scenario check and the rewrite's. Translation checks its
-#: own work, and a marked-word list is parsed, not checked by a model.
-MODEL_CHECKS = ("typos", "scenario", "preserve")
+#: typo check, the scenario check, the rewrite's and the meaning check (code
+#: switching, romanization). Translation checks its own work, and a
+#: marked-word list is parsed, not checked by a model.
+MODEL_CHECKS = ("typos", "scenario", "preserve", "meaning")
 
 
 def uses_check(pool: list[Callable]) -> bool:

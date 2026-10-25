@@ -989,3 +989,109 @@ def test_a_translation_drawn_in_phase_4_still_joins_a_suffix_wrapper_container()
             if "to_french" in {t.__name__ for t in fn.techniques}
             for t in fn.techniques}
     assert {"to_adversarial_suffix_punctuation", "to_json", "to_csv_row"} <= held
+
+
+_TRANSLITERATIONS = ["to_cyrillic_transliteration", "to_greek_transliteration",
+                     "to_devanagari_transliteration", "to_arabic_transliteration"]
+
+
+@pytest.mark.parametrize("translit", _TRANSLITERATIONS)
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_base64", "to_rot13", "to_french", "to_russian",
+    "to_rewrite_with_typos_low", "to_lowercase",
+    "to_emoji_sprinkle_low", "to_payload_split"])
+def test_a_transliteration_refuses_the_whole_text_obfuscations_either_way(
+        translit, other):
+    """A transliteration is a whole-text script rewrite at the front: it
+    refuses the same obfuscation families a translation does (and translation
+    itself), each way."""
+    assert not _joins(translit, other)
+    assert not _joins(other, translit)
+
+
+@pytest.mark.parametrize("first", _TRANSLITERATIONS)
+@pytest.mark.parametrize("second", _TRANSLITERATIONS)
+def test_a_combination_holds_one_transliteration(first, second):
+    """One per family, so two transliterations never co-occur."""
+    assert not _joins(first, second)
+
+
+@pytest.mark.parametrize("translit", _TRANSLITERATIONS)
+@pytest.mark.parametrize("other", [
+    "to_json", "to_summarize", "to_fsh_random_short", "to_fictional_world"])
+def test_a_transliteration_joins_a_wrapper_a_request_or_the_hacking_layers(
+        translit, other):
+    """It changes the letters, not the frame, so a structural wrapper, a
+    request template, a hacking frame or a few-shot example may sit with it
+    (it is not in the manipulation block)."""
+    assert _joins(translit, other)
+    assert _joins(other, translit)
+
+
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_base64", "to_french", "to_russian",
+    "to_rewrite_with_typos_low", "to_lowercase", "to_payload_split",
+    "to_cyrillic_transliteration"])
+def test_code_switching_refuses_the_whole_text_obfuscations_either_way(other):
+    """Code-switching is a whole-text language rewrite at the front: it
+    refuses the obfuscation families a translation does, translation, and the
+    other language-mix families, each way."""
+    assert not _joins("to_code_switch_spanish", other)
+    assert not _joins(other, "to_code_switch_spanish")
+
+
+@pytest.mark.parametrize("second", ["to_code_switch_french", "to_code_switch_arabic"])
+def test_a_combination_holds_one_code_switch(second):
+    assert not _joins("to_code_switch_spanish", second)
+
+
+@pytest.mark.parametrize("other", ["to_json", "to_summarize", "to_fsh_random_short"])
+def test_code_switching_joins_a_wrapper_a_request_or_a_few_shot(other):
+    """It keeps English words, so a wrapper, a request template or a few-shot
+    frame may sit with it (not in the manipulation block)."""
+    assert _joins("to_code_switch_spanish", other)
+    assert _joins(other, "to_code_switch_spanish")
+
+
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_base64", "to_french", "to_russian", "to_lowercase",
+    "to_cyrillic_transliteration", "to_code_switch_spanish"])
+def test_romanization_refuses_the_whole_text_obfuscations_either_way(other):
+    """Romanization is a whole-text language rewrite at the front: it refuses
+    the obfuscation families a translation does, translation, and the other
+    language-mix families, each way."""
+    assert not _joins("to_romanize_hindi", other)
+    assert not _joins(other, "to_romanize_hindi")
+
+
+def test_a_combination_holds_one_romanization():
+    assert not _joins("to_romanize_hindi", "to_romanize_arabic")
+
+
+@pytest.mark.parametrize("other", ["to_json", "to_summarize", "to_fsh_random_short"])
+def test_romanization_joins_a_wrapper_a_request_or_a_few_shot(other):
+    assert _joins("to_romanize_hindi", other)
+    assert _joins(other, "to_romanize_hindi")
+
+
+@pytest.mark.parametrize("other", [
+    "to_ascii_art", "to_base64", "to_french", "to_russian", "to_lowercase",
+    "to_cyrillic_transliteration", "to_code_switch_spanish", "to_romanize_hindi"])
+def test_dialect_refuses_the_whole_text_obfuscations_either_way(other):
+    """A dialect is a translation into a regional variant: it refuses the
+    obfuscation families a translation does, translation, and the other
+    language-mix families, each way."""
+    assert not _joins("to_dialect_mexican_spanish", other)
+    assert not _joins(other, "to_dialect_mexican_spanish")
+
+
+def test_a_combination_holds_one_dialect():
+    assert not _joins("to_dialect_mexican_spanish", "to_dialect_canadian_french")
+
+
+@pytest.mark.parametrize("other", ["to_json", "to_summarize", "to_fsh_random_short"])
+def test_a_dialect_joins_a_wrapper_a_request_or_a_few_shot(other):
+    """Unlike translation, a dialect is not in the manipulation block, so fsh
+    and dap may sit with it (a deliberate deviation; see the blockers note)."""
+    assert _joins("to_dialect_mexican_spanish", other)
+    assert _joins(other, "to_dialect_mexican_spanish")

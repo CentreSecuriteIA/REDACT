@@ -222,16 +222,19 @@ def is_machine_translation(model: str) -> bool:
     return config is not None and MACHINE_TRANSLATION_ROLE in config.roles
 
 
-def check_translation(translation: str, source: str, slug: str) -> str | None:
-    """Why a machine translation of ``source`` into the language ``slug``
-    is rejected, or ``None``.
+def check_translation(translation: str, source: str, *,
+                      labels: set[str], median_ratio: float) -> str | None:
+    """Why a machine translation of ``source`` is rejected, or ``None``.
 
-    Empty; a GlotLID label not among the language's accepted ones (skipped
-    without the detector, and for an undetermined label, :data:`UNDETERMINED`);
-    a length ratio, over the language's median, outside
-    :data:`LENGTH_RATIO_BAND`, which a reply cut at its cap is (skipped for a
-    ``source`` under :data:`MIN_BAND_CHARS` characters). A copy of ``source``
-    passes: the chain records it as a no-op.
+    Empty; a GlotLID label not among ``labels`` (skipped without the detector,
+    and for an undetermined label, :data:`UNDETERMINED`); a length ratio, over
+    ``median_ratio``, outside :data:`LENGTH_RATIO_BAND`, which a reply cut at
+    its cap is (skipped for a ``source`` under :data:`MIN_BAND_CHARS`
+    characters). A copy of ``source`` passes: the chain records it as a no-op.
+
+    ``labels`` and ``median_ratio`` are the target language's (or dialect's),
+    passed by the caller so the translation family and the dialect family
+    share this check.
     """
     if not translation.strip():
         return "empty"
@@ -239,11 +242,11 @@ def check_translation(translation: str, source: str, slug: str) -> str | None:
         return None
     label = langid.detect(translation)
     if (label is not None and not label.startswith(UNDETERMINED)
-            and label not in ACCEPTED_LABELS[slug]):
+            and label not in labels):
         return f"language={label}"
     if len(source) < MIN_BAND_CHARS:
         return None
-    ratio = len(translation) / len(source) / MEDIAN_RATIO[slug]
+    ratio = len(translation) / len(source) / median_ratio
     low, high = LENGTH_RATIO_BAND
     if not low <= ratio <= high:
         return f"length_ratio={ratio:.2f}"
@@ -297,26 +300,27 @@ def _judge_messages(original: str, back_translation: str, language: str,
 
 
 def _machine_translate_gen(
-    prompt: str, language: dict, *, translator: str, judge: str, num_retries: int,
-    prompt_dir,
+    prompt: str, *, name: str, code: str, labels: set[str], median_ratio: float,
+    translator: str, judge: str, num_retries: int, prompt_dir, extra_check=None,
 ) -> TechniqueGen:
     """Translate ``prompt`` piece by piece on ``translator``, one request at a
-    time, into ``language`` (a row of :data:`LANGUAGES`).
+    time, into the language (or dialect) named ``name``, sent the target
+    ``code``.
 
     A round translates the pieces still pending and checks each
-    (:func:`check_translation`); a piece that fails is resampled alone in the
-    next round. When every piece passes, each is translated back and
-    ``judge`` reads the original against the joined back-translation; a
+    (:func:`check_translation` against ``labels`` and ``median_ratio``, then
+    ``extra_check(translation, source)`` when given: a dialect's extra test,
+    such as the Traditional-character share); a piece that fails is resampled
+    alone in the next round. When every piece passes, each is translated back
+    and ``judge`` reads the original against the joined back-translation; a
     rejection resamples every piece in the next round. A resample is the same
     request again: the model's temperature varies it. After ``num_retries``
     rounds the info names the piece that failed (``piece=all`` for the judge)
     and why.
     """
-    name, slug = language["name"], language["slug"]
     pieces, gaps = split_text(prompt)
     if not pieces:
         return prompt, name
-    code = LANGUAGE_CODES[slug]
     translations = list(pieces)
     pending = list(range(len(pieces)))
     reason = ""
@@ -326,7 +330,10 @@ def _machine_translate_gen(
             translations[i] = yield LLMRequest(
                 translator, _mt_messages(pieces[i], SOURCE_CODE, code, prompt_dir),
                 max_tokens=reply_cap(pieces[i]))
-            why = check_translation(translations[i], pieces[i], slug)
+            why = check_translation(translations[i], pieces[i],
+                                    labels=labels, median_ratio=median_ratio)
+            if why is None and extra_check is not None:
+                why = extra_check(translations[i], pieces[i])
             if why is not None:
                 failed.append((i, why))
         if failed:
@@ -388,6 +395,32 @@ def _build_check_messages(
     return build_messages(config, original=original, translation=translation, language=language)
 
 
+def _chat_translate_gen(
+    prompt: str, name: str, *, translator: str, check_model: str, num_retries: int,
+    prompt_dir,
+) -> TechniqueGen:
+    """Translate ``prompt`` into the language (or dialect) ``name`` on a chat
+    ``translator``, checking each round with ``check_model`` and feeding the
+    verdict back, up to ``num_retries`` rounds. Returns ``(translation, name)``
+    or ``(last, "DISCARDED; language=<name>; ...")`` on exhaustion. Shared by
+    the translation family and the dialect family."""
+    feedback = ""
+    last = prompt
+    for _ in range(num_retries):
+        translation = yield LLMRequest(
+            translator,
+            _build_translate_messages(prompt, name, feedback, prompt_dir),
+        )
+        verdict = yield LLMRequest(
+            check_model, _build_check_messages(prompt, translation, name, prompt_dir)
+        )
+        if is_accepted(verdict):
+            return translation, name
+        feedback = verdict
+        last = translation
+    return last, f"{DISCARDED}; language={name}; feedback={feedback}"
+
+
 def _translate_gen(
     prompt: str,
     language: dict,
@@ -421,29 +454,19 @@ def _translate_gen(
     # runtime register_model(..., role="translation") takes effect
     # immediately, same as every other role default in the library.
     translator = translate_model or _resolve_translate_model()
+    name, slug = language["name"], language["slug"]
     if is_machine_translation(translator):
         judge = (translate_check_model or gen_model
                  or default_model_for_role("uncensored_gen"))
         return (yield from _machine_translate_gen(
-            prompt, language, translator=translator, judge=judge,
+            prompt, name=name, code=LANGUAGE_CODES[slug],
+            labels=ACCEPTED_LABELS[slug], median_ratio=MEDIAN_RATIO[slug],
+            translator=translator, judge=judge,
             num_retries=num_retries, prompt_dir=prompt_dir))
-    name = language["name"]
-    chk_model = translate_check_model or translator
-    feedback = ""
-    last = prompt
-    for _ in range(num_retries):
-        translation = yield LLMRequest(
-            translator,
-            _build_translate_messages(prompt, name, feedback, prompt_dir),
-        )
-        verdict = yield LLMRequest(
-            chk_model, _build_check_messages(prompt, translation, name, prompt_dir)
-        )
-        if is_accepted(verdict):
-            return translation, name
-        feedback = verdict
-        last = translation
-    return last, f"{DISCARDED}; language={name}; feedback={feedback}"
+    return (yield from _chat_translate_gen(
+        prompt, name, translator=translator,
+        check_model=translate_check_model or translator,
+        num_retries=num_retries, prompt_dir=prompt_dir))
 
 
 def _make_language_fn(language: dict) -> Callable:

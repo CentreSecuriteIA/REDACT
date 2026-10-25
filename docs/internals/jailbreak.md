@@ -39,7 +39,7 @@ the technique names are in [techniques.md](../techniques.md).
 |---|---|
 | `technique.py` | The technique contract, `load_spec` and `read_spec` (the spec, its generators expanded), `data_rows`, `tag`, `DISCARDED`, `KINDS`, `DEFAULT_KINDS`, `family_kinds`, `FIRST_VERSION`, `version_key`, `decode_hint_rate` (the spec's share of hinted encodings written with a hint), `heavy_encoding_weight` (the spec's weight of the heavy full-text encodings' slot) |
 | `rewrite/`, `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` and `smalltalk.py` each hold both families of their pair), each with a getter; `get_all_rewrite_functions` (16), `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage; `all_techniques` joins the rewrite layer last, so the others keep their registry order. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)`; the fake turns (`manipulation/fake_turns.py`) need none. `hacking/persona_templates.py` checks its persona frames at import (`check_pools`): a frame is its technique's own text, and only the mechanics are its `variant_pool` |
-| `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `chain_tags` (a row's `families` and `layers` from its `technique`, which the build writes; `?<name>` and `?` for a name no registered technique has), `uses_translation`, `uses_check` (whether a pool holds a technique the check model checks), `uses_check_model` (that, or a technique that needs the benign data, whose pairs the check model reads), `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
+| `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `chain_tags` (a row's `families` and `layers` from its `technique`, which the build writes; `?<name>` and `?` for a name no registered technique has), `uses_translation` (a translation or a dialect technique), `uses_check` (whether a pool holds a technique the check model checks), `uses_check_model` (that, or a technique that needs the benign data, whose pairs the check model reads), `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
 | `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates`, `after_request_obfuscation` (what may still join once a pick is the request obfuscation) |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family`, `deal_key` (the name a dealer counts a technique under), `is_heavy_encoding`, `REQUEST_SCOPE`, `HEAVY_ENCODINGS` |
@@ -426,7 +426,10 @@ order.
   gives 65, 65, 67 and 70). It is a quota in every budget round, not a
   floor, since the weight does not read the round's budget: in the
   escalation (3,000 units a round, three groups, seeds 42 to 46) round 3
-  goes from 6 draws of the ten to 42 and round 4 from about 121 to about 45.
+  goes from 6 draws of the ten to 42 and round 4 from about 121 to about 45
+  (spec 1.3; with spec 1.4's four language-mix families, which share the
+  obfuscation picks among more families, the slot gives 30 in the default
+  attacks and in round 3 and 24 in round 4, at each of the seeds).
   A count draw (`exact_techniques`: the eval type, the natural kind, the
   first two escalation rounds) and a draw without a dealer deal them as
   encode's members, as before, so their draws do not move. The slot is not
@@ -621,7 +624,7 @@ admits those alone. Last, it keeps the techniques whose `kinds` (set by
 `family_kinds`, else `DEFAULT_KINDS`, `["adversarial"]`) hold the kind,
 which `pool.kind_of(resolved)` reads as `rounds_of` does: natural when the
 resolved kind has `exact_techniques`, so no key is added to it. The
-natural pool is narrowed to the 72 techniques of
+natural pool is narrowed to the 96 techniques of
 [techniques.md](../techniques.md#the-natural-pool) with translation off;
 the attacks lose only the techniques of the three families marked
 `["natural"]` alone (`smalltalk_prefix`, `smalltalk_suffix`,

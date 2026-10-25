@@ -45,6 +45,19 @@ def _write_rows(folder: Path, rows: list[dict]) -> None:
     file.write_text(json.dumps({"rows": rows}), encoding="utf-8")
 
 
+def _copy_spec_and_data(folder: Path) -> None:
+    """The packaged spec and every top-level data file its generators read
+    (languages.json and the spec 1.4 language-mix files) into ``folder``, so
+    ``read_spec`` there finds them; the suffix file is written by the test."""
+    configs = paths.jailbreak_configs_dir()
+    shutil.copy(configs / "combination_spec.json", folder)
+    spec = json.loads((configs / "combination_spec.json").read_text(encoding="utf-8"))
+    for generator in spec.get("generators", {}).values():
+        name = generator.get("file", "") if isinstance(generator, dict) else ""
+        if name and "/" not in name and (configs / name).exists():
+            shutil.copy(configs / name, folder)
+
+
 def _package_with(tmp_path: Path, rows: list[dict]) -> Path:
     """A copy of the package whose suffix file holds ``rows``: its ``src``."""
     src = tmp_path / "src"
@@ -129,8 +142,7 @@ def test_the_packaged_file_s_rows_are_attack_only_suffix_techniques():
 
 def test_an_empty_file_registers_the_family_with_its_noise_suffixes_alone(
         tmp_path, monkeypatch):
-    shutil.copy(paths.jailbreak_configs_dir() / "combination_spec.json", tmp_path)
-    shutil.copy(paths.jailbreak_configs_dir() / "languages.json", tmp_path)
+    _copy_spec_and_data(tmp_path)
     _write_rows(tmp_path, [])
     spec = T.read_spec(tmp_path / "combination_spec.json")
     assert S.suffix_rows(tmp_path) == []
@@ -208,8 +220,7 @@ def test_a_row_that_breaks_a_rule_raises_naming_it(tmp_path, row, message):
 
 def test_a_row_named_as_a_noise_suffix_is_one_the_spec_has_already(tmp_path):
     """The spec's generator refuses it too, as for any name it has."""
-    shutil.copy(paths.jailbreak_configs_dir() / "combination_spec.json", tmp_path)
-    shutil.copy(paths.jailbreak_configs_dir() / "languages.json", tmp_path)
+    _copy_spec_and_data(tmp_path)
     _write_rows(tmp_path, [{**_ROWS[0], "slug": "emoji"}])
     with pytest.raises(ValueError, match="'to_adversarial_suffix_emoji', which the "
                        "spec has already"):

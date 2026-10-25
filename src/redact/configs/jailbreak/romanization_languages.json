@@ -1,0 +1,15 @@
+{
+  "_comment": "Languages a romanization technique writes the prompt in, spelled in the Latin alphabet (Hinglish, Arabizi and the like), one row per technique (the romanization generator of combination_spec.json makes to_romanize_{slug}). name: the language as the prompt and info write it. slug: the end of the technique name. romanized_label: the GlotLID v3 label of that language written in Latin script, used by the gate to confirm the output is the romanized language and not plain English (jailbreak/obfuscation/romanization.py); every language here has one (GlotLID v3 has romanized labels for these South Asian languages and for Arabic; it has none for romanized Russian, Japanese, Chinese, Greek or Korean, which are listed as not built in .claude/completion_blockers.md). GlotLID's romanized labels were trained on few sentences (hundreds to ~1000), so the gate also accepts a Latin-script output that is not English as a fallback. Read from the package only.",
+  "rows": [
+    {"name": "Hindi", "slug": "hindi", "romanized_label": "hin_Latn", "since": "1.4"},
+    {"name": "Urdu", "slug": "urdu", "romanized_label": "urd_Latn", "since": "1.4"},
+    {"name": "Bengali", "slug": "bengali", "romanized_label": "ben_Latn", "since": "1.4"},
+    {"name": "Marathi", "slug": "marathi", "romanized_label": "mar_Latn", "since": "1.4"},
+    {"name": "Tamil", "slug": "tamil", "romanized_label": "tam_Latn", "since": "1.4"},
+    {"name": "Telugu", "slug": "telugu", "romanized_label": "tel_Latn", "since": "1.4"},
+    {"name": "Gujarati", "slug": "gujarati", "romanized_label": "guj_Latn", "since": "1.4"},
+    {"name": "Punjabi", "slug": "punjabi", "romanized_label": "pan_Latn", "since": "1.4"},
+    {"name": "Nepali", "slug": "nepali", "romanized_label": "npi_Latn", "since": "1.4"},
+    {"name": "Arabic", "slug": "arabic", "romanized_label": "arb_Latn", "since": "1.4"}
+  ]
+}

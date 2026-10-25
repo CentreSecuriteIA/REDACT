@@ -617,9 +617,12 @@ _FOUR_TRANSLATIONS = ["to_amharic", "to_chinese", "to_hindi", "to_hmong"]
 
 #: What spec 1.4 added to the attack pool, by family: twelve persona
 #: templates, the 24 published suffixes, the Yoruba translation, the letter
-#: spacing and the three guardrail-address techniques.
+#: spacing, the three guardrail-address techniques and the four language-mix
+#: families (four transliterations, ten code-switching techniques, ten
+#: romanizations, six dialects).
 SPEC_1_4_ADDED = {"persona_template": 12, "suffixes": 24, "translation": 1,
-                  "encode": 1, "guardrail_address": 3}
+                  "encode": 1, "guardrail_address": 3, "transliteration": 4,
+                  "code_switching": 10, "romanization": 10, "dialect": 6}
 
 
 def _by_family(names: list[str]) -> dict[str, int]:
@@ -635,10 +638,10 @@ def _growth_since_1_2(key: str, pool: list) -> tuple[list[str], list[str]] | Non
 
 
 def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
-    """The attack pool of a plan made at 1.2 differs from today's by 77 names,
-    none retired: 36 dated 1.3 (the four translations switched on among them)
-    and the 41 dated 1.4 (:data:`SPEC_1_4_ADDED`). The library added them
-    after the plan, so the plan is kept and the run warns."""
+    """The attack pool of a plan made at 1.2 differs from today's by 107
+    names, none retired: 36 dated 1.3 (the four translations switched on
+    among them) and the 71 dated 1.4 (:data:`SPEC_1_4_ADDED`). The library
+    added them after the plan, so the plan is kept and the run warns."""
     added, retired = _growth_since_1_2(
         "adversarial", technique_pool(resolve(None, "adversarial")))
     by_name = registry(all_techniques())
@@ -647,17 +650,23 @@ def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
         for version in {by_name[name].since for name in added}}
     assert retired == []
     assert {version: len(names) for version, names in by_version.items()} == {
-        "1.3": 36, "1.4": 41}
+        "1.3": 36, "1.4": 71}
     assert set(_FOUR_TRANSLATIONS) <= set(by_version["1.3"])
     assert _by_family(by_version["1.4"]) == SPEC_1_4_ADDED
     assert "to_letter_spacing" in by_version["1.4"]
 
 
-def test_a_natural_plan_of_spec_1_2_finds_the_urgent_ask_as_the_library_s_growth():
-    """Spec 1.3 added ``to_ask_with_urgency`` to the natural pool, the one
-    technique it added there."""
+def test_a_natural_plan_of_spec_1_2_finds_the_later_additions_as_growth():
+    """Spec 1.3 added ``to_ask_with_urgency`` to the natural pool, and spec
+    1.4's language-mix step added the four transliterations, the ten
+    code-switching techniques and the ten romanizations (dialect is natural
+    too but only under the translation switch, off here): 25 names in all,
+    none retired."""
     pool = technique_pool(resolve(None, "natural"))
-    assert _growth_since_1_2("natural", pool) == (["to_ask_with_urgency"], [])
+    added, retired = _growth_since_1_2("natural", pool)
+    assert retired == [] and "to_ask_with_urgency" in added
+    assert len(added) == 25     # noqa: PLR2004
+    assert {registry(all_techniques())[name].since for name in added} == {"1.3", "1.4"}
 
 
 #: The pools of the kinds at the released spec 1.3, as a plan made then
@@ -722,15 +731,23 @@ def test_a_resume_of_a_spec_1_3_plan_warns_that_the_library_added_yoruba(
     assert Manifest.sidecar(out).load() == plan
 
 
-@pytest.mark.parametrize("key", ["natural", "eval:adversarial"])
-def test_a_natural_or_eval_plan_of_spec_1_3_finds_no_growth(key):
-    """The natural kind leaves translation off, and the eval type's pool is
-    pinned: Yoruba joins neither."""
+def test_an_eval_plan_of_spec_1_3_finds_no_growth():
+    """The eval type's pool is pinned: nothing spec 1.4 added joins it."""
     from redact.recipe import load_dataset_type
 
-    section = (resolve(None, "natural") if key == "natural" else resolve(
-        load_dataset_type("eval")["augmentations"], "adversarial"))
-    assert _growth_since_1_3(key, technique_pool(section)) == ([], [])
+    section = resolve(load_dataset_type("eval")["augmentations"], "adversarial")
+    assert _growth_since_1_3("eval:adversarial", technique_pool(section)) == ([], [])
+
+
+def test_a_natural_plan_of_spec_1_3_finds_the_language_mix_as_growth():
+    """The natural kind leaves translation off, so neither Yoruba nor a
+    dialect joins it; the 24 other language-mix techniques spec 1.4 admitted
+    to it do, retiring nothing."""
+    added, retired = _growth_since_1_3(
+        "natural", technique_pool(resolve(None, "natural")))
+    assert retired == []
+    assert _by_family(added) == {
+        "transliteration": 4, "code_switching": 10, "romanization": 10}
 
 
 def test_an_eval_plan_of_spec_1_2_finds_no_growth():

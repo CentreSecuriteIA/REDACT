@@ -176,7 +176,7 @@ that lists that role.
 |---|---|---|---|
 | `gen` | inputs, outputs, jailbreaks | `uncensored_gen` | `venice-uncensored`, hosted (Venice) |
 | `check` | inputs, outputs, jailbreaks (what a technique's model writes; translation keeps its own checkers) | `uncensored_gen` | the `gen` model |
-| `translation` | jailbreaks, only when a kind's pool holds a translation technique (`"translation": true`: the packaged attacks, and the eval type's) | `translation` | `translategemma-27b`, local vLLM (27B, FP8). Without a GPU, name the hosted `deepseek-v3.2`, or set `"translation": false` in the adversarial kind |
+| `translation` | jailbreaks, only when a kind's pool holds a translation or dialect technique (`"translation": true`: the packaged attacks, and the eval type's) | `translation` | `translategemma-27b`, local vLLM (27B, FP8). Without a GPU, name the hosted `deepseek-v3.2`, or set `"translation": false` in the adversarial kind |
 | `constitution` | constitution | `constitution_gen` | `claude-opus-4-6`, hosted (Anthropic) |
 | `paraphraser` | paraphrase | `paraphraser` | `humanizer-12b`, local vLLM (12B, bf16) |
 | `paraphrase_check` | paraphrase | `uncensored_gen` | `venice-uncensored`, hosted |

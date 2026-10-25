@@ -315,12 +315,13 @@ class TestMachineTranslationTables:
         """Chinese is the shortest by far, 0.34 of its input: the median of
         another language would reject every good translation."""
         from redact.jailbreak.obfuscation import langid
-        from redact.jailbreak.obfuscation.translation import check_translation
+        from redact.jailbreak.obfuscation.translation import (
+            ACCEPTED_LABELS, MEDIAN_RATIO, check_translation)
 
         monkeypatch.setattr(langid, "detect", lambda text: "cmn_Hani")
-        assert check_translation("译" * 34, "x" * 100, "chinese") is None
+        assert check_translation("译" * 34, "x" * 100, labels=ACCEPTED_LABELS["chinese"], median_ratio=MEDIAN_RATIO["chinese"]) is None
         assert check_translation(
-            "译" * 100, "x" * 100, "chinese") == "length_ratio=2.94"
+            "译" * 100, "x" * 100, labels=ACCEPTED_LABELS["chinese"], median_ratio=MEDIAN_RATIO["chinese"]) == "length_ratio=2.94"
 
     @pytest.mark.parametrize(("translation", "source"), [
         ("问：", "Q:"), ("步骤 1：", "Step 1:"), ("译" * 60, "x" * 19), ("译", "1"),
@@ -330,54 +331,60 @@ class TestMachineTranslationTables:
         """``Q:`` is 2.9 times as long in Chinese, a label or a digit keeps its
         characters, and the medians are those of sentences."""
         from redact.jailbreak.obfuscation import langid
-        from redact.jailbreak.obfuscation.translation import check_translation
+        from redact.jailbreak.obfuscation.translation import (
+            ACCEPTED_LABELS, MEDIAN_RATIO, check_translation)
 
         monkeypatch.setattr(langid, "detect", lambda text: "cmn_Hani")
-        assert check_translation(translation, source, "chinese") is None
+        assert check_translation(translation, source, labels=ACCEPTED_LABELS["chinese"], median_ratio=MEDIAN_RATIO["chinese"]) is None
 
     def test_a_piece_of_twenty_characters_is_held_to_it(self, monkeypatch):
         from redact.jailbreak.obfuscation import langid
-        from redact.jailbreak.obfuscation.translation import check_translation
+        from redact.jailbreak.obfuscation.translation import (
+            ACCEPTED_LABELS, MEDIAN_RATIO, check_translation)
 
         monkeypatch.setattr(langid, "detect", lambda text: "cmn_Hani")
-        assert check_translation("译" * 60, "x" * 20, "chinese") == "length_ratio=8.82"
+        assert check_translation("译" * 60, "x" * 20, labels=ACCEPTED_LABELS["chinese"], median_ratio=MEDIAN_RATIO["chinese"]) == "length_ratio=8.82"
 
     def test_a_short_piece_is_still_checked_for_its_language_and_for_empty(
             self, monkeypatch):
         from redact.jailbreak.obfuscation import langid
-        from redact.jailbreak.obfuscation.translation import check_translation
+        from redact.jailbreak.obfuscation.translation import (
+            ACCEPTED_LABELS, MEDIAN_RATIO, check_translation)
 
         monkeypatch.setattr(langid, "detect", lambda text: "jpn_Jpan")
-        assert check_translation("问：", "Q:", "chinese") == "language=jpn_Jpan"
-        assert check_translation(" ", "Q:", "chinese") == "empty"
+        assert check_translation("问：", "Q:", labels=ACCEPTED_LABELS["chinese"], median_ratio=MEDIAN_RATIO["chinese"]) == "language=jpn_Jpan"
+        assert check_translation(" ", "Q:", labels=ACCEPTED_LABELS["chinese"], median_ratio=MEDIAN_RATIO["chinese"]) == "empty"
 
     @pytest.mark.parametrize("label", ["und_Bali", "und_Xsux", "und_Latn"])
     def test_an_undetermined_glotlid_label_is_no_verdict_on_the_language(
             self, monkeypatch, label):
         """Two of the three Chinese discards of the measured run were this."""
         from redact.jailbreak.obfuscation import langid
-        from redact.jailbreak.obfuscation.translation import check_translation
+        from redact.jailbreak.obfuscation.translation import (
+            ACCEPTED_LABELS, MEDIAN_RATIO, check_translation)
 
         monkeypatch.setattr(langid, "detect", lambda text: label)
-        assert check_translation("译" * 34, "x" * 100, "chinese") is None
-        assert check_translation("译" * 100, "x" * 100, "chinese") == "length_ratio=2.94"
+        assert check_translation("译" * 34, "x" * 100, labels=ACCEPTED_LABELS["chinese"], median_ratio=MEDIAN_RATIO["chinese"]) is None
+        assert check_translation("译" * 100, "x" * 100, labels=ACCEPTED_LABELS["chinese"], median_ratio=MEDIAN_RATIO["chinese"]) == "length_ratio=2.94"
 
     def test_a_label_that_only_starts_like_an_undetermined_one_is_a_language(
             self, monkeypatch):
         from redact.jailbreak.obfuscation import langid
-        from redact.jailbreak.obfuscation.translation import check_translation
+        from redact.jailbreak.obfuscation.translation import (
+            ACCEPTED_LABELS, MEDIAN_RATIO, check_translation)
 
         for label in ("ind_Latn", "undd_Hani", "eng_Latn"):
             monkeypatch.setattr(langid, "detect", lambda text, label=label: label)
             assert check_translation(
-                "译" * 34, "x" * 100, "chinese") == f"language={label}"
+                "译" * 34, "x" * 100, labels=ACCEPTED_LABELS["chinese"], median_ratio=MEDIAN_RATIO["chinese"]) == f"language={label}"
 
     def test_a_japanese_translation_at_its_median_passes(self, monkeypatch):
         from redact.jailbreak.obfuscation import langid
-        from redact.jailbreak.obfuscation.translation import check_translation
+        from redact.jailbreak.obfuscation.translation import (
+            ACCEPTED_LABELS, MEDIAN_RATIO, check_translation)
 
         monkeypatch.setattr(langid, "detect", lambda text: "jpn_Jpan")
-        assert check_translation("訳" * 47, "x" * 100, "japanese") is None
+        assert check_translation("訳" * 47, "x" * 100, labels=ACCEPTED_LABELS["japanese"], median_ratio=MEDIAN_RATIO["japanese"]) is None
 
     def test_the_reply_cap_is_about_three_times_the_inputs_tokens(self):
         from redact.jailbreak.obfuscation.translation import reply_cap

@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 285 active techniques in 5 layers and 37
+The jailbreak stage draws from 315 active techniques in 5 layers and 41
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -42,7 +42,7 @@ manifest recorded, and its resume warns that the rules changed (the plan
 file's `rules` id holds the layer order). Within the obfuscation layer,
 families apply in the order of their `within_layer_order`, numbered in tens
 so a family added later slots in between: the whole-text rewrites first
-(`translation` 10, `typos` 20, `casual_writing` 30, `noise` 35), then the word-level
+(`translation` 10 and the spec 1.4 language-mix families `dialect` 11, `code_switching` 12, `transliteration` 13 and `romanization` 14, then `typos` 20, `casual_writing` 30, `noise` 35), then the word-level
 steps (`sensitive_words` 40, `wording` 45, `tokenbreak` 50, `word_art` 55), so a rewrite cannot undo a
 split, an encoded word or a code name, then `suffixes` 60, `payload_split` 65, `encode` 70, `structural` and
 `neutral_container` 80 (each excludes the other, so they share the place)
@@ -72,10 +72,10 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 4 | 47 | at most 1 |
-| `obfuscation` | 14 | 136 | no cap |
+| `obfuscation` | 18 | 166 | no cap |
 | `requests` | 13 | 71 | at most 1 |
 | `manipulation` | 3 | 15 | at most 1 |
-| all | 37 | 285 | |
+| all | 41 | 315 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -99,6 +99,10 @@ that call a model call the generation model.
 | hacking | `persona` | `role_framing` |  | 14 | yes | no | `to_invented_persona`, `to_psychopath_persona`, `to_alien_persona`, `to_radical_politician_persona`, `to_cult_leader_persona`, `to_very_advanced_ai_persona`, `to_cartel_leader_persona`, `to_artist_persona`, `to_deformed_scientist_persona`, `to_actor_persona`, `to_someone_from_the_future_persona`, `to_mercenary_persona`, `to_underground_hacker_persona`, `to_anarchist_philosopher_persona` |
 | hacking | `persona_template` | `role_framing` |  | 23 | no | no | `to_dan_persona_template`, `to_stan_persona_template`, `to_dude_persona_template`, `to_developer_mode_persona_template`, `to_aim_persona_template`, `to_evil_confidant_persona_template`, `to_opposite_mode_persona_template`, `to_unfiltered_oracle_persona_template`, `to_rogue_ai_persona_template`, `to_maintenance_mode_persona_template`, `to_liberated_model_persona_template`, `to_caring_grandma_persona_template`, `to_worried_parent_persona_template`, `to_loyal_friend_persona_template`, `to_licensed_professional_persona_template`, `to_official_investigator_persona_template`, `to_research_scientist_persona_template`, `to_game_engine_persona_template`, `to_terminal_simulator_persona_template`, `to_simulation_rules_persona_template`, `to_penalty_game_persona_template`, `to_tagged_speaker_persona_template`, `to_character_reset_persona_template` |
 | obfuscation | `translation` | `language` | 10 | 24 | yes | no | `to_french`, `to_japanese`, `to_russian`, `to_spanish`, `to_german`, `to_arabic`, `to_turkish`, `to_czech`, `to_vietnamese`, `to_greek`, `to_croatian`, `to_swahili`, `to_thai`, `to_khmer`, `to_nepali`, `to_zulu`, `to_scots_gaelic`, `to_bengali`, `to_javanese`, `to_hmong`, `to_chinese`, `to_hindi`, `to_yoruba`, `to_amharic` |
+| obfuscation | `dialect` | `language` | 11 | 6 | yes | no | `to_dialect_brazilian_portuguese`, `to_dialect_mexican_spanish`, `to_dialect_canadian_french`, `to_dialect_egyptian_arabic`, `to_dialect_swiss_german`, `to_dialect_traditional_chinese` |
+| obfuscation | `code_switching` | `language` | 12 | 10 | yes | no | `to_code_switch_spanish`, `to_code_switch_french`, `to_code_switch_german`, `to_code_switch_portuguese`, `to_code_switch_swahili`, `to_code_switch_russian`, `to_code_switch_arabic`, `to_code_switch_hindi`, `to_code_switch_chinese`, `to_code_switch_japanese` |
+| obfuscation | `transliteration` | `encoding` | 13 | 4 | no | no | `to_cyrillic_transliteration`, `to_greek_transliteration`, `to_devanagari_transliteration`, `to_arabic_transliteration` |
+| obfuscation | `romanization` | `language` | 14 | 10 | yes | no | `to_romanize_hindi`, `to_romanize_urdu`, `to_romanize_bengali`, `to_romanize_marathi`, `to_romanize_tamil`, `to_romanize_telugu`, `to_romanize_gujarati`, `to_romanize_punjabi`, `to_romanize_nepali`, `to_romanize_arabic` |
 | obfuscation | `typos` | `surface_noise` | 20 | 4 | yes | no | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium`, `to_rewrite_with_typos_high`, `to_rewrite_with_typos_insane` |
 | obfuscation | `casual_writing` | `surface_noise` | 30 | 9 | no | no | `to_lowercase`, `to_uppercase`, `to_no_sentence_capitals`, `to_dropped_spaces`, `to_doubled_spaces`, `to_dropped_punctuation`, `to_doubled_punctuation`, `to_abbreviations`, `to_stripped_accents` |
 | obfuscation | `noise` | `surface_noise` | 35 | 12 | no | no | `to_random_capitals_low`, `to_random_capitals_medium`, `to_random_capitals_high`, `to_scrambled_letters_low`, `to_scrambled_letters_medium`, `to_scrambled_letters_high`, `to_keyboard_typos_low`, `to_keyboard_typos_medium`, `to_keyboard_typos_high`, `to_emoji_sprinkle_low`, `to_emoji_sprinkle_medium`, `to_emoji_sprinkle_high` |
@@ -156,10 +160,14 @@ own beside `encode`, at the spec's `heavy_encoding_weight` (0.2) times
 `encode`'s weight, about a fifth of a family's draws: dealt as `encode`'s
 members they were seldom drawn in the default attacks, since one fits only a
 unit with 3 points of its budget left ([internals/jailbreak.md](internals/jailbreak.md#balanced-dealing)).
-The slot is a quota in every budget round, not a floor: about 40 draws in
-3,000 units whatever the round's budget, so round 3 of the escalation rises
-from 6 to 42 and round 4, whose budget of 9 dealt them about 121 times, falls
-to about 45. A count round deals them as `encode`'s members.
+The slot is a quota in every budget round, not a floor, whatever the round's
+budget: about 45 draws in 3,000 units when it was set (spec 1.3), so round 3
+of the escalation rose from 6 to 42 and round 4, whose budget of 9 dealt
+them about 121 times, fell to about 45. Spec 1.4's four language-mix
+families share the obfuscation picks among more families, and the slot
+follows: 30 draws of the ten in 3,000 units of the default attacks (3
+each), 30 in round 3 and 24 in round 4 (three groups, seeds 42 to 46, the
+same at each). A count round deals them as `encode`'s members.
 
 Nineteen of them are tagged `needs_latin`: the ciphers `to_rot13`,
 `to_rot18`, `to_rot47`, `to_caesar_cipher`, `to_atbash`, the three
@@ -196,6 +204,8 @@ QWERTY map only), checked on the same six scripts. The three
 in any font, so each is kept from `ascii_art`. The `noise` family is kept
 from `typos` and `casual_writing`: one kind of surface noise per text. It is
 kept from `translation` too, whatever the script.
+
+The four `transliteration` techniques (spec 1.4) are tagged too: they write the Latin letters of a text in another script and leave every other character as it was.
 
 No rule reads the `needs_latin` tag. A translation into another script would
 leave such a technique nothing to change, and the family rules keep the two
@@ -293,7 +303,11 @@ technique is picked first. A technique may not join a combination when:
   hand the translator a cipher; the ten `to_sensitive_words_encode_*` were
   kept from a translation by their other family already; the
   [eval release](configuration.md#release-notes) removed from the eval pool
-  the 40 pairs of its eight translations with its five encodings);
+  the 40 pairs of its eight translations with its five encodings); the four
+  spec 1.4 language-mix families (`dialect`, `code_switching`,
+  `transliteration`, `romanization`) refuse the same ten families, `translation`
+  and one another (each rewrites the whole text into another language or
+  script, so one is enough);
   `ascii_art` with `framing`, `persona`, `cognitive`, `fsh`,
   `dap`; `fsh` and `dap` with `continuation`, `indirect`, `framing`,
   `persona`, `cognitive`; `persona_template` with `fsh`, `dap` and
@@ -376,7 +390,7 @@ technique is picked first. A technique may not join a combination when:
   know which technique of a combination is the request obfuscation). A
   translation drawn as an ordinary obfuscation runs before those steps and
   joins them, and an encoding is kept from any translation by the family
-  rule above. Together the family rules (ten of the other thirteen
+  rule above. Together the family rules (fourteen of the other seventeen
   obfuscation families) and this table (the last three) make a translation
   drawn as the request obfuscation the unit's only obfuscation;
 - in budget mode, its complexity is above what is left of `max_complexity`
@@ -481,16 +495,20 @@ spec version 1.2 marks `["natural"]` alone: `smalltalk_prefix`,
 `smalltalk_suffix` and `benign_role`, which no attack draws (an adversarial
 allow list that names one raises). The families `typos`, `casual_writing`,
 `noise`, `neutral_container`, `translation`, `answer_language`,
-`answer_format`, `asking` and `indirect` are marked
+`answer_format`, `asking` and `indirect`, and since spec 1.4 `dialect`,
+`code_switching`, `transliteration` and `romanization`, are marked
 `["adversarial", "natural"]`, less their attack-only
 techniques, and three techniques of attack families are marked natural on
 their own. The natural kind draws only what is marked natural: by default
-(translation off) these 72 techniques in 13 families, pinned in
+(translation off) these 96 techniques in 16 families, pinned in
 `tests/fixtures/natural_pool.json`:
 
 | Family | Natural techniques |
 |---|---|
 | `typos` | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium` |
+| `transliteration` | all four (since spec 1.4) |
+| `code_switching` | all ten (since spec 1.4) |
+| `romanization` | all ten (since spec 1.4) |
 | `casual_writing` | all nine |
 | `noise` | the low and medium densities of `to_random_capitals_*`, `to_scrambled_letters_*`, `to_keyboard_typos_*` and `to_emoji_sprinkle_*` (eight, since spec 1.2) |
 | `neutral_container` | all six (since spec 1.2) |
@@ -503,7 +521,7 @@ their own. The natural kind draws only what is marked natural: by default
 | `encode` | `to_leetspeak_basic` |
 | `suffixes` | `to_adversarial_suffix_punctuation`, `to_adversarial_suffix_emoji` |
 
-With `"natural": {"translation": true}` the 24 translations join them (96);
+With `"natural": {"translation": true}` the 24 translations and the six `dialect` techniques join them (126);
 the kind draws one technique per input unless `exact_techniques` says more,
 and with two or more a translation is kept from `typos`, `casual_writing` and
 `noise` by the rules above.
@@ -528,7 +546,7 @@ kind does not draw, with one WARNING that counts them
 
 A technique that calls a model carries, in the spec, the model calls one
 application makes (`calls`, generation and checks, low to high: a typo
-rewrite 2 to 4, a translation of one paragraph 2 to 12, a word-marking
+rewrite 2 to 4, a code-switching or romanization rewrite 2 to 4, a translation or dialect of one paragraph 2 to 12, a word-marking
 step 1, the synonyms 1 to 11, a wording technique 1 to 21, a semantic payload
 split 1 to 3, an fsh or dap pick 1, a cognitive or persona scenario 3 to 9, an
 invented persona 4 to 12, a persuasion or tense rewrite 2 to 4, a model
@@ -538,15 +556,17 @@ planned units; for 1,000 inputs of one category and entry type, planned
 with the packaged attack kind and seed 42:
 
 ```text
-Model calls: 855 of 1000 planned units call a model, 1997 to 7669 calls (translation 480 to 2880, from the spec's calls).
+Model calls: 857 of 1000 planned units call a model, 2099 to 7719 calls (translation 434 to 2604, from the spec's calls).
 ```
 
-Other seeds (43 to 46) give 848 to 853 units, 1,986 to 1,994 calls at the
-low end, 7,610 to 7,732 at the high end and a translation share of 478 to 480
-and 2,868 to 2,880.
+Other seeds (43 to 46) give 841 to 857 units, 2,079 to 2,100 calls at the
+low end, 7,629 to 7,712 at the high end and a translation share of 430 to 432
+and 2,580 to 2,592.
 
 The translation share goes to the translation model (a machine
-translation's judge, one call a round, to the generation model).
+translation's judge, one call a round, to the generation model); the line
+counts the translation family alone, and the `dialect` techniques, which run
+on the same model, are in the totals only.
 
 ## What the families do
 
@@ -762,6 +782,58 @@ wrappers. The family is attack-only, and the eval type does not draw it.
   words or characters of its text (`sensitive_words`, `wording`,
   `tokenbreak`, `word_art`, `typos`, `casual_writing`, `noise`,
   `payload_split`; [the rules](#compatibility-rules)).
+- The four language-mix families (spec 1.4) sit in the obfuscation layer
+  between `translation` and `typos`, as `translation` does: each rewrites the
+  whole text into another language or script, so each refuses the same
+  families a translation refuses, `translation` and one another
+  ([the rules](#compatibility-rules)). `dialect`, `code_switching`,
+  `transliteration` and `romanization` are all marked
+  `["adversarial", "natural"]`.
+- `dialect` (6, `to_dialect_<slug>`) translates the prompt into a regional
+  variant: Brazilian Portuguese, Mexican Spanish, Canadian French, Egyptian
+  Arabic, Swiss German or Traditional Chinese, one technique per row of
+  `configs/jailbreak/dialect_variants.json`. It reuses the translation path
+  of `obfuscation/translation.py` (the piece-by-piece machine translation
+  with the back-translation judge, or the chat path by the variant's name),
+  and on a machine translator the variant's region or script code is sent.
+  It runs on the `translation` model, so a kind's `translation` switch gates
+  it as it gates the translation family (off removes it), and a pool that
+  holds one plans that model. The code checks what GlotLID and the
+  characters can tell: the base language's labels, a length band, and for
+  Traditional Chinese a share of Traditional over Simplified characters;
+  GlotLID tells the base language, not the region, so the region itself is
+  not checked. Spec `check` `translate`, 2 to 12 calls.
+- `code_switching` (10, `to_code_switch_<slug>`) has the generation model
+  rewrite the prompt with some phrases in a second language and the rest in
+  English, keeping its meaning: Spanish, French, German, Portuguese,
+  Swahili, Russian, Arabic, Hindi, Chinese or Japanese, one technique per
+  row of `code_switch_languages.json`. A code gate checks the mix (for a
+  second language in a non-Latin script, its share of the letters; for a
+  Latin one, GlotLID over windows of four words; and a length band), then
+  the check model reads the rewrite against the prompt for meaning
+  (`jailbreak/code_switch`, `jailbreak/code_switch_check`). A rejected
+  rewrite is made again with the reason, up to two rewrites; one rejected
+  twice is discarded (`DISCARDED; reason=code switch failed`). Spec `check`
+  `meaning`, 2 to 4 calls; the info is `language=<name>`.
+- `transliteration` (4) writes the Latin letters of the prompt in another
+  script by a fixed letter and digraph table: Cyrillic, Greek, Devanagari
+  or Arabic. It is pure and lossy: the words stay English, only the
+  letters change, and several letters share one target letter, so the text
+  cannot be turned back. It changes only Latin letters, so it is tagged
+  `needs_latin`, and a fresh plan draws it only for a text that holds a
+  Latin letter. No reader of those scripts has checked the tables.
+- `romanization` (10, `to_romanize_<slug>`) has the generation model rewrite
+  the prompt in a non-Latin language spelled in the Latin alphabet (Hinglish,
+  Arabizi and the like): Hindi, Urdu, Bengali, Marathi, Tamil, Telugu,
+  Gujarati, Punjabi, Nepali or Arabic, one technique per row of
+  `romanization_languages.json`. A code gate checks that the reply is
+  mostly Latin and that GlotLID does not read it as plain English (its
+  romanized label confirms it; GlotLID has little data for them, so any
+  other non-English Latin label passes), and a length band, then the check
+  model reads it for meaning (`jailbreak/romanize`,
+  `jailbreak/romanize_check`), with the same retry as code switching. Spec
+  `check` `meaning`, 2 to 4 calls. None of the four families is checked by
+  a native speaker: the gates and the check model are the whole check.
 - `typos` is a rewrite by the model, at one of four densities, with the
   level's description in the prompt, then a check: the stage's `check`
   model (the `gen` model unless the recipe names one) reads the rewrite
