@@ -691,6 +691,34 @@ def test_the_benign_data_is_made_with_the_stages_taxonomy_overlay_and_batch(
         "prompt_dir": tmp_path / "prompts", "batch_size": 4}
 
 
+@pytest.mark.parametrize(("given", "checker"), [
+    ({}, "jb-gen"), ({"check_model": "jb-check"}, "jb-check")],
+    ids=["generation model", "named check model"])
+def test_the_benign_pairs_are_checked_by_the_check_model_else_the_generation_model(
+        tmp_path, monkeypatch, given, checker):
+    """fsh draws no technique a check model checks, but needs the benign
+    pairs, which the check model reads: a named one is created for them."""
+    import redact.stages as P
+
+    created = []
+
+    def create(model):
+        created.append(model)
+        return make_client(MockBackend("unused", model=model), model)
+
+    monkeypatch.setattr(P.ModelClient, "create", create)
+    loads = _benign_loads(monkeypatch)
+    generate_jailbreaks(
+        inputs=_inputs(), output_path=tmp_path / "jb.csv", seed=7, model="jb-gen",
+        augmentation={"adversarial": {
+            "techniques": {"allow": ["to_fsh_random_short"]}, "translation": False,
+            "rounds": [{"exact_techniques": 1}]}, "natural": None},
+        verbose=False, **given)
+    (load,) = loads
+    assert (load["client"].model, load["check"].model) == ("jb-gen", checker)
+    assert created == ["jb-gen", *given.values()]
+
+
 def test_a_resume_loads_the_benign_data_its_plan_needs_whatever_its_pool(
         tmp_path, monkeypatch):
     """Else the pending units of a technique that needs it would be acked as

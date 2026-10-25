@@ -9,6 +9,6 @@
   "few_shot_examples": [],
   "metadata": {
     "version": "1.0",
-    "notes": "Not currently wired into any pipeline: benign Q&A generation for FSH/DAP (jailbreak/manipulation/benign.py) has no check step today. Authored for a validation pass that ensures Q&A pairs are truly benign and not disguised harmful content; load via load_prompt('jailbreak', 'benign_check') to use it."
+    "notes": "Checks each benign Q&A pair the FSH and DAP techniques show (jailbreak/manipulation/benign.py, generate_benign_data), on the jailbreak stage's check model, else its generation model, at CHECK_TEMPERATURE; the category is the pair's subcategory under its main category. A rejection's reply is fed back to the pair asked for again alone, up to three generations of the pair; one rejected every time is left out of the cache."
   }
 }

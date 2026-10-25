@@ -52,7 +52,7 @@ in [techniques.md](../techniques.md).
 | Recipe role | Registry role | Default | Calls |
 |---|---|---|---|
 | `gen` | `uncensored_gen` | `venice-uncensored` | Every technique that calls a model, the benign data, and the judge of a machine translation |
-| `check` | `uncensored_gen` | the `gen` model | Passed to each technique as `check_model`, to check what its model writes (the typo, scenario and preserve checks); left out, it is the `gen` model, so no other model loads; given, it is created, planned and loaded only when a kind that runs draws a technique with one of those checks (the eval type's attacks draw none). Translation keeps its own checkers: the chat translator itself, the `gen` model as a machine translation's judge |
+| `check` | `uncensored_gen` | the `gen` model | Passed to each technique as `check_model`, to check what its model writes (the typo, scenario and preserve checks), and reads each benign pair the stage generates; left out, it is the `gen` model, so no other model loads; given, it is created, planned and loaded only when a kind that runs draws a technique with one of those checks or one that needs the benign data (the eval type's attacks draw `fsh` and `dap`, so it is planned for their pairs). Translation keeps its own checkers: the chat translator itself, the `gen` model as a machine translation's judge |
 | `translation` | `translation` | `translategemma-27b` | The `translation` family; resolved, planned and loaded only when a kind's pool holds a translation technique (`"translation": true`, as in the packaged attacks and the eval type's) |
 
 A chat translator (`deepseek-v3.2`, named in the recipe) makes up to 4
@@ -176,11 +176,24 @@ subcategories; a category without subcategories is its own). A unit is one
 `(main_category, sub_category, answer_type)`, the answer type `short` or
 `long`: one call asking for 8 pairs. The units run on the worker pool, as the
 stage's own units do. A reply that does not hold exactly 8 complete pairs is
-rejected and the call made again: up to three calls in all. A unit rejected
-every time is acked
-`rejected` with no rows, and a WARNING names it. When no unit has a row, the
-stage stops with `No benign pairs at ...`. The prompt
-`prompts/jailbreak/benign_generation/` is read through the overlay.
+rejected and the call made again: up to three calls in all. Each pair of an
+accepted reply is then read by the `check` model (the `gen` model when the
+recipe names none) with `prompts/jailbreak/benign_check/`, shown the pair's
+subcategory under its main category, its question and its answer, at the check
+temperature (0.15). A rejected pair is asked for again alone (the generation
+prompt for one pair) with the verdict as feedback, and the new pair checked:
+three generations of a pair in all, the reply's first. A reply that is not one
+pair in the format is rejected with no check call, its feedback saying so. A
+pair rejected every time is left out, and its unit's ack counts it
+(`rejected_pairs`), so a subcategory may hold fewer than 8 pairs of a type (the
+`short` and `long` variants take as many as it has, up to their draw). A unit
+is one generation call and 8 check calls when every pair passes, and at most
+3 + 8 × 5 = 43 calls. A unit with no reply in the format, or none of whose
+pairs is left, is acked `rejected` with no rows, and a WARNING names it. When
+no unit has a row, the stage stops with `No benign pairs at ...`. The prompts
+`prompts/jailbreak/benign_generation/` and `benign_check/` are read through
+the overlay. A cache loaded as it is (with `auto_generate_benign` off, or the
+pairs of earlier runs) is not checked again.
 
 The `short` and `long` variants show three to seven pairs of one
 subcategory. The many-shot variants (`*_many`) show 32 short pairs, more

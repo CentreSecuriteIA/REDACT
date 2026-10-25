@@ -154,7 +154,8 @@ default": `paraphraser` may be a pool (`"distribution"`); `check` left out is
 the `gen` model; `translation` is no model when no kind's pool holds a
 translation technique; and in the `jailbreaks` stage `check` is no model when
 no kind's pool holds a technique whose spec `check` a check model makes
-(`typos`, `scenario`, `preserve`; `jailbreak.pool.uses_check`). The driver
+(`typos`, `scenario`, `preserve`) nor one that needs the benign data, whose
+pairs the check model reads (`jailbreak.pool.uses_check_model`). The driver
 passes each stage, for the plan and for the run record's `serving`.
 
 ## config_overlay.py

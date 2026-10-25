@@ -1,16 +1,26 @@
 """Benign Q&A pairs for the FSH and DAP techniques: generated on the worker pool
-for each subcategory of a benign taxonomy, and cached.
+for each subcategory of a benign taxonomy, each pair checked, and cached.
 """
 
 import logging
+from collections.abc import Generator
 from pathlib import Path
 
 import pandas as pd
 
 from redact import paths
+from redact.content_moderation.feedback import NOT_ONE_PAIR, with_feedback
 from redact.dataset import CommitBuffer, Ledger, Manifest, append_rows, resume_state
 from redact.dataset.taxonomy import iter_categories, load_taxonomy
-from redact.llm_pipeline import drive_units, extracted, pool_size
+from redact.llm_pipeline import (
+    CHECK_TEMPERATURE,
+    LLMRequest,
+    checked,
+    drive_units,
+    extracted,
+    is_accepted,
+    pool_size,
+)
 from redact.llms.client import ModelClient
 from redact.llms.prompting import build_messages, extract_structured_qa, load_prompt
 
@@ -22,8 +32,12 @@ DEFAULT_TAXONOMY = "benign"
 ANSWER_TYPES = ("short", "long")
 # A unit's key, and its ledger's.
 _KEY_FIELDS = ("main_category", "sub_category", "answer_type")
-# Generations of a unit before it is given up.
+# Generations of a unit's reply before it is given up, and of each pair: the
+# reply's generation is a pair's first, then it is asked for alone again.
 _ATTEMPTS = 3
+
+#: A unit's pairs: ``{"question", "answer"}`` each.
+Pairs = list[dict[str, str]]
 
 
 def benign_categories(taxonomy: dict) -> list[tuple[str, str]]:
@@ -43,11 +57,23 @@ def _ledger(path: Path) -> Ledger:
     return Ledger.sidecar(path, _KEY_FIELDS, dict.fromkeys(_KEY_FIELDS, str))
 
 
+def _category(main: str, sub: str) -> str:
+    """The category a pair's check is shown: its subcategory under its main
+    category, or the main category alone when it is its own subcategory."""
+    return main if sub == main else f"{main} / {sub}"
+
+
+def _one_pair(reply: str) -> Pairs:
+    """The pair of a reply that holds exactly one, ``[]`` for any other."""
+    return extract_structured_qa(reply, expected_count=1)
+
+
 def generate_benign_data(
     categories: list[tuple[str, str]],
     client: ModelClient,
     out_path: str | Path,
     *,
+    check: ModelClient | None = None,
     prompt_dir: str | Path | None = None,
     num_samples: int = 8,
     batch_size: int = 256,
@@ -58,9 +84,23 @@ def generate_benign_data(
     A unit is one ``(main, sub)`` and answer type: one call asking for
     ``num_samples`` pairs. A reply with any other number of pairs is rejected
     whole and the call made again, up to three times; a unit rejected every
-    time is acked ``rejected`` with no rows. ``pool_size(batch_size, client)``
-    units are live, a call carries up to ``batch_size`` requests, and rows
-    are appended every 32 units.
+    time is acked ``rejected`` with no rows.
+
+    Each pair of an accepted reply is then read by ``check`` (``client``
+    when None) with ``jailbreak/benign_check`` (its ``category``,
+    ``question`` and ``answer``), at
+    :data:`~redact.llm_pipeline.CHECK_TEMPERATURE`. A rejected pair is
+    asked for again alone (the generation prompt for one pair) with the
+    verdict as feedback, and the new pair checked, through
+    :func:`~redact.llm_pipeline.checked`: three generations of a pair in all,
+    the reply's first; a reply that is not one pair is rejected without a
+    check call (:data:`~redact.content_moderation.feedback.NOT_ONE_PAIR`,
+    its feedback). A pair rejected every time is left out, its unit's ack
+    counting it (``rejected_pairs``); a unit none of whose pairs is left is
+    acked ``rejected`` with no rows, as one with no reply in the format.
+
+    ``pool_size(batch_size, client, check)`` units are live, a call carries
+    up to ``batch_size`` requests, and rows are appended every 32 units.
 
     The run always resumes: the ledger beside ``out_path``, keyed
     ``(main_category, sub_category, answer_type)``, says which units are
@@ -68,7 +108,9 @@ def generate_benign_data(
     units it holds no rows of are generated.
     """
     out_path = Path(out_path)
+    check = check if check is not None else client
     config = load_prompt("jailbreak", "benign_generation", prompt_dir)
+    check_config = load_prompt("jailbreak", "benign_check", prompt_dir)
     units = [(main, sub, answer_type)
              for main, sub in categories for answer_type in ANSWER_TYPES]
 
@@ -82,33 +124,66 @@ def generate_benign_data(
 
     if verbose:
         logger.info("Benign data: %d units (%d subcategories x %d answer types), "
-                    "%d to generate | Model: %s | Batch: %d", len(units),
+                    "%d to generate | Model: %s | Check: %s | Batch: %d", len(units),
                     len(categories), len(ANSWER_TYPES), len(pending), client.model,
-                    batch_size)
+                    check.model, batch_size)
 
-    def _unit(unit: tuple[str, str, str]):
+    def _check_messages(category: str, pair: dict[str, str]) -> list[dict]:
+        return build_messages(check_config, category=category,
+                              question=pair["question"], answer=pair["answer"])
+
+    def _checked_pair(pair: dict[str, str], ask_one: list[dict], category: str,
+                      ) -> Generator[LLMRequest, str, tuple[dict | None, str]]:
+        """Check ``pair``; ask for one pair again (``ask_one``) with the
+        verdict until one is accepted, :data:`_ATTEMPTS` generations in all.
+        Returns ``(pair, "")``, or ``(None, last verdict)``."""
+        verdict = yield LLMRequest.for_client(
+            check, _check_messages(category, pair), temperature=CHECK_TEMPERATURE)
+        if is_accepted(verdict):
+            return pair, ""
+        reply, accepted, reasoning = yield from checked(
+            client, lambda feedback: with_feedback(ask_one, feedback or verdict),
+            check, lambda _original, reply: _check_messages(category, _one_pair(reply)[0]),
+            max_attempts=_ATTEMPTS - 1,
+            precheck=lambda reply: "" if _one_pair(reply) else NOT_ONE_PAIR,
+            temperatures=(None, CHECK_TEMPERATURE))
+        return (_one_pair(reply)[0], "") if accepted else (None, reasoning)
+
+    def _unit(unit: tuple[str, str, str],
+              ) -> Generator[LLMRequest, str, tuple[Pairs, int, int]]:
+        """The unit's pairs that passed the check, the generations its reply
+        took, and how many pairs the check left out."""
         main, sub, answer_type = unit
-        messages = build_messages(
-            config,
-            sub_category=sub,
-            main_category=main,
-            num_samples=str(num_samples),
-            answer_style=config["answer_styles"][answer_type],
-        )
-        return extracted(
+
+        def ask(count: int) -> list[dict]:
+            return build_messages(
+                config, sub_category=sub, main_category=main, num_samples=str(count),
+                answer_style=config["answer_styles"][answer_type])
+
+        messages = ask(num_samples)
+        pairs, attempts = yield from extracted(
             client, lambda: messages,
             lambda reply: extract_structured_qa(reply, expected_count=num_samples),
             max_attempts=_ATTEMPTS,
         )
+        kept, ask_one, category = [], ask(1), _category(main, sub)
+        for pair in pairs:
+            pair, _verdict = yield from _checked_pair(pair, ask_one, category)
+            if pair is not None:
+                kept.append(pair)
+        return kept, attempts, len(pairs) - len(kept)
 
-    written = 0
+    written = dropped = 0
     rejected: list[tuple[str, str, str]] = []
 
-    def _on_done(i: int, value: tuple[list[dict], int]) -> None:
-        nonlocal written
-        pairs, attempts = value
+    def _on_done(i: int, value: tuple[Pairs, int, int]) -> None:
+        nonlocal written, dropped
+        pairs, attempts, left_out = value
         main, sub, answer_type = unit = pending[i]
         record = dict(zip(_KEY_FIELDS, unit))
+        if left_out:
+            record["rejected_pairs"] = left_out
+            dropped += left_out
         if not pairs:
             # Acked: un-acked, it would be generated, and paid for, again on
             # every resume.
@@ -125,22 +200,25 @@ def generate_benign_data(
         drive_units(
             ((i, _unit(unit)) for i, unit in enumerate(pending)),
             on_done=_on_done,
-            pool_size=pool_size(batch_size, client),
+            pool_size=pool_size(batch_size, client, check),
             cap=batch_size,
             progress="benign" if verbose else None,
         )
 
     if rejected:
         logger.warning(
-            "%d benign units rejected after %d attempt(s) each: %s. They are "
-            "acked and skipped on resume; delete %s to generate them again (the "
-            "pairs already in %s are kept).",
-            len(rejected), _ATTEMPTS, ", ".join(" / ".join(u) for u in rejected),
-            ledger.path.name, out_path.name,
+            "%d benign units rejected: no reply held %d pairs in %d calls, or "
+            "the check rejected each pair %d times: %s. They are acked and "
+            "skipped on resume; delete %s to generate them again (the pairs "
+            "already in %s are kept).",
+            len(rejected), num_samples, _ATTEMPTS, _ATTEMPTS,
+            ", ".join(" / ".join(u) for u in rejected), ledger.path.name,
+            out_path.name,
         )
     if verbose:
-        logger.info("Benign data: %d pairs generated this run, saved to %s",
-                    written, out_path)
+        logger.info("Benign data: %d pairs generated this run, saved to %s; %d "
+                    "left out, rejected by the check %d times each", written,
+                    out_path, dropped, _ATTEMPTS)
 
 
 def get_or_generate_benign_data(
@@ -148,6 +226,7 @@ def get_or_generate_benign_data(
     cache_path=None,
     verbose: bool = True,
     *,
+    check: ModelClient | None = None,
     taxonomy: dict | str = DEFAULT_TAXONOMY,
     taxonomy_dir: str | Path | None = None,
     prompt_dir: str | Path | None = None,
@@ -156,10 +235,11 @@ def get_or_generate_benign_data(
     """The benign data at ``cache_path``, generated first with ``client``.
 
     With a client, the pairs of every subcategory of ``taxonomy`` that the
-    cache does not hold yet are generated (:func:`generate_benign_data`).
-    ``taxonomy`` is a taxonomy file's name under ``taxonomy_dir`` (the
-    packaged ``configs/taxonomy`` by default), or a loaded taxonomy. Without
-    a client, the cache is loaded as it is. ``cache_path`` defaults to
+    cache does not hold yet are generated, each pair checked by ``check``
+    (``client`` when None; :func:`generate_benign_data`). ``taxonomy`` is a
+    taxonomy file's name under ``taxonomy_dir`` (the packaged
+    ``configs/taxonomy`` by default), or a loaded taxonomy. Without a client,
+    the cache is loaded as it is, unchecked. ``cache_path`` defaults to
     ``paths.benign_csv()``.
 
     Returns:
@@ -189,12 +269,13 @@ def get_or_generate_benign_data(
         raise ValueError(
             f"The benign taxonomy {taxonomy.get('name', '')!r} has no category; "
             "write its categories, each with its subcategories.")
-    generate_benign_data(categories, client, path, prompt_dir=prompt_dir,
+    generate_benign_data(categories, client, path, check=check, prompt_dir=prompt_dir,
                          batch_size=batch_size, verbose=verbose)
     if not path.exists():
         raise ValueError(
-            f"No benign pairs at {path}: every unit's reply was rejected "
-            f"{_ATTEMPTS} times, and the units are acked as rejected in "
+            f"No benign pairs at {path}: every unit was rejected (no reply in "
+            f"the format in {_ATTEMPTS} calls, or every pair rejected by the "
+            f"check {_ATTEMPTS} times), and the units are acked as rejected in "
             f"{_ledger(path).path.name}. Delete that file to generate them again.")
     return load_benign_data(path)
 
