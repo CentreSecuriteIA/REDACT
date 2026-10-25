@@ -278,7 +278,8 @@ def test_a_stale_eval_copy_names_what_it_adds_to_the_eval_pool(tmp_path, caplog)
 
 #: The eval.json of the first eval release (643c0ed), byte for byte: what
 #: scaffold_setup wrote into a config_dir before eval pool v2.
-_FIRST_RELEASE_EVAL = Path(__file__).parent / "fixtures" / "eval_type_first_release.json"
+_FIRST_RELEASE_EVAL = (Path(__file__).parent / "fixtures"
+                       / "eval_type_first_release.json")
 
 #: The families eval pool v2 admitted, which that copy draws none of.
 _V2_FAMILIES = [
@@ -298,10 +299,12 @@ def test_a_copy_from_the_first_eval_release_lacks_the_v2_families_and_is_warned_
     from tests.jailbreak.test_eval_pairs import FIRST_POOL
 
     (tmp_path / "dataset_types").mkdir()
-    (tmp_path / "dataset_types" / "eval.json").write_bytes(_FIRST_RELEASE_EVAL.read_bytes())
+    copy = tmp_path / "dataset_types" / "eval.json"
+    copy.write_bytes(_FIRST_RELEASE_EVAL.read_bytes())
     base = load_dataset_type("eval", tmp_path)["augmentations"]
     pool = technique_pool(resolve(None, "adversarial", base=base, config_dir=tmp_path))
-    assert sorted(fn.__name__ for fn in pool) == sorted([*FIRST_POOL, "to_letter_spacing"])
+    assert (sorted(fn.__name__ for fn in pool)
+            == sorted([*FIRST_POOL, "to_letter_spacing"]))
     assert extra_eval_techniques(tmp_path) == []
     assert unseen_type_families(tmp_path, "eval") == {"adversarial": _V2_FAMILIES}
     with caplog.at_level("WARNING", logger="redact.config_overlay"):

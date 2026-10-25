@@ -214,8 +214,8 @@ class _Budget:
         """Whether a combination of ``fns`` stays within the budget."""
         if any(getattr(fn, "layer", None) in self.layers_off for fn in fns):
             return False
-        if (self.max_complexity is not None
-                and sum(getattr(fn, "complexity", 0) for fn in fns) > self.max_complexity):
+        spent = sum(getattr(fn, "complexity", 0) for fn in fns)
+        if self.max_complexity is not None and spent > self.max_complexity:
             return False
         return (self.max_obfuscations is None
                 or sum(getattr(fn, "layer", None) == "obfuscation" for fn in fns)

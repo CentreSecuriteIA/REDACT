@@ -197,7 +197,8 @@ def test_the_record_gives_back_every_pair_and_only_those():
     assert expand(record(pairs, members)) == set(pairs)
     fewer = pairs[1:]
     assert expand(record(fewer, members)) == set(fewer)
-    assert record(fewer, members)["family_pairs"] != record(pairs, members)["family_pairs"]
+    assert (record(fewer, members)["family_pairs"]
+            != record(pairs, members)["family_pairs"])
     refused = sorted(set(_pairs_between(members, "translation", "encode")))
     more = sorted({*pairs, refused[0]})
     assert expand(record(more, members)) == set(more)
@@ -219,8 +220,9 @@ def test_four_family_pairs_are_mixed_and_each_admits_the_letter_spacing_alone():
         "dap|encode": {"admitted": [_pair(name, "to_letter_spacing") for name in (
             "to_dap_random_long", "to_dap_random_short", "to_dap_selected_long",
             "to_dap_selected_short")]},
-        "encode|fake_turns": {"admitted": [_pair(name, "to_letter_spacing") for name in (
-            "to_fake_assistant_turn", "to_fake_history", "to_fake_system_turn")]},
+        "encode|fake_turns": {"admitted": [
+            _pair(name, "to_letter_spacing") for name in (
+                "to_fake_assistant_turn", "to_fake_history", "to_fake_system_turn")]},
         "encode|fsh": {"admitted": [_pair(name, "to_letter_spacing") for name in (
             "to_fsh_random_long", "to_fsh_random_short", "to_fsh_selected_long",
             "to_fsh_selected_short")]},
@@ -238,7 +240,8 @@ def test_eval_pool_v2_holds_the_first_pool_whose_pairs_did_not_move(recorded):
 
 
 def test_the_first_pool_is_the_one_a_spec_1_3_eval_plan_recorded():
-    spec_1_3 = json.loads((_FIXTURES / "spec_1_3_pools.json").read_text(encoding="utf-8"))
+    spec_1_3 = json.loads(
+        (_FIXTURES / "spec_1_3_pools.json").read_text(encoding="utf-8"))
     assert sorted(spec_1_3["eval:adversarial"]) == sorted(FIRST_POOL)
     assert len(FIRST_POOL) == 36    # noqa: PLR2004
 

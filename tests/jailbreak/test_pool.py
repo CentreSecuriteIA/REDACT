@@ -175,9 +175,10 @@ def test_the_default_attack_pool_is_285_techniques_in_34_families():
     families: the 24 translations included, now the packaged adversarial
     kind has its translation switch on (the four spec 1.3 ones are Hmong,
     Chinese, Hindi and Amharic, the spec 1.4 one Yoruba); the seven spec 1.1
-    retired left out, the fifteen spec 1.2 encodings, the twelve spec 1.2 noise techniques, the
-    six spec 1.2 neutral containers, the six spec 1.2 answer languages, the
-    four spec 1.2 many-shot fsh and dap variants, the eleven spec 1.3
+    retired left out, the fifteen spec 1.2 encodings, the twelve spec 1.2
+    noise techniques, the six spec 1.2 neutral containers, the six spec 1.2
+    answer languages, the four spec 1.2 many-shot fsh and dap variants, the
+    eleven spec 1.3
     persona templates, the three spec 1.3 answer formats, the three spec 1.3
     fake turns, the seven spec 1.3 members of the thin request families and
     the two spec 1.3 payload splits, the spec 1.3 word art and the three

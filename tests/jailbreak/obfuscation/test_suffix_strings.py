@@ -31,8 +31,10 @@ from redact.jailbreak.pool import all_techniques, technique_pool
 
 _SRC = Path(__file__).parents[3] / "src"
 _ROWS = [
-    {"slug": "alpha", "suffix": "zz alpha omega", "source": "Stand-in 2026, arXiv:0000.00000",
-     "optimized_against": "a stand-in model", "notes": "not a real suffix", "since": "1.4"},
+    {"slug": "alpha", "suffix": "zz alpha omega",
+     "source": "Stand-in 2026, arXiv:0000.00000",
+     "optimized_against": "a stand-in model", "notes": "not a real suffix",
+     "since": "1.4"},
     {"slug": "beta_2", "suffix": "qq beta", "source": "Stand-in repository",
      "optimized_against": "two stand-in models", "complexity": 2, "since": "1.4",
      "kinds": ["adversarial", "natural"]},
@@ -73,8 +75,10 @@ import redact.jailbreak
 from redact.jailbreak.augmentation import resolve
 from redact.jailbreak.pool import all_techniques, technique_pool
 from redact.recipe import load_dataset_type
-made = [fn for fn in all_techniques() if fn.__name__.startswith("to_adversarial_suffix_")]
-pools = {"adversarial": resolve(None, "adversarial"), "natural": resolve(None, "natural"),
+made = [fn for fn in all_techniques()
+        if fn.__name__.startswith("to_adversarial_suffix_")]
+pools = {"adversarial": resolve(None, "adversarial"),
+         "natural": resolve(None, "natural"),
          "eval": resolve(load_dataset_type("eval")["augmentations"], "adversarial")}
 print(json.dumps({
     "techniques": {fn.__name__: {"families": fn.families, "kinds": fn.kinds,
@@ -105,8 +109,9 @@ def test_each_row_registers_an_attack_only_technique_when_the_package_imports(tm
     assert list(report["techniques"]) == [*noise, "to_adversarial_suffix_alpha",
                                           "to_adversarial_suffix_beta_2"]
     alpha = report["techniques"]["to_adversarial_suffix_alpha"]
-    assert alpha == {"families": ["suffixes"], "kinds": ["adversarial"], "complexity": 1,
-                     "since": "1.4", "requires_llm": False, "refuses": ["ascii_art"],
+    assert alpha == {"families": ["suffixes"], "kinds": ["adversarial"],
+                     "complexity": 1, "since": "1.4", "requires_llm": False,
+                     "refuses": ["ascii_art"],
                      "applied": ["a prompt zz alpha omega", "slug=alpha"]}
     beta = report["techniques"]["to_adversarial_suffix_beta_2"]
     # A row's complexity is read; its kinds are not: no row is natural.
@@ -121,7 +126,8 @@ def test_each_row_registers_an_attack_only_technique_when_the_package_imports(tm
 
 
 def test_a_row_without_its_source_fails_the_import_naming_the_row(tmp_path):
-    rows = [_ROWS[0], {key: value for key, value in _ROWS[1].items() if key != "source"}]
+    rows = [_ROWS[0],
+            {key: value for key, value in _ROWS[1].items() if key != "source"}]
     done = _import(_package_with(tmp_path, rows))
     assert done.returncode != 0
     assert ("ValueError: obfuscation/suffix_strings.json: row 'beta_2' must give "
@@ -184,7 +190,8 @@ def test_the_published_suffixes_refuse_ascii_art_both_ways():
 
     every = {fn.__name__: fn for fn in all_techniques()}
     art = every["to_ascii_art"]
-    published = [every[f"to_adversarial_suffix_{row['slug']}"] for row in S.suffix_rows()]
+    published = [every[f"to_adversarial_suffix_{row['slug']}"]
+                 for row in S.suffix_rows()]
     family = [fn for fn in all_techniques() if fn.families[0] == "suffixes"]
 
     def refused(fn):
@@ -207,7 +214,8 @@ def _without(field: str) -> dict:
     *[(_without(field), f"row 'alpha' must give ['{field}']")
       for field in S.REQUIRED_FIELDS],
     ({**_ROWS[0], "suffix": "  "}, "row 'alpha' must give ['suffix']"),
-    ({**_ROWS[0], "optimized_against": 7}, "row 'alpha' must give ['optimized_against']"),
+    ({**_ROWS[0], "optimized_against": 7},
+     "row 'alpha' must give ['optimized_against']"),
     ({**_ROWS[0], "notes": ["a"]}, "the notes of row 'alpha' must be a string"),
     ({**_ROWS[0], "slug": "Alpha-1"}, "row 'Alpha-1' must have a slug of lower-case"),
     ({**_ROWS[0], "slug": "emoji"}, "row 'emoji' must have a slug of lower-case"),
@@ -249,6 +257,10 @@ _FIELDS = ("slug", "suffix", "source", "optimized_against", "notes", "complexity
            "since")
 _OPTIONAL = ("deprecated",)
 _TEXT_FIELDS = ("slug", "suffix", "source", "optimized_against", "notes", "since")
+#: The complexity scale's top, and the fewest published rows the file holds
+#: (the plan asked for six).
+_MAX_COMPLEXITY = 3
+_AT_LEAST = 6
 #: The models the rows name, each spelled as its Hugging Face id.
 _MODEL_IDS = ("vicuna-13b-v1.5", "Llama-2-7b-chat-hf")
 
@@ -307,9 +319,10 @@ def problems(doc: object) -> list[str]:
         for field in _TEXT_FIELDS:
             if not isinstance(row[field], str) or not row[field].strip():
                 found.append(f"row {i} has an empty or non-text {field}")
-        if not isinstance(row["complexity"], int) or isinstance(row["complexity"], bool):
+        complexity = row["complexity"]
+        if not isinstance(complexity, int) or isinstance(complexity, bool):
             found.append(f"row {i} has a complexity that is not a whole number")
-        elif not 0 <= row["complexity"] <= 3:
+        elif not 0 <= complexity <= _MAX_COMPLEXITY:
             found.append(f"row {i} has a complexity outside 0 to 3")
         slug = row["slug"]
         if isinstance(slug, str):
@@ -340,7 +353,7 @@ class TestFile:
         assert problems(doc) == []
 
     def test_at_least_six_rows(self, doc):
-        assert len(doc["rows"]) >= 6
+        assert len(doc["rows"]) >= _AT_LEAST
 
     def test_the_comment_says_these_are_a_surface_pattern_family(self, doc):
         comment = doc["_comment"].lower()
@@ -355,7 +368,8 @@ class TestFile:
         by_slug = {r["slug"]: r for r in doc["rows"]}
         assert set(_DIGESTS) <= set(by_slug), sorted(set(_DIGESTS) - set(by_slug))
         for slug, digest in _DIGESTS.items():
-            assert _digest(by_slug[slug]["suffix"]) == digest, f"{slug}: the string was edited"
+            assert _digest(by_slug[slug]["suffix"]) == digest, (
+                f"{slug}: the string was edited")
 
 
 class TestTheCheckCanFail:

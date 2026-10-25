@@ -4,11 +4,12 @@ after a kill (same rows, no duplicates), and a resume whose settings changed.
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 
 from redact.dataset import content_id
 from redact.jailbreak import best_combinations, search_combinations
-from redact.jailbreak.search import _beam, _draw_round0, _mutations
 
 from ._search_fakes import (
     POOL,
@@ -89,7 +90,7 @@ def test_resume_after_a_mid_round_kill_matches_a_clean_run(tmp_path):
         seeds, out_path=tmp_path / "probe.csv",
         resolve=make_resolve("target", "judge", set()), **kw)
     r1 = probe["rows"][probe["rows"]["round"] == 1]["candidate"].astype(str)
-    pair = next(c for c in r1 if len(c.split("+")) == 2)
+    pair = next(c for c in r1 if c.count("+") == 1)
     win = applied_for(PROMPT, pair.split("+"))
 
     ref = search_combinations(
@@ -102,12 +103,10 @@ def test_resume_after_a_mid_round_kill_matches_a_clean_run(tmp_path):
         d = tmp_path / f"k{k}"
         d.mkdir()
         out_path = d / "s.csv"
-        try:
+        with contextlib.suppress(RuntimeError):
             search_combinations(
                 seeds, out_path=out_path,
                 resolve=make_resolve("target", "judge", {win}, kill=[k]), **kw)
-        except RuntimeError:
-            pass
         resumed = search_combinations(
             seeds, out_path=out_path,
             resolve=make_resolve("target", "judge", {win}), **kw)

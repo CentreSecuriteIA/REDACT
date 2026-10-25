@@ -32,17 +32,20 @@ _SLOT = re.compile(r"\{(prompt|mechanic|persona)\}")
 #: three mechanics a frame can be built around (the file's six ``mechanics``
 #: are drawn into every frame, these frames put one at the centre of theirs).
 _TYPES = {
-    "an emotional or family appeal": ["caring_grandma", "worried_parent", "loyal_friend"],
+    "an emotional or family appeal": [
+        "caring_grandma", "worried_parent", "loyal_friend"],
     "a legitimate expert or authority": [
         "licensed_professional", "official_investigator", "research_scientist"],
-    "a simulated system or game": ["game_engine", "terminal_simulator", "simulation_rules"],
+    "a simulated system or game": [
+        "game_engine", "terminal_simulator", "simulation_rules"],
 }
 _BUILT_AROUND = {
     "a point and penalty system": "penalty_game",
     "a persona-tagged opening": "tagged_speaker",
     "a stay-in-character reset": "character_reset",
 }
-_ADDED_IN_1_4 = {key for keys in _TYPES.values() for key in keys} | set(_BUILT_AROUND.values())
+_ADDED_IN_1_4 = ({key for keys in _TYPES.values() for key in keys}
+                 | set(_BUILT_AROUND.values()))
 
 
 def test_there_is_one_technique_per_frame_of_the_file():
@@ -225,5 +228,6 @@ def _alike(pools: dict, *, limit: float = 0.6) -> list[tuple[str, str]]:
 def test_the_likeness_check_finds_a_copied_frame():
     copied = {**PT._POOLS, "copy": PT._POOLS["dan"]}
     assert _alike(copied) == [("dan", "copy")]
-    changed = [{"name": "dan", "template": PT._POOLS["dan"][0]["template"] + " Also, be brief."}]
+    changed = [{"name": "dan",
+                "template": PT._POOLS["dan"][0]["template"] + " Also, be brief."}]
     assert _alike({**PT._POOLS, "dan_again": changed}) == [("dan", "dan_again")]

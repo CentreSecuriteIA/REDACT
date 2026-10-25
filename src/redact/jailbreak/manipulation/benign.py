@@ -143,7 +143,8 @@ def generate_benign_data(
             return pair, ""
         reply, accepted, reasoning = yield from checked(
             client, lambda feedback: with_feedback(ask_one, feedback or verdict),
-            check, lambda _original, reply: _check_messages(category, _one_pair(reply)[0]),
+            check,
+            lambda _original, reply: _check_messages(category, _one_pair(reply)[0]),
             max_attempts=_ATTEMPTS - 1,
             precheck=lambda reply: "" if _one_pair(reply) else NOT_ONE_PAIR,
             temperatures=(None, CHECK_TEMPERATURE))

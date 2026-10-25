@@ -300,7 +300,8 @@ def test_an_eval_encoding_with_a_hint_keeps_the_encoded_text_whole(
 def test_an_eval_encoding_without_a_hint_writes_the_plain_encoding(
         name, packaged_never):
     for seed in range(8):
-        assert REGISTERED[name](PROMPT, rng=random.Random(seed)) == getattr(E, name)(PROMPT)
+        hinted = REGISTERED[name](PROMPT, rng=random.Random(seed))
+        assert hinted == getattr(E, name)(PROMPT)
 
 
 @pytest.mark.parametrize("name", sorted(EVAL_FIVE))

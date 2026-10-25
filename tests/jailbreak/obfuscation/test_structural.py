@@ -256,7 +256,8 @@ class TestToMarkdown:
         text, _ = to_markdown(SAMPLE, rng=random.Random(0))
         assert SAMPLE in text
 
-    @pytest.mark.parametrize("variant", S._POOLS["to_markdown"], ids=lambda v: v["name"])
+    @pytest.mark.parametrize("variant", S._POOLS["to_markdown"],
+                             ids=lambda v: v["name"])
     def test_every_variant_holds_the_prompt_once_and_is_markdown(self, variant):
         text = variant["template"].format_map({"prompt": "MARK"})
         assert text.count("MARK") == 1
@@ -269,7 +270,8 @@ class TestToMarkdown:
     def test_info_is_the_variant(self):
         _, info = to_markdown(SAMPLE, rng=random.Random(2))
         assert info.startswith("variant=")
-        assert info.removeprefix("variant=") in {v["name"] for v in S._POOLS["to_markdown"]}
+        names = {v["name"] for v in S._POOLS["to_markdown"]}
+        assert info.removeprefix("variant=") in names
 
     def test_the_text_is_the_variant_the_info_names(self):
         for seed in range(30):

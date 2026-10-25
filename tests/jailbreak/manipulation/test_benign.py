@@ -38,6 +38,12 @@ def _yes() -> ModelClient:
     return make_client(MockBackend("Yes", model="mock-check"), "mock-check")
 
 
+def _generate(client, out, **kwargs) -> dict:
+    """The benign data, quietly, with :func:`_yes` as the check model."""
+    return get_or_generate_benign_data(client, out, verbose=False, check=_yes(),
+                                       **kwargs)
+
+
 def _taxonomy(subcategories: int) -> dict:
     return {"name": "test", "categories": {"Main": {
         "description": "", "subcategories": [f"s{i}" for i in range(subcategories)]}}}
@@ -128,8 +134,7 @@ class TestGeneration:
     def test_a_finished_run_makes_no_call(self, tmp_path):
         out, backend, units = tmp_path / "benign.csv", MockBackend(_reply()), 4
         for _ in range(2):
-            get_or_generate_benign_data(make_client(backend), out, verbose=False, check=_yes(),
-                                        taxonomy=_taxonomy(units // 2))
+            _generate(make_client(backend), out, taxonomy=_taxonomy(units // 2))
         assert len(backend.calls) == units
         assert len(pd.read_csv(out)) == units * _PAIRS
         assert lock_is_free(_ledger(out).path)
@@ -142,15 +147,13 @@ class TestGeneration:
         units, saved = 40, 32               # CommitBuffer saves every 32 units
         kill_after_rows(monkeypatch, B, on_call=2)
         with pytest.raises(Killed):
-            get_or_generate_benign_data(make_client(backend), out, verbose=False, check=_yes(),
-                                        taxonomy=_taxonomy(units // 2))
+            _generate(make_client(backend), out, taxonomy=_taxonomy(units // 2))
         landed = out.read_bytes()
         assert len(pd.read_csv(out)) == units * _PAIRS      # every row landed
         assert len(_ledger(out).completed()) == saved       # the last 8 acks did not
         assert lock_is_free(_ledger(out).path)
 
-        get_or_generate_benign_data(make_client(backend), out, verbose=False, check=_yes(),
-                                    taxonomy=_taxonomy(units // 2))
+        _generate(make_client(backend), out, taxonomy=_taxonomy(units // 2))
         assert len(backend.calls) == units + (units - saved)    # only those 8 again
         df = pd.read_csv(out)
         assert len(df) == units * _PAIRS
@@ -168,12 +171,11 @@ class TestGeneration:
         old.to_csv(out, index=False)
 
         # Without a client the cache is read as it is.
-        data = get_or_generate_benign_data(None, out, verbose=False, check=_yes())
+        data = _generate(None, out)
         assert data["all_subcategories"] == ["s0", "s1"] and len(data["long"]) == 1
 
         backend = MockBackend(_reply())
-        data = get_or_generate_benign_data(make_client(backend), out, verbose=False, check=_yes(),
-                                           taxonomy=_taxonomy(2))
+        data = _generate(make_client(backend), out, taxonomy=_taxonomy(2))
         assert len(backend.calls) == 1                       # s1's long pairs
         df = pd.read_csv(out)
         pd.testing.assert_frame_equal(df.iloc[:len(old)], old)
@@ -186,8 +188,7 @@ class TestGeneration:
         backend = MockBackend(_reply(_PAIRS - 1))
         for _ in range(2):
             with pytest.raises(ValueError, match="rejected"):
-                get_or_generate_benign_data(make_client(backend), out, verbose=False, check=_yes(),
-                                            taxonomy=_taxonomy(1))
+                _generate(make_client(backend), out, taxonomy=_taxonomy(1))
             # Two units, three attempts each, and none again on resume.
             assert len(backend.calls) == 2 * 3
         assert not out.exists()
@@ -199,8 +200,7 @@ class TestGeneration:
         out = tmp_path / "benign.csv"
         replies = [_reply(), _reply(1), _reply(1), _reply()]
         backend = _WidthBackend(replies)
-        data = get_or_generate_benign_data(make_client(backend), out, verbose=False, check=_yes(),
-                                           taxonomy=_taxonomy(1))
+        data = _generate(make_client(backend), out, taxonomy=_taxonomy(1))
         assert len(backend.calls) == len(replies)
         assert len(data["short"]) == len(data["long"]) == _PAIRS
 
@@ -208,21 +208,19 @@ class TestGeneration:
         overlays, load = [], B.load_prompt
         monkeypatch.setattr(B, "load_prompt", lambda pipeline, name, prompt_dir: (
             overlays.append((name, prompt_dir)) or load(pipeline, name)))
-        get_or_generate_benign_data(make_client(MockBackend(_reply())),
-                                    tmp_path / "benign.csv", verbose=False, check=_yes(),
-                                    taxonomy=_taxonomy(1), prompt_dir=tmp_path / "mine")
+        _generate(make_client(MockBackend(_reply())), tmp_path / "benign.csv",
+                  taxonomy=_taxonomy(1), prompt_dir=tmp_path / "mine")
         assert overlays == [("benign_generation", tmp_path / "mine"),
                             ("benign_check", tmp_path / "mine")]
 
     def test_a_taxonomy_without_a_category_is_refused(self, tmp_path):
         with pytest.raises(ValueError, match="no category"):
-            get_or_generate_benign_data(make_client(MockBackend(_reply())),
-                                        tmp_path / "benign.csv", verbose=False, check=_yes(),
-                                        taxonomy={"name": "empty", "categories": {}})
+            _generate(make_client(MockBackend(_reply())), tmp_path / "benign.csv",
+                      taxonomy={"name": "empty", "categories": {}})
 
     def test_no_cache_and_no_client_is_refused(self, tmp_path):
         with pytest.raises(ValueError, match="no client"):
-            get_or_generate_benign_data(None, tmp_path / "benign.csv", verbose=False, check=_yes())
+            _generate(None, tmp_path / "benign.csv")
 
 
 class _Fake(MockBackend):
@@ -239,6 +237,10 @@ class _Fake(MockBackend):
             self.requests.append({"messages": messages, "temperature": temperature})
             replies.append(self.reply(messages, temperature))
         return replies
+
+
+#: The units of :func:`_run`'s one subcategory: a short and a long one.
+_UNITS = 2
 
 
 def _one_pair_prompts() -> tuple[str, ...]:
@@ -300,13 +302,13 @@ class TestCheck:
 
         gen, check = _generator(), _checker([])
         out, data = _run(tmp_path, gen, check)
-        assert len(gen.requests) == 2                # one reply per unit
+        assert len(gen.requests) == _UNITS           # one reply per unit
         assert len(check.requests) == 2 * _PAIRS     # each pair once
         assert {r["temperature"] for r in check.requests} == {CHECK_TEMPERATURE}
         shown = [str(r["messages"]) for r in check.requests]
         for i in range(1, _PAIRS + 1):
             assert sum(f"Question {i}?" in s and f"Answer {i}." in s
-                       for s in shown) == 2          # the short and the long unit
+                       for s in shown) == _UNITS     # the short and the long unit
         assert all("Main / s0" in s for s in shown)
         assert len(data["short"]) == len(data["long"]) == _PAIRS
         assert [ack.get("rejected_pairs") for ack in _acks(out)] == [None, None]
@@ -325,11 +327,11 @@ class TestCheck:
         gen, check = _generator(), _checker(["Question 3?"])
         out, data = _run(tmp_path, gen, check)
         again = [r for r in gen.requests if _asks_one(r["messages"])]
-        assert len(again) == 2                       # pair 3 of each unit
+        assert len(again) == _UNITS                  # pair 3 of each unit
         assert all("No, Question 3? is not benign." in r["messages"][-1]["content"]
                    for r in again)
         # The new pair was checked and accepted, and takes the old one's place.
-        assert sum("Again?" in str(r["messages"]) for r in check.requests) == 2
+        assert sum("Again?" in str(r["messages"]) for r in check.requests) == _UNITS
         questions = [pair["prompt"] for pair in data["short"]]
         assert "Question 3?" not in questions and "Again?" in questions
         assert len(questions) == _PAIRS
@@ -378,9 +380,10 @@ class TestCheck:
         _out, data = _run(tmp_path, gen, check)
         again = [r for r in gen.requests if _asks_one(r["messages"])]
         assert len(again) == 2 * 2
-        assert sum(NOT_ONE_PAIR in r["messages"][-1]["content"] for r in again) == 2
+        assert sum(NOT_ONE_PAIR in r["messages"][-1]["content"]
+                   for r in again) == _UNITS
         # The two-pair reply got no check call; the one-pair reply did.
-        assert sum("Again?" in str(r["messages"]) for r in check.requests) == 2
+        assert sum("Again?" in str(r["messages"]) for r in check.requests) == _UNITS
         assert "Again?" in [pair["prompt"] for pair in data["short"]]
 
 

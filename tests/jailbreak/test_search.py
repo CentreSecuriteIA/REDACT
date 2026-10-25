@@ -15,7 +15,6 @@ from redact.jailbreak.search import (
     _draw_round0,
     _is_valid,
     _mutations,
-    _mutations_by_kind,
     _plan_round,
 )
 
@@ -60,7 +59,8 @@ def test_mutations_are_all_valid_and_change_the_parent():
 
 def test_mutations_never_pair_two_of_one_family():
     # to_lowercase and to_uppercase are both casual_writing: never together.
-    for parent in ("to_lowercase", "to_leetspeak_basic", "to_lowercase+to_leetspeak_basic"):
+    for parent in ("to_lowercase", "to_leetspeak_basic",
+                   "to_lowercase+to_leetspeak_basic"):
         for cand in _mutations(parent, POOL, REGISTRY, PROMPT, "harmful", "id0"):
             names = [] if cand == "identity" else cand.split("+")
             fams = [REGISTRY[n].families[0] for n in names]
@@ -139,7 +139,8 @@ def test_early_stop_on_success(tmp_path):
     rows = out["rows"]
     solved_id, unsolved_id = content_id(solved), content_id(unsolved)
     best = out["best"]
-    assert best[solved_id].success and best[solved_id].combination == ["to_leetspeak_basic"]
+    assert best[solved_id].success
+    assert best[solved_id].combination == ["to_leetspeak_basic"]
     assert not best[unsolved_id].success
     assert set(rows[rows["input_id"] == solved_id]["round"]) == {0}
     assert max(rows[rows["input_id"] == unsolved_id]["round"]) >= 1
@@ -210,14 +211,14 @@ def test_plan_round_reads_only_earlier_rounds(tmp_path):
 
 
 def test_max_candidates_caps_the_round(tmp_path):
-    pool = pure_pool()
+    pool, cap = pure_pool(), 5
     out = search_combinations(
         inputs(PROMPT), target_model="target", judge_model="judge", pool=pool,
-        out_path=tmp_path / "cap.csv", width=4, beam=2, depth=1, max_candidates=5,
+        out_path=tmp_path / "cap.csv", width=4, beam=2, depth=1, max_candidates=cap,
         resolve=make_resolve("target", "judge", set()), verbose=False)
     r1 = out["rows"][out["rows"]["round"] == 1]
     # One input, so round 1 holds at most max_candidates rows.
-    assert 0 < len(r1) <= 5
+    assert 0 < len(r1) <= cap
     # Uncapped, the same round holds far more (the fan-out F3 describes).
     full = search_combinations(
         inputs(PROMPT), target_model="target", judge_model="judge", pool=pool,
@@ -225,7 +226,7 @@ def test_max_candidates_caps_the_round(tmp_path):
         max_candidates=None,
         resolve=make_resolve("target", "judge", set()), verbose=False)
     full1 = full["rows"][full["rows"]["round"] == 1]
-    assert len(full1) > 5
+    assert len(full1) > cap
 
 
 def test_mutations_respect_the_round0_budget():
