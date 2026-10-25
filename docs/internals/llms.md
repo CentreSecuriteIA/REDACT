@@ -210,9 +210,11 @@ down and its memory freed, and a client built on it raises on its next call.
   `PromptTooLongError`. A temperature goes in `extra_body`: the SDK's
   `messages.create()` has no `temperature` keyword from 1.0. API version
   2026-10-21, which the SDK sends from 2.0, refuses one on every model, so
-  on such an SDK none is sent, with one warning. The reply is its text
-  blocks, joined (a model that thinks by default puts a thinking block
-  first). It warns on an empty reply.
+  on such an SDK none is sent, with one warning; `pyproject.toml` holds
+  `anthropic` below 2 (`>=0.40,<2`, and `openai>=1.55.3`, the oldest
+  versions that build a client beside httpx 0.28) so the checks keep their
+  0.15. The reply is its text blocks, joined (a model that thinks by default
+  puts a thinking block first). It warns on an empty reply.
 
 ### TransformersIntrospectionBackend
 
@@ -337,8 +339,8 @@ the same `rpm`.
 | `report_prompt_sources(prompt_dir)` | Logs overrides, and warns about override folders that match nothing |
 | `extract_numbered_list`, `extract_structured_qa`, `extract_and_clean` | Parse a reply: a numbered list (`1. sample`, `2) sample`, `3- sample`, `4: sample`), or `**Question:** ... **Answer:** ...` pairs, optionally headed `**Prompt N:**`. `extract_numbered_list(text, strict=True)` rejects a reply that is not one clean list. With `expected_count`, `extract_structured_qa` and `extract_and_clean` reject a reply with another count whole: the result is empty |
 | `clean_sample` | Strip markdown and stray chat tokens |
-| `scaffold_prompt_tree(target_dir, source_dir=None, mode="copy")` | Write a copy (`copy`) or skeletons (`empty`) of the prompt tree |
-| `scaffold_setup(target_dir, *, overwrite=False)` | Write a setup folder: the two example recipes with `"config_dir": "."`, their params files, the dataset type, taxonomy, augmentation, generation axes and dimensions files a `config_dir` overlays, and a `README.md` ([configuration.md](../configuration.md#your-own-config-folder)) |
+| `scaffold_prompt_tree(target_dir, source_dir=None, mode="copy", *, overwrite=False)` | Write a copy (`copy`) or skeletons (`empty`) of the prompt tree. A file to write that the folder holds already raises `FileExistsError`, naming the count and the first five, before any file is written, unless `overwrite=True` |
+| `scaffold_setup(target_dir, *, overwrite=False)` | Write a setup folder: the two example recipes with `"config_dir": "."` and a `data_dir` of the folder's own (`runs/eval`, `runs/training`, written absolute), their params files, the dataset type, taxonomy, augmentation, generation axes and dimensions files a `config_dir` overlays, and a `README.md` that says how to run a recipe from the folder ([configuration.md](../configuration.md#your-own-config-folder)). It refuses to overwrite, naming the files, unless `overwrite=True` |
 
 A render error names the missing placeholder, and the prompt file when the
 template comes from `PromptTemplate.load`.

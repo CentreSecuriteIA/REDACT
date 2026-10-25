@@ -15,7 +15,7 @@ Under `src/redact/`:
 | `residency/` | The GPU planner: which local models fit, per stage; preload and unload ([residency.md](residency.md)) |
 | `constitution/` | The constitution stage: `generation.py` (`ConstitutionPipeline`, `read_constitution`), `units.py` (one call per taxonomy category and entry type, and one per benign-taxonomy category for the general-benign part), `parse.py` (the `[END]` marker and the three-level markdown parser) |
 | `content_moderation/` | The inputs, outputs and paraphrase stages: `inputs.py` (`InputPipeline`), `outputs.py`, `axes.py` (the generation axes: resolve, deal, render, coverage), `modes.py` (the outputs' answer modes: the mapping, the label, the deal), `paraphrase.py`, `checker.py` (the checkers), `feedback.py` (rejection feedback, the length floor's reason), `results.py` (the inputs stage's totals) |
-| `jailbreak/` | The technique library, one subpackage per layer, and the augmentation engine ([jailbreak.md](jailbreak.md)) |
+| `jailbreak/` | The technique library, one subpackage per layer, the augmentation engine, and `search.py`, a beam search over technique combinations that is not a recipe stage ([jailbreak.md](jailbreak.md)) |
 | `multi_turn/` | Conversation datasets: settings, actors, `generate_conversations`, `evaluate_conversations`; a planned extension, not finished |
 | `multiturn_attacks/`, `optimization/` | Crescendo and PAIR attacks against a safety-trained target; a beam search over conversation moves ([conversations](../stages/conversations.md#attacks-and-search)); planned extensions, not finished |
 | `dataset/` | Rows on disk: identity, the ledger and manifest, resume, the per-category tree, what an eval build leaves out ([dataset.md](dataset.md)) |
@@ -28,8 +28,12 @@ Under `src/redact/`:
 
 Beside the package: `scripts/` (`run.py`, `inspect_run.py`,
 `scaffold_prompts.py`, `scaffold_setup.py`, `download_models.py`,
-`gpu_check_residency.py`, the residency checks on a GPU pod), `notebooks/` (walkthroughs), `docs/` and
-`mkdocs.yml` (this site), and `tests/`.
+`gpu_check_residency.py`, the residency checks on a GPU pod, `catalog.py`,
+which writes the technique catalog under `docs/`, and `langmix_smoke.py`,
+`persona_smoke.py` and `search_smoke.py`, which run the language-mix and
+persona techniques and the combination search on real models and print
+counts only), `notebooks/` (walkthroughs), `docs/` and `mkdocs.yml` (this
+site), and `tests/`.
 
 ## Responsibilities and boundaries
 
@@ -140,7 +144,7 @@ the params.
 
 | Function | Does |
 |---|---|
-| `load_recipe(path or dict, params=None)` | Reads and checks a recipe ([running.md](../running.md#write-a-recipe)), with `params` (a path or dict) standing in for its `params_file`, as `run_pipeline`'s does (a relative `params` path read from the current directory, else the recipe's folder; `params_file_of`, which also gives the recipe's own `params_file` from its folder; the file read is the recipe's `_params_file`); refuses a recipe without a `dataset_type` or with one other than `eval` and `training`, a `resume` that is not a bool and a top-level `copies` other than null; takes `stages` from the dataset type when left out; resolves `augmentations`; reads the former taxonomy name `content_moderation_categories` as `harmful`, with a `DeprecationWarning` |
+| `load_recipe(path or dict, params=None)` | Reads and checks a recipe ([running.md](../running.md#write-a-recipe)), with `params` (a path or dict) standing in for its `params_file`, as `run_pipeline`'s does (a relative `params` path read from the current directory, else the recipe's folder; `params_file_of`, which also gives the recipe's own `params_file` from its folder; the file read is the recipe's `_params_file`); refuses a recipe without a `dataset_type` or with one other than `eval` and `training`, an unknown or repeated stage, an unknown key, a `resume` that is not a bool, a `config_dir` that is not a folder (it is made absolute, relative to the recipe) and a top-level `copies` other than null; takes `stages` from the dataset type when left out; resolves `augmentations`; reads `benign_taxonomy` (`benign_taxonomy_of`) and, with the build listed, `check_build_params`; reads the former taxonomy name `content_moderation_categories` as `harmful`, with a `DeprecationWarning` |
 | `load_dataset_type(name, config_dir=None)`, `dataset_type_hash(name, config_dir=None)` | The file `dataset_types/<name>.json` (`stages`, `params`, `augmentations`), the `config_dir`'s when it has one, else the packaged one, as a copy; read again when it changes. A `name` other than `eval` and `training` (`config_overlay.DATASET_TYPES`) raises. The content id of the file as parsed, which each run record holds ([configuration.md](../configuration.md#dataset-types)) |
 | `stage_params(stage, dataset_type, params=None, config_dir=None)` | A stage's params: the dataset type file's, with the params file's entry over them key by key; what `Stage.params` and `benign_taxonomy_of` read |
 | `benign_taxonomy_of(recipe, stages, params=None)` | The recipe's `benign_taxonomy` (`"benign"` by default); read, and checked to have a category, when the constitution stage runs with `include_general_benign` (or its former name `include_standalone_benign`) on in `stage_params` over `params`, or the jailbreak stage runs a kind that draws a technique needing benign data |
@@ -338,7 +342,7 @@ How each stage departs from this:
 | Stage | Difference |
 |---|---|
 | constitution | `resume_state(artifact=<constitution folder>, pattern="*.csv", units_in=...)`: locked, every CSV's size recorded with each save, cut back on a resume; a fresh run's `resume_state` removes the CSVs. It saves after every unit (`every=1`), runs one unit at a time (`pool_size=1`), and reads back through `read_constitution` |
-| inputs | A tree of files: `artifact=folder, pattern="*/samples.csv"`, sidecars named `constitution_inputs.*` in the folder; a fresh run clears the whole tree. Returns `ConstitutionInputResult`; the front reads the tree |
+| inputs | A tree of files: `artifact=folder, pattern="*/samples.csv"`, sidecars named `constitution_inputs.*` in the folder; a fresh run clears the whole tree. Before step 3 it checks the category names, renders its prompts and stops on an old folder; between steps 3 and 4 it compares the plan file (`seed`, `samples_per_entry`, `axes`), only once a unit is done, then deals each unit a spec (a done unit keeping its ack's). Returns `ConstitutionInputResult`; the front reads the tree |
 | outputs | Before step 3 it checks the inputs' entry types and renders its prompts and checkers; between steps 3 and 4 it stops on an old folder and on a changed plan file, then deals each unit an answer mode (a done unit keeping its ack's) and a spec |
 | paraphrase | Before step 3 the front checks every paraphraser's fingerprinted prompt and the core builds its checker; after step 4 the units of texts under `min_words` words are acked `skipped`, with no call; steps 5 and 6 run once per paraphraser, with the stage's own residency plan and an unload between paraphrasers that do not co-fit, in one `CommitBuffer` |
 | jailbreaks | Steps 2 to 7 run once per kind; the plan is reused on resume |

@@ -243,8 +243,8 @@ left out too, for its input's reason, so every `input_id` of the eval files
 names a row of `eval_inputs.csv`. A shared constitution entry only flags
 the rows that stay: the input and every row derived from it, each counted
 under `descriptions`, with a warning. The build saves the counts with the
-files read in `Datasets/eval_excluded.json`; a build without `exclude_from`
-removes an earlier one. The run record's `counts` take them as `excluded`,
+files read in `Datasets/eval_excluded.json`; an eval build without
+`exclude_from` removes an earlier one. The run record's `counts` take them as `excluded`,
 and its `sources` list the files read:
 
 ```json

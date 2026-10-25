@@ -135,7 +135,11 @@ The stage resumes as every stage does
 it names its folder and the pattern `*.csv` to the resume, so every CSV in
 it is checked and cut back together. Each unit's rows are appended to its
 own file and to `merged.csv`, then acked, one save per unit, the ack
-recording each file's size.
+recording each file's size. The folder is the stage's own
+(`Data_cache/constitution/`, which the front uses): a `.csv` in it that no
+finished save recorded is moved whole to its `.cut` file on a resume and
+removed by a fresh run, so a core called with an `output_dir` that holds
+other CSVs would treat them so.
 
 - `resume: true` takes the stage's lock, checks each CSV against the size
   and checksum the last save recorded, cuts off what a save that did not
@@ -156,9 +160,12 @@ recording each file's size.
 - Without its ledger (deleted by hand), or with the plain ledger an earlier
   version wrote, which records no sizes, a resume takes the folder over
   once: a unit whose rows are in `merged.csv` counts as done, and the other
-  units run. A CSV of such a folder that ends inside a row stops the
-  takeover, since nothing recorded says where its whole rows end: repair
-  the file, or start over.
+  units run. A unit whose rows reached its entry-type file but not
+  `merged.csv` (a crash between the two appends) runs again, so that file
+  holds its rows twice; `merged.csv`, which the inputs stage reads, holds
+  them once. A CSV of such a folder that ends inside a row, any of them,
+  stops the takeover, since nothing recorded says where its whole rows end:
+  repair the file, or start over.
 - A resume of a `merged.csv` saved without a column the rows now have (one
   written before `source_taxonomy`) raises before any call, naming the
   column and `resume=False`.

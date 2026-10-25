@@ -105,8 +105,9 @@ same batch.
 - A `PromptTooLongError` from an async request is raised inside its unit, at
   the `yield` that made it; the other requests stay in flight. The inputs
   stage acks that entry rejected, outputs writes a rejected row, jailbreaks
-  and conversations an error row, paraphrase acks the unit
-  `prompt_too_long`, and scoring scores it false. The
+  and conversations an error row, the combination search a failed candidate
+  row, paraphrase acks the unit `prompt_too_long`, and scoring scores it
+  false. The
   constitution and benign units take no `on_error`, so there it stops the
   stage.
 - Any other failed async request propagates, as a failed `generate()` does.
@@ -144,8 +145,9 @@ only.
 checkers of `content_moderation/checker.py` build.
 
 `CHECK_TEMPERATURE` (0.15) is the temperature the stages' check requests
-ask for (inputs, outputs, paraphrase, and the jailbreak scenario and typo
-checks); the generations keep the model's default. A model registered with
+ask for (inputs, outputs, paraphrase, and the jailbreak stage's checks of a
+model's rewrite, scenario or benign pair); the generations keep the model's
+default. A model registered with
 `supports_temperature` false (one that rejects sampling settings, such as
 `claude-opus-5-5`) is sent no temperature, the check's included
 ([llms.md](llms.md#the-registry)).
@@ -159,6 +161,7 @@ checks); the generations keep the model's default. A model registered with
 | outputs | `drive_units` | `pool_size(batch_size, client, check)` | `batch_size` | `checked` |
 | jailbreaks | `drive_units` | `pool_size(batch_size, client, check)` | `batch_size` | `jailbreak.chain.run_chain` over the unit's techniques |
 | benign data (`jailbreak/manipulation/benign.py`) | `drive_units` | `pool_size(batch_size, client, check)` | `batch_size` | `extracted` over one call: one subcategory and answer type, 3 attempts; then each pair's check request, and for a rejected pair `checked` over one pair asked for again, 2 attempts |
+| combination search (`jailbreak/search.py`) | `drive_units` | `pool_size(batch_size, *clients)` | `batch_size` | one candidate combination: its `run_chain` calls, one request to the target, one to the judge |
 | conversations | `drive_units` | `pool_size(batch_size, *clients)` | `batch_size` | `multi_turn.conversation_gen` |
 | scoring | `drive_units` | `pool_size(batch_size, judge)` | `batch_size` | one judge request |
 | paraphrase | `drive_units`, per paraphraser | `pool_size(batch_size, client, check)` | `batch_size` | `checked` with the gates as `precheck`, the reply cap per unit as its `max_tokens` |

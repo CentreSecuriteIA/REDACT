@@ -147,10 +147,14 @@ again, and the specs of any group would move. A done unit keeps the mode
 and the spec its ack records instead: the deal counts them as dealt and
 deals the other units around them, so the manifest and the coverage table
 agree with the rows, and the new inputs balance the modes and the values
-the rows have. An ack written by an earlier version, without a mode or a
-spec, leaves its unit to the deal, and so does the spec of a key that two
-input rows share (one ack holds it). Rows keep what they were written with
-either way.
+the rows have. The deal counts a done unit's mode and spec when it reaches
+the unit, in `(input_id, iteration)` order, so a unit of the same input with
+a lower iteration that is not done (one in flight when a run crashed) is
+dealt without them: where the group changed, it can repeat the done
+sibling's value, or its mode. An ack written by an earlier version, without
+a mode or a spec, leaves its unit to the deal, and so does the spec of a key
+that two input rows share (one ack holds it). Rows keep what they were
+written with either way.
 
 | | Value |
 |---|---|

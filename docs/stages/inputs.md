@@ -75,6 +75,11 @@ and the core, before the stage writes anything. The `eval` type pins the
 `directness` axis at `explicit`; the `training` type deals the weights
 log-scaled (`axes_weighting: "log"`).
 
+There is one generation template and no setting that picks a length: the
+`length` axis sets each sample's. For short inputs only, give the two long
+`length` values weight 0
+([configuration.md](../configuration.md#short-inputs-only)).
+
 ## Unit and ledger key
 
 Each entry is `samples_per_entry` units, one per `iteration` (0 to k - 1).
@@ -145,9 +150,14 @@ subcategory.
   table agree with the rows. Entries that join a group already dealt (a
   frame passed with entries added) are dealt around the done units, and
   the specs of units not done may move; a new category is a group of its
-  own. An ack written by an earlier version, without a spec, leaves its
-  unit to the deal: its row keeps its spec, and the manifest may show
-  another.
+  own. A group that did not change is dealt again to the same specs. The
+  deal counts a done unit's spec when it reaches the unit, in
+  `(sample_description, iteration)` order, so a unit of the same entry
+  with a lower iteration that is not done (one in flight when a run
+  crashed) is dealt without it, and in a group that changed it can repeat
+  the done sibling's value. An ack written by an earlier version, without
+  a spec, leaves its unit to the deal: its row keeps its spec, and the
+  manifest may show another.
 - **Entries that leave.** The units of entries no longer in the frame (a
   constitution regenerated with `resume: false`, or a subset passed) are
   not planned: their rows stay in the category files and reach the later

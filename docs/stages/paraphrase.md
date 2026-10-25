@@ -104,7 +104,7 @@ training run), it paraphrases each of an input's k responses: its units are
 |---|---|---|
 | Ledger key | `(input_id, iteration)` | `(response_id, iteration)` |
 | Ledger record | the key, `paraphrase_model`, and `status`: `accepted`, `rejected`, `dropped_dedup`, `prompt_too_long` or `skipped` (with `reason` and `min_words`) | the key, `input_id`, `paraphrase_model`, `status` (and for `skipped`, `reason` and `min_words`) |
-| Manifest row | `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type` (empty where the source has none, never `nan`), `status` (`planned`, or `skipped` for a text under `min_words` words) | `response_id`, `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` |
+| Manifest row | `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type` (each empty where the source has none, never `nan`), `status` (`planned`, or `skipped` for a text under `min_words` words) | `response_id`, `input_id`, `iteration`, `paraphrase_model`, `category`, `entry_type`, `status` |
 
 Two accepted responses with one text (siblings of one input that a model
 answered alike) have one `response_id`: the target plans two units under
@@ -148,7 +148,7 @@ Per target, under `Datasets/`:
 | `input_id` | The input: the one reworded, or the one the response answers |
 | `iteration` | Which paraphrase of the row |
 | `sample` | The paraphrase |
-| `category`, `entry_type` | Copied from the source row: for a response, its input's |
+| `category`, `entry_type` | Copied from the source row: for a response, its input's. Empty where the source has no such column or cell, never `nan` |
 | `response_mode`, `output_label`, `response_label` | `outputs` only: copied from the response, so a paraphrase carries its response's label ([outputs](outputs.md#answer-modes)). Always written, empty when the source lacks the column |
 | `paraphrase_model` | The model that wrote it |
 | `accepted` | The gates' and the checker's verdict; `true` when `check` is off |

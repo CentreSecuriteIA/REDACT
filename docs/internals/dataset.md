@@ -181,7 +181,9 @@ row.
 
 A folder whose ledger records no sizes, such as one written before the
 ledger did, is taken over once: each output file is read for the unit keys
-of its rows, and one ledger write acks them and records the sizes.
+of its rows, and one ledger write acks them and records the sizes. A file
+that does not end in a whole row, or does not parse, stops the takeover with
+a `RuntimeError`, since nothing recorded says where its whole rows end.
 
 `resume_state(ledger, resume=False, artifact=out, manifest=manifest)` takes
 the stage's lock and removes the output, its `.cut` and `.tmp` files, the
@@ -200,7 +202,7 @@ files in `also`. The fronts call it with `resume=False` for a stage skipped
 for want of accepted rows: outputs, each paraphrase target, and each
 jailbreak kind. A jailbreak kind is also cleared when its `entry_types`
 match no input or its pool is empty. `also` holds the `.coverage.csv` and `.plan.json` of the
-outputs stage and of a kind, and a kind's `.variants.csv`.
+outputs stage and of a kind, and a kind's `.variants.csv` and `.scenarios.csv`.
 
 ### The lock
 
@@ -226,7 +228,9 @@ Every matching file is checked and cut back together. A matching file that
 no finished save recorded is cut whole: a save that did not finish created
 it. The seeded inputs stage checks the columns of every file of a save
 (`check_columns`) before it writes the first, so a save never stops half way
-over a bad column.
+over a bad column. The constitution's pattern is `*.csv` of its folder, so
+every CSV there is the stage's: `ConstitutionPipeline`'s `output_dir` has to
+be the constitution's own folder.
 
 ## The per-category tree
 
@@ -294,6 +298,7 @@ taxonomy format.
 | paraphrase | `artifact=paraphrases_<target>.csv` | `input_id`, `iteration` (inputs); `response_id`, `iteration` (outputs) | `paraphrase_model`, `status`; `input_id` (outputs); `reason`, `min_words` when `skipped` |
 | jailbreaks, per kind | `artifact=jailbreaks.csv` or `variations.csv` | `input_id`, `iteration` | |
 | benign data (jailbreaks) | `artifact=benign_samples.csv`, always `resume=True` | `main_category`, `sub_category`, `answer_type` | `status`, `attempts` when rejected; `rejected_pairs`, the pairs the check left out |
+| combination search (`search_combinations`) | `artifact=jailbreak_search.csv` | `input_id`, `round`, `candidate` | |
 | conversations | `artifact=conversations.csv` | `input_id`, `iteration` | `stop_reason` |
 | scoring | `artifact=conversations_scored.csv`, no manifest | `sample_id` | |
 
