@@ -90,25 +90,28 @@ def test_non_letters_pass_through_unchanged(scheme):
     assert decoded == text.lower()  # only letters changed, and only in case
 
 
-def test_a_whole_technique_draw_decodes_to_the_prompt(monkeypatch):
-    """Run the technique, recover the scheme from the info, rebuild the same
-    mapping, and decode the ciphertext out of the rendered prompt."""
-    captured = {}
-    real_mapping = BJ._mapping
-
-    def spy(scheme, rng, text=""):
-        m = real_mapping(scheme, rng, text)
-        captured["mapping"] = m
-        return m
-
-    monkeypatch.setattr(BJ, "_mapping", spy)
+@pytest.mark.parametrize("seed", range(12))
+def test_a_whole_technique_draw_decodes_to_the_prompt(seed):
+    """Read the key off the rendered output, as a reader would, and decode
+    the ciphertext it shows: nothing here reads the module's mapping, so a
+    draw that showed one key and enciphered with another fails."""
     prompt = "mix the two reagents and heat them"
-    written, info = to_bijection_learning(prompt, rng=random.Random(7))
+    written, info = to_bijection_learning(prompt, rng=random.Random(seed))
     scheme = info.split("scheme=")[1].split(";")[0]
     assert scheme in _SCHEMES
-    ciphertext = _encode(prompt, captured["mapping"])
-    assert ciphertext in written
-    assert _decode(ciphertext, captured["mapping"]) == _canon(prompt)
+    assert _decode_with(written, _ciphertext(written, prompt)) == _canon(prompt)
+    assert prompt not in written
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_the_worked_examples_decode_with_the_shown_key_too(seed):
+    """Every teaching pair of the output is a sentence and its encoding under
+    the same key, so a reader learns the cipher that was used."""
+    written, _info = to_bijection_learning("mix the reagents", rng=random.Random(seed))
+    shown = [s for s in BJ._SENTENCES if s in written]
+    assert len(shown) == BJ._EXAMPLES
+    for sentence in shown:
+        assert _decode_with(written, _ciphertext(written, sentence)) == _canon(sentence)
 
 
 # --- the symbol scheme's collisions --------------------------------------------

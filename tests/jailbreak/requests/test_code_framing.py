@@ -1,4 +1,4 @@
-"""Code framing (requests/code_framing.py, spec 1.5): to_code_completion
+﻿"""Code framing (requests/code_framing.py, spec 1.5): to_code_completion
 (CodeAttack, Ren 2403.07865) and to_decrypt_function (CodeChameleon, Lv
 2402.16717). Two pure request-layer techniques. The frame wording is not
 reproduced here; the tests assert on shape, the slot, the info, the floor,
@@ -71,6 +71,86 @@ def test_the_shown_decrypt_inverts_the_transform_in_a_restricted_exec(slug, text
     exec(_DECRYPT[slug], {"__builtins__": {}}, namespace)  # noqa: S102
     encrypted = _TRANSFORMS[slug](text)
     assert namespace["decrypt"](encrypted) == text
+
+
+def _shown_decrypt(written: str):
+    """The decrypt function the output shows, read out of the rendered text
+    and executed with no builtins: ``(code, callable)``.
+
+    The code is taken from ``def decrypt`` to the end of its indented body,
+    so the test reads what the model is shown rather than the module's own
+    ``_DECRYPT`` entry."""
+    import ast
+
+    start = written.index("def decrypt")
+    lines = written[start:].splitlines()
+    body = [lines[0]]
+    for line in lines[1:]:
+        if line.strip() and not line.startswith((" ", "\t")):
+            break
+        body.append(line)
+    code = "\n".join(body).rstrip()
+    ast.parse(code)
+    namespace: dict = {}
+    exec(code, {"__builtins__": {}}, namespace)  # noqa: S102
+    return code, namespace["decrypt"]
+
+
+def _candidates(written: str) -> list[str]:
+    """The strings of the output a ciphertext could be, without knowing the
+    frame's wording: every line, every span inside quotes or backticks, and
+    what follows the first ``=`` or ``:`` of a line, each stripped of
+    surrounding whitespace, quotes and backticks."""
+    import re
+
+    out = []
+    for line in written.splitlines():
+        parts = [line]
+        for sep in ("=", ":"):
+            if sep in line:
+                parts.append(line.split(sep, 1)[1])
+        parts += [a or b or c for a, b, c in re.findall(
+            r"\"([^\"\n]*)\"|'([^'\n]*)'|`([^`\n]*)`", line)]
+        out += [part.strip().strip("\"'`").strip() for part in parts]
+    return out
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_the_decrypt_shown_in_the_output_recovers_the_prompt(seed):
+    """Read the decrypt code out of the rendered frame, run it with no
+    builtins on the ciphertext the frame shows, and get the prompt back.
+
+    Nothing here reads ``_DECRYPT`` or ``_TRANSFORMS``: a frame that showed
+    another transform's code, or a ciphertext made with another transform,
+    fails even though the module's own tables still agree."""
+    prompt = "mix the two reagents and heat them"
+    written, info = to_decrypt_function(prompt, rng=random.Random(seed))
+    _code, decrypt = _shown_decrypt(written)
+    recovered = [text for text in _candidates(written) if decrypt(text) == prompt]
+    assert recovered, info
+    # the plaintext itself is not in the frame (the transforms all change a
+    # multi-word prompt)
+    assert prompt not in written
+
+
+@pytest.mark.parametrize("text", ["a b c d", "Mix 2 parts; then wait!",
+                                  'say "hi" to {braces}'])
+def test_the_shown_decrypt_recovers_other_prompts_too(text):
+    for seed in range(6):
+        written, _info = to_decrypt_function(text, rng=random.Random(seed))
+        _code, decrypt = _shown_decrypt(written)
+        assert any(decrypt(c) == text for c in _candidates(written))
+
+
+def test_the_shown_code_is_the_entry_for_the_transform_the_info_names():
+    """The code read out of the output is the module's entry for the slug the
+    info names: the frame shows neither another transform's code nor code of
+    its own."""
+    for seed in range(12):
+        written, info = to_decrypt_function("mix the reagents", rng=random.Random(seed))
+        slug = info.split("transform=")[1].split(";")[0]
+        code, _decrypt = _shown_decrypt(written)
+        assert code.strip() == _DECRYPT[slug].strip()
 
 
 def test_the_transforms_are_involutions():
