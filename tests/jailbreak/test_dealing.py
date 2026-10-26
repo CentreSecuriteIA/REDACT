@@ -342,14 +342,14 @@ def test_the_default_attacks_draw_every_technique_of_their_pool(section):
 
 # The ten heavy full-text encodings, dealt in a slot of their own beside encode
 # in a budget draw (sampling.HEAVY_ENCODINGS, at the spec's
-# heavy_encoding_weight, 0.4).
+# heavy_encoding_weight, 0.45).
 _HEAVY = ("to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
           "to_braille", "to_hex", "to_binary", "to_html_entities", "to_base32",
           "to_base85")
 
 
 def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares):
-    """3,000 units in three groups: ~38 draws of the ten, 3 or more each. The
+    """3,000 units in three groups: ~39 draws of the ten, 3 or more each. The
     slot fixes the total, not a count for each encoding. The slot was set at
     `heavy_encoding_weight` 0.2 for about 40 draws (then 44 to 50), fell to
     30 or 31 once spec 1.4's four language-mix families joined the obfuscation
@@ -357,12 +357,15 @@ def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares
     spec 1.5's literature-gap obfuscation families joined (packet A's
     unicode_smuggling and char_injection, packet B's bijection, packet C's
     semantic_reencoding, translationese and sociolect). The integration retune
-    moved the weight to 0.35 for ~37, and completing the two exclusive
-    families' refusals of the four packet B and C families diluted the picks
-    once more, so 0.35 drew 31 to 34. The weight is now 0.4, which draws the
-    ten 36 to 40 per 3,000 default attack units over seeds 42 to 46 in one,
-    three or ten groups (38 at the fixture's three groups, seed 42), with none
-    of the ten undrawn in any of those cells: about the ~40 aim again. Dealt
+    moved the weight to 0.35 for ~37, and three fixes that refuse pairs the
+    layer used to draw (the two exclusive families against the four packet B
+    and C ones, bijection against what the heavy encodings refuse, the request
+    obfuscation off the code frames) diluted the picks again, so 0.35 drew
+    about 30 and 0.4 about 36, each leaving one of the ten undrawn in a
+    ten-group cell. The weight is now 0.45, which draws the ten 38 to 40 per
+    3,000 default attack units over seeds 42 to 46 in one, three or ten groups
+    (39 at the fixture's three groups, seed 42), with none of the ten undrawn
+    in any of those cells: about the ~40 aim again. Dealt
     as encode's members the ten got 12, two of them never; dealt as a family
     of their own (weight 1), ~200."""
     counts = [default_shares[name]["count"] for name in _HEAVY]
