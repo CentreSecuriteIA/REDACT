@@ -120,6 +120,125 @@ def test_the_semantic_reencodings_refuse_each_other_both_ways(partner):
     assert math not in compatible([other], [math])
 
 
+# --- stego and the frames that lengthen its text ---------------------------
+
+#: The hacking and rewrite families whose frame lengthens the text before the
+#: acrostic is built (they apply first): ``to_stego_paragraph`` refuses them in
+#: its own spec entry, since its applicability reads the plan's input while it
+#: builds the acrostic from the lengthened text.
+_LENGTHENING = ("framing", "persona", "cognitive", "persona_template",
+                "policy_framing", "persuasion", "model_distractors")
+#: Techniques of other families stego still joins: a rewrite that does not
+#: lengthen, a request, a wrapper, a suffix and a manipulation technique.
+_STEGO_PARTNERS = ("to_rewrite_in_past_tense", "to_refusal_then_comply", "to_xml",
+                   "to_adversarial_suffix_punctuation", "to_fsh_random_short")
+
+
+def _members(family: str) -> list:
+    return [fn for fn in all_techniques() if family in fn.families]
+
+
+def _stego():
+    return registry(all_techniques())["to_stego_paragraph"]
+
+
+def test_stego_names_the_lengthening_families_in_its_own_entry():
+    assert sorted(_stego().cross_incompatible_with) == sorted(_LENGTHENING)
+    # the rule is stego's own: the family's list does not hold them, so the
+    # other three re-encodings, which build nothing from the text's words, keep
+    # them (below).
+    for name in ("to_mathprompt", "to_adversarial_poetry", "to_infoflood"):
+        assert _BY[name].cross_incompatible_with == []
+
+
+@pytest.mark.parametrize("family", _LENGTHENING)
+def test_stego_refuses_every_technique_of_a_lengthening_family_both_ways(family):
+    stego, members = _stego(), _members(family)
+    assert members
+    for other in members:
+        # stego picked first: the frame may not join.
+        assert other not in compatible([stego], [other]), other.__name__
+        # the frame picked first: stego may not join.
+        assert stego not in compatible([other], [stego]), other.__name__
+
+
+@pytest.mark.parametrize("name", ["to_mathprompt", "to_adversarial_poetry",
+                                  "to_infoflood"])
+@pytest.mark.parametrize("family", _LENGTHENING)
+def test_the_other_reencodings_still_join_the_lengthening_families(name, family):
+    fn = _BY[name]
+    for other in _members(family):
+        assert other in compatible([fn], [other]), other.__name__
+        assert fn in compatible([other], [fn]), other.__name__
+
+
+@pytest.mark.parametrize("partner", _STEGO_PARTNERS)
+def test_stego_still_joins_its_other_partners_both_ways(partner):
+    stego, other = _stego(), registry(all_techniques())[partner]
+    assert other in compatible([stego], [other])
+    assert stego in compatible([other], [stego])
+
+
+def test_stego_own_entry_takes_out_the_lengthening_families_and_nothing_else(
+        monkeypatch):
+    """Re-derived through ``rules.compatible`` with and without the entry: the
+    techniques stego refuses, in either pick order, grow by the lengthening
+    families' members exactly, and no other pair changes."""
+    pool, stego = all_techniques(), _stego()
+
+    def joins() -> tuple[set, set]:
+        stego_first = {fn.__name__ for fn in compatible([stego], pool)}
+        stego_second = {fn.__name__ for fn in pool
+                        if stego in compatible([fn], [stego])}
+        return stego_first, stego_second
+
+    with_entry = joins()
+    monkeypatch.setattr(stego, "cross_incompatible_with", [])
+    without_entry = joins()
+    lengthening = {fn.__name__ for fn in pool if set(fn.families) & set(_LENGTHENING)}
+    for kept, wider in zip(with_entry, without_entry):
+        assert kept <= wider
+        assert wider - kept == lengthening
+
+
+def _stego_plan(pool: list, n: int = 60) -> list[list[str]]:
+    """The combinations of a plan of ``n`` short inputs (stego applies to
+    each), a count round of two techniques and a budget round with the
+    rewrite layer drawn."""
+    from tests.jailbreak import simulate
+
+    rounds = [{"exact_techniques": 2},
+              {"include_rewrite": True, "max_complexity": 9}]
+    return simulate.deal(pool, n, rounds=rounds,
+                         layer_rates={"rewrite": 0.5, "hacking": 0.5})
+
+
+def test_a_fresh_plan_never_puts_stego_beside_a_lengthening_frame():
+    reg = registry(all_techniques())
+    frames = [_members(family)[0] for family in _LENGTHENING]
+    partners = [reg[name] for name in _STEGO_PARTNERS]
+    combinations = _stego_plan([_stego(), *frames, *partners])
+    frame_names = {fn.__name__ for fn in frames}
+    with_stego = [c for c in combinations if "to_stego_paragraph" in c]
+    assert with_stego
+    assert not [c for c in with_stego if frame_names & set(c)]
+    # the frames are still drawn, beside the other techniques
+    assert any(frame_names & set(c) for c in combinations)
+    # and stego still meets its other partners
+    assert any(set(_STEGO_PARTNERS) & set(c) for c in with_stego)
+
+
+def test_a_fresh_plan_of_the_default_attacks_never_puts_stego_beside_a_frame():
+    from tests.jailbreak import simulate
+
+    combinations, pool = simulate.deal_kind({"rounds": "escalation"}, 120)
+    family_of = {fn.__name__: set(fn.families) for fn in pool}
+    with_stego = [c for c in combinations if "to_stego_paragraph" in c]
+    assert with_stego
+    for names in with_stego:
+        assert not set().union(*(family_of[n] for n in names)) & set(_LENGTHENING)
+
+
 # --- the generate-gate-check loop -----------------------------------------
 
 class _Fake:

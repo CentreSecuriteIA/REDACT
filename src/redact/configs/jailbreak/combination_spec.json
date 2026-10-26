@@ -104,7 +104,7 @@
       "cross_incompatible_with": ["ascii_art", "encode", "sensitive_words", "tokenbreak", "word_art", "wording", "typos", "casual_writing", "noise", "payload_split", "translation"]
     },
     "semantic_reencoding": {
-      "description": "A model re-expresses the request's meaning in another symbolic or literary form (a symbolic-math problem, verse, an acrostic hidden in a benign paragraph, or an information-overload restatement), keeping the request recoverable. A whole-text rewrite at the front of the obfuscations; each technique has a code gate for its form (math notation, line/verse statistics, an exact word-acrostic, a length-ratio band) and then the check model reads the rewrite against the original (check reencode). It refuses the same obfuscation families a translation does, translation itself, the language-mix families and the other semantic-reencoding families translationese and sociolect, since re-encoding the meaning over any of them is incoherent. Spec 1.5; adversarial only. See the literature blockers for what cannot be verified here (poetry quality).",
+      "description": "A model re-expresses the request's meaning in another symbolic or literary form (a symbolic-math problem, verse, an acrostic hidden in a benign paragraph, or an information-overload restatement), keeping the request recoverable. A whole-text rewrite at the front of the obfuscations; each technique has a code gate for its form (math notation, line/verse statistics, an exact word-acrostic, a length-ratio band) and then the check model reads the rewrite against the original (check reencode). It refuses the same obfuscation families a translation does, translation itself, the language-mix families and the other semantic-reencoding families translationese and sociolect, since re-encoding the meaning over any of them is incoherent. to_stego_paragraph also refuses, in its own entry, the hacking and rewrite families that lengthen the text before it applies (framing, persona, cognitive, persona_template, policy_framing, persuasion, model_distractors): its applicability reads the plan's input, 3 to 40 words, but it builds its acrostic from the text it is given, which those frames lengthen past 40 words, so the pair was drawn and then almost always discarded. Spec 1.5; adversarial only. See the literature blockers for what cannot be verified here (poetry quality).",
       "layer": "obfuscation",
       "dimension": "semantic_form",
       "kinds": ["adversarial"],
@@ -514,7 +514,7 @@
 
     "to_mathprompt": {"families": ["semantic_reencoding"], "complexity": 2, "requires_llm": true, "since": "1.5"},
     "to_adversarial_poetry": {"families": ["semantic_reencoding"], "complexity": 2, "requires_llm": true, "since": "1.5"},
-    "to_stego_paragraph": {"families": ["semantic_reencoding"], "complexity": 3, "requires_llm": true, "since": "1.5"},
+    "to_stego_paragraph": {"families": ["semantic_reencoding"], "complexity": 3, "requires_llm": true, "cross_incompatible_with": ["framing", "persona", "cognitive", "persona_template", "policy_framing", "persuasion", "model_distractors"], "since": "1.5"},
     "to_infoflood": {"families": ["semantic_reencoding"], "complexity": 2, "requires_llm": true, "since": "1.5"},
     "to_translationese": {"families": ["translationese"], "complexity": 2, "requires_llm": true, "since": "1.5"},
 

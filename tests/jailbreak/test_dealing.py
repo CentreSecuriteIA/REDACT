@@ -603,7 +603,15 @@ _BUDGETS = [
 # the new families. The integration retune of heavy_encoding_weight (0.25 ->
 # 0.35) moved it once more: the weight scales the heavy full-text encodings'
 # dealing slot, which the budget rounds of this digest draw.
-_PINNED_DRAWS = "90385eb30989e7145e1140868d2daa19f5a187a0bca2b9af7d7015a048cfb58e"
+# to_stego_paragraph's own refusal of the seven families that lengthen the
+# text before it (framing, persona, cognitive, persona_template,
+# policy_framing, persuasion, model_distractors) moved it: 15 of the 240 dealt
+# units (the 2 that held stego beside a hacking frame, then the group's counts
+# after them) and 5 of the 200 undealt draws (the 2 that held stego beside a
+# frame, and 3 whose candidates lost stego once a frame was picked, so the rng
+# drew another; the one draw that held stego with no frame keeps it). The
+# eval type's pin below does not move: no eval pool draws stego.
+_PINNED_DRAWS = "0a8264b61f6919d329c9946b783bb722476899b249ba998ec502791c2597bfeb"
 
 
 
