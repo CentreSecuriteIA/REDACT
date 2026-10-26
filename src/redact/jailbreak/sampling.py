@@ -7,6 +7,7 @@ from .chain import combine_techniques, in_layer_order
 from .rules import (
     after_request_obfuscation,
     compatible,
+    request_obfuscation_allowed_after,
     request_obfuscation_candidates,
 )
 from .technique import heavy_encoding_weight, load_spec
@@ -238,14 +239,20 @@ def sample_combination(
             _commit(request)
 
     # Phase 5, decided and drawn before phase 4: a request-layer obfuscation
-    # (optional, if enabled), only for a unit that holds a request, since it
-    # obfuscates the finished request. It holds one of the max_obfuscations
+    # (optional, if enabled), only for a unit that holds a request the step
+    # may transform (rules.request_obfuscation_allowed_after: not a frame the
+    # model must read as code), since it obfuscates the finished request. A
+    # unit whose request it may not transform is not even asked of the
+    # dealer, which deals the step to the group's next unit that can take it,
+    # as a layer no technique of which applies to a unit is dealt on. It
+    # holds one of the max_obfuscations
     # slots and its complexity, so the obfuscations fill what it leaves and
     # the combination never holds more than max_obfuscations of them. Its
     # families are dealt under REQUEST_SCOPE, apart from phase 4's.
     request_obfuscation: Callable | None = None
     obfuscation_slots = max_obfuscations
-    if (request is not None and allow_request_obfuscation and max_obfuscations > 0
+    if (request_obfuscation_allowed_after(request) and allow_request_obfuscation
+            and max_obfuscations > 0
             and _include("request_obfuscation", p_request_obfuscation)):
         req_obfusc_candidates = request_obfuscation_candidates(current_pool)
         if req_obfusc_candidates:

@@ -107,6 +107,24 @@ def request_obfuscation_candidates(pool: list[Callable]) -> list[Callable]:
     return [fn for fn in pool if allowed_for_request(fn)]
 
 
+def request_obfuscation_allowed_after(request: Callable | None) -> bool:
+    """Whether a combination whose request template is ``request`` may take a
+    request obfuscation.
+
+    The step applies right after the request, to the whole frame, so a frame
+    the model must read as code (the spec's
+    ``request_obfuscation_blocked_requests``: ``code_framing``, which shows a
+    Python decrypt function or a code stub) would be rewritten with the
+    question: every light encoding leaves no readable code, and a translation
+    translates the code and the ciphertext. ``None`` (no request) is false, as
+    the step obfuscates a request.
+    """
+    if request is None:
+        return False
+    blocked = set(load_spec().get("request_obfuscation_blocked_requests", []))
+    return not blocked & set(getattr(request, "families", ()))
+
+
 def after_request_obfuscation(pick: Callable, pool: list[Callable]) -> list[Callable]:
     """The techniques of ``pool`` that may still join a combination whose
     request obfuscation is ``pick``.

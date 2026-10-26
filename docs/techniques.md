@@ -1451,14 +1451,29 @@ reversible transforms drawn from the unit's rng — the whole string reversed,
 the word order reversed, or each word reversed — and shows a Python decrypt
 function that inverts it, the ciphertext set into one of eight framing
 variants, the info `transform=<slug>;variant=<name>`. The transforms are
-involutions, so the shown decrypt is the same operation; a test runs each
-shown decrypt on the transformed text in a restricted `exec` and checks it
-returns the original. The codes shown live in the template file's `_decrypt`
+involutions, so the shown decrypt is the same operation; the tests read the
+decrypt code out of the rendered frame, run it in a restricted `exec` with no
+builtins on the ciphertext the frame shows, and check it returns the prompt.
+The codes shown live in the template file's `_decrypt`
 map (not Python), so no technique text sits in code. The frames and the
 `_decrypt` map are in `requests/code_framing_templates.json` (both pools at
 floor 8). Both are request-layer frames (dimension `request_shape`, one
 request per combination), with no cross rule beyond the layer cap; they are
 attack only and not in the eval pool (a new family).
+
+A combination whose request is one of these two takes **no request
+obfuscation** (the spec's `request_obfuscation_blocked_requests`, read by
+`rules.request_obfuscation_allowed_after`). That step applies right after the
+request, to the whole frame, so it would rewrite the code the model is meant
+to read: measured on a rendered decrypt frame, every one of the 18 pure
+candidates (the light encodings) leaves no `def decrypt` line at all, and a
+translation translates the code and the ciphertext with it. The unit is not
+asked of the dealer either, so the step goes to the group's next unit that
+can take it. An ordinary obfuscation (phase 4) is unaffected: it runs before
+the frame is put around the question, so only the question is encoded. In the
+escalation's two budget rounds over 6,000 units, the code-frame units that
+also hold a light encoding or a translation fall from 303 to 64 at seed 42
+and from 292 to 41 at seed 43, the rest being those ordinary phase-4 picks.
 
 Three request families of spec version 1.2 are for natural variations only
 (their `kinds` are `["natural"]`, so no attack draws them): ordinary,

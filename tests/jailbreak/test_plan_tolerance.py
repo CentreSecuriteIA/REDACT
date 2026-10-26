@@ -357,16 +357,20 @@ def test_the_rules_id_moves_when_a_technique_stops_refusing_ascii_art(monkeypatc
 
 def _request_obfuscation_lists(spec: dict, key: str) -> None:
     """Change in ``spec`` the ``key`` a request obfuscation reads: one family
-    less in what a translation drawn as one keeps out, or in the families
-    it may be drawn from."""
+    less in what a translation drawn as one keeps out, in the families it may
+    be drawn from, or in the request families whose frame it may not
+    transform."""
     if key == "request_obfuscation_refuses":
         spec[key]["translation"].remove("structural")
+    elif key == "request_obfuscation_blocked_requests":
+        spec[key].remove("code_framing")
     else:
         spec[key].remove("encode_light")
 
 
 @pytest.mark.parametrize("key", [
-    "request_obfuscation_refuses", "request_obfuscation_allowed_families"])
+    "request_obfuscation_refuses", "request_obfuscation_allowed_families",
+    "request_obfuscation_blocked_requests"])
 def test_the_rules_id_moves_with_what_a_request_obfuscation_reads(monkeypatch, key):
     """A plan with a round that allows the request obfuscation reads the
     spec's two lists of it, so their content is in its id, a comment is
@@ -390,7 +394,8 @@ def test_the_rules_id_moves_with_what_a_request_obfuscation_reads(monkeypatch, k
     _COUNT, [{}], [{"exact_techniques": 1, "allow_request_obfuscation": True}]],
     ids=["count", "budget-without-the-step", "count-with-the-key"])
 @pytest.mark.parametrize("key", [
-    "request_obfuscation_refuses", "request_obfuscation_allowed_families"])
+    "request_obfuscation_refuses", "request_obfuscation_allowed_families",
+    "request_obfuscation_blocked_requests"])
 def test_a_plan_no_round_of_which_draws_a_request_obfuscation_keeps_its_rules_id(
         monkeypatch, key, rounds):
     """A count round draws no request obfuscation, whatever its settings

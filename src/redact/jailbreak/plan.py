@@ -399,7 +399,8 @@ def rules_id(pool: list[Callable], *, rounds: list[dict]) -> str:
     ``layer_max_picks`` and ``layer_rates``, the obfuscations it keeps from
     the manipulation layer; when a round allows the request obfuscation (a
     budget round with ``allow_request_obfuscation``), the families a request
-    obfuscation may draw and the families it keeps out of a combination;
+    obfuscation may draw, the families it keeps out of a combination and the
+    request families whose frame it may not transform;
     when a round is a budget round and the pool holds a heavy full-text
     encoding (:func:`~redact.jailbreak.sampling.is_heavy_encoding`), the
     ``heavy_encoding_weight`` it deals them at; the ``layer``,
@@ -440,6 +441,8 @@ def rules_id(pool: list[Callable], *, rounds: list[dict]) -> str:
             "request_obfuscation_allowed_families", [])
         record["request_obfuscation_refuses"] = _without_comments(
             spec.get("request_obfuscation_refuses", {}))
+        record["request_obfuscation_blocked_requests"] = spec.get(
+            "request_obfuscation_blocked_requests", [])
     if budget and any(is_heavy_encoding(fn) for fn in techniques):
         record["heavy_encoding_weight"] = spec.get("heavy_encoding_weight")
     return content_id(json.dumps(record, sort_keys=True))

@@ -1165,15 +1165,14 @@ Answer modes: `harmful`, `helpful`.
 | Pool size | 315 |
 | Techniques drawn | 315 |
 | Never drawn |  |
-| Mean techniques per unit | 3.008 |
+| Mean techniques per unit | 3.01 |
 
 | Techniques | Units |
 |---|---|
-| 1 | 34 |
-| 2 | 355 |
-| 3 | 2166 |
-| 4 | 444 |
-| 5 | 1 |
+| 1 | 35 |
+| 2 | 351 |
+| 3 | 2164 |
+| 4 | 450 |
 
 | Layers touched | Units |
 |---|---|
@@ -1192,21 +1191,21 @@ Answer modes: `harmful`, `helpful`.
 
 | Family pair | Units |
 |---|---|
-| `special_tokens` + `translation` | 393 |
+| `special_tokens` + `translation` | 405 |
 | `persona` + `reasoning_injection` | 106 |
 | `policy_framing` + `reasoning_injection` | 105 |
 | `framing` + `reasoning_injection` | 104 |
 | `cognitive` + `reasoning_injection` | 96 |
 | `persona_template` + `reasoning_injection` | 94 |
-| `ascii_art` + `sensitive_words` | 91 |
-| `continuation` + `translation` | 77 |
-| `noise` + `sensitive_words` | 75 |
-| `encode` + `noise` | 71 |
-| `persona_template` + `translation` | 70 |
-| `asking` + `sensitive_words` | 67 |
-| `cognitive` + `translation` | 67 |
-| `temporal` + `translation` | 64 |
-| `impersonation` + `sensitive_words` | 60 |
+| `ascii_art` + `sensitive_words` | 90 |
+| `encode` + `noise` | 74 |
+| `asking` + `sensitive_words` | 73 |
+| `persona_template` + `translation` | 72 |
+| `continuation` + `translation` | 69 |
+| `answer_language` + `sensitive_words` | 67 |
+| `impersonation` + `sensitive_words` | 67 |
+| `temporal` + `translation` | 65 |
+| `framing` + `translation` | 64 |
 
 ### Kind `natural`
 

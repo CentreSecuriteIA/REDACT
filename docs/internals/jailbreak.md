@@ -41,7 +41,7 @@ the technique names are in [techniques.md](../techniques.md).
 | `rewrite/`, `hacking/`, `manipulation/`, `obfuscation/`, `requests/` | The techniques, one module per family (`distractor.py` and `smalltalk.py` each hold both families of their pair), each with a getter; `get_all_rewrite_functions` (16), `get_all_hacking_functions`, `get_all_manipulation_functions`, `get_all_obfuscation_functions`, `get_all_request_functions` per subpackage; `all_techniques` joins the rewrite layer last, so the others keep their registry order. `manipulation/benign.py` makes the benign data: one unit per subcategory of the benign taxonomy and answer type, keyed `(main_category, sub_category, answer_type)`; the fake turns (`manipulation/fake_turns.py`) need none. `hacking/persona_templates.py` checks its persona frames at import (`check_pools`): a frame is its technique's own text, and only the mechanics are its `variant_pool` |
 | `pool.py` | `all_techniques`, `technique_pool(resolved)`, `kind_of(resolved)`, `languages`, `registry`, `chain_tags` (a row's `families` and `layers` from its `technique`, which the build writes; `?<name>` and `?` for a name no registered technique has), `uses_translation` (a translation or a dialect technique), `uses_check` (whether a pool holds a technique the check model checks), `uses_check_model` (that, or a technique that needs the benign data, whose pairs the check model reads), `variant_pools` (each template pool's family, techniques and count of variants on, which the variant floor test ratchets); at import, the spec against the registries, the families' dimensions and the techniques' variant pools |
 | `augmentation.py` | `KINDS`, `defaults(config_dir)`, `resolve(section, kind, base=None, config_dir=None)`, `rounds_of(resolved)`, `apply_flat_keywords`, `FLAT_KEYWORDS` |
-| `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates`, `after_request_obfuscation` (what may still join once a pick is the request obfuscation) |
+| `rules.py` | `compatible(selected, pool, remaining_complexity)`, `request_obfuscation_candidates`, `request_obfuscation_allowed_after` (whether a unit's request frame may be obfuscated at all), `after_request_obfuscation` (what may still join once a pick is the request obfuscation) |
 | `sampling.py` | `sample_combination`, `sample_exact_combination`, `_pick_by_family`, `deal_key` (the name a dealer counts a technique under), `is_heavy_encoding`, `REQUEST_SCOPE`, `HEAVY_ENCODINGS` |
 | `plan.py` | `plan_run`, `assign_combination` (with the opt-in group budget: `_allowance`, `UNIT_HEADROOM`), `combination_of`, `coverage`, `plan_inputs` (the record of the `<stem>.plan.json` beside the manifest, written through `dataset/planfile.py`, its `spec_version` dating the pool and its `rules` the rules it was drawn by, `rules_id`), `default_escalation_schedule`; it deals from `dataset.dealing.Dealer` |
 | `chain.py` | `run_chain` (with `scenarios`, a list, it hands each technique that takes it a `record_scenario` of its own), `combine_techniques`, `in_layer_order`, `apply_combination` |
@@ -290,7 +290,21 @@ obfuscation is phase 5 and runs before phase 4):
   `to_sensitive_words_encode_*` among them) or a translation, applied right
   after the request technique, before the manipulation layer. A unit without
   a request is not asked, so the step never lands after the outermost
-  wrapper. A translation drawn this way applies after every obfuscation and
+  wrapper, and neither is one whose request is of a family the spec's
+  `request_obfuscation_blocked_requests` names
+  (`rules.request_obfuscation_allowed_after`): today `code_framing`, whose
+  frames show a Python decrypt function or a code stub the model must read as
+  code. The step transforms the whole frame, so it would rewrite that code
+  with the question: measured on a rendered decrypt frame, all 18 pure
+  candidates (the light encodings) leave no `def decrypt` line at all, and a
+  translation translates the code and the ciphertext. Such a unit is not
+  asked of the dealer either, which deals the step to the group's next unit
+  that can take it, as it does for a layer no technique of which applies to a
+  unit; in the escalation's two budget rounds over 6,000 units, the code-frame
+  units that also hold a light encoding or a translation fall from 303 to 64
+  at seed 42 and from 292 to 41 at seed 43 (what is left is an ordinary phase-4
+  obfuscation, which runs before the request frame is put around the question
+  and leaves its code alone). A translation drawn this way applies after every obfuscation and
   the request (a manipulation technique, the only step after it, never meets
   a translation), so it would translate a suffix, a wrapper's keys or a
   container's lines: the spec's `request_obfuscation_refuses` keeps the

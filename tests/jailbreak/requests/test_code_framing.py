@@ -1,4 +1,4 @@
-﻿"""Code framing (requests/code_framing.py, spec 1.5): to_code_completion
+"""Code framing (requests/code_framing.py, spec 1.5): to_code_completion
 (CodeAttack, Ren 2403.07865) and to_decrypt_function (CodeChameleon, Lv
 2402.16717). Two pure request-layer techniques. The frame wording is not
 reproduced here; the tests assert on shape, the slot, the info, the floor,
@@ -153,6 +153,64 @@ def test_the_shown_code_is_the_entry_for_the_transform_the_info_names():
         assert code.strip() == _DECRYPT[slug].strip()
 
 
+# --- the request obfuscation never transforms a code frame ---------------------
+
+def test_a_light_request_obfuscation_would_destroy_the_shown_code():
+    """Why the step is kept off a code frame: every pure candidate of the
+    spec's ``request_obfuscation_allowed_families``, applied to a rendered
+    decrypt frame, leaves no ``def decrypt`` at all, so the shown code can
+    neither be read nor run (a translation rewrites the code and the
+    ciphertext the same way, which no test here can run)."""
+    from redact.jailbreak.pool import all_techniques as _all
+    from redact.jailbreak.rules import request_obfuscation_candidates
+
+    frame, _info = to_decrypt_function("mix the two reagents and heat them",
+                                       rng=random.Random(0))
+    assert "def decrypt" in frame
+    pure = [fn for fn in request_obfuscation_candidates(_all())
+            if not getattr(fn, "requires_llm", False)]
+    assert len(pure) >= 15  # noqa: PLR2004
+    for fn in pure:
+        written, _ = (fn(frame, rng=random.Random(1))
+                      if "rng" in fn.__code__.co_varnames else fn(frame))
+        assert "def decrypt" not in written, fn.__name__
+
+
+def test_the_spec_keeps_the_request_obfuscation_off_the_code_frames():
+    from redact.jailbreak.rules import request_obfuscation_allowed_after
+
+    assert load_spec()["request_obfuscation_blocked_requests"] == ["code_framing"]
+    for fn in FUNCTIONS:
+        assert not request_obfuscation_allowed_after(fn)
+    # another request family still takes one, and no request at all takes none
+    other = {fn.__name__: fn for fn in all_techniques()}["to_innocuous_question"]
+    assert request_obfuscation_allowed_after(other)
+    assert not request_obfuscation_allowed_after(None)
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_a_drawn_combination_never_obfuscates_a_code_frame(seed):
+    """Over the whole pool, with the step on at every unit: a combination
+    whose request is a code frame has no request obfuscation, and one whose
+    request is another family still may."""
+    from redact.jailbreak.sampling import sample_combination
+
+    code_framing = {fn.__name__ for fn in FUNCTIONS}
+    with_step = 0
+    for n in range(60):
+        combo = sample_combination(
+            random.Random(seed * 1000 + n), all_techniques(),
+            allow_request_obfuscation=True, max_obfuscations=3,
+            sampling_probs={"requests": 1.0, "request_obfuscation": 1.0})
+        names = [fn.__name__ for fn in combo.techniques]
+        step = getattr(combo, "request_obfuscation", None)
+        if code_framing & set(names):
+            assert step is None, names
+        elif step is not None:
+            with_step += 1
+    assert with_step  # the step is still drawn for the other requests
+
+
 def test_the_transforms_are_involutions():
     for transform in _TRANSFORMS.values():
         for text in TEXTS:
@@ -243,3 +301,4 @@ def test_it_combines_with_an_obfuscation_and_a_hacking_frame_both_ways(fn):
         partner = by_name[name]
         assert partner in compatible([fn], [partner]), name
         assert fn in compatible([partner], [fn]), name
+

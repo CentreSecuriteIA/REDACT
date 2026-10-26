@@ -251,6 +251,29 @@ def test_a_refuses_table_that_could_not_act_raises_when_read(tmp_path, change, m
     assert str(raised.value).startswith(message)
 
 
+@pytest.mark.parametrize(("blocked", "ok"), [
+    (["code_framing"], True),
+    (["code_framing", "indirect"], True),
+    ([], True),
+    (["encode"], False),          # an obfuscation family blocks nothing
+    (["fsh"], False),             # nor a manipulation family
+    ("code_framing", False),      # not a list
+    (["code_framin"], False),     # not a family
+], ids=["packaged", "two requests", "empty", "an obfuscation", "a manipulation",
+        "not a list", "not a family"])
+def test_the_blocked_request_families_must_be_request_families(tmp_path, blocked, ok):
+    """``request_obfuscation_blocked_requests`` is read off the unit's request
+    pick, so only a request-layer family can block the step."""
+    change = lambda s: s.__setitem__(  # noqa: E731
+        "request_obfuscation_blocked_requests", blocked)
+    if ok:
+        spec = _read_changed(tmp_path, change)
+        assert spec["request_obfuscation_blocked_requests"] == blocked
+        return
+    with pytest.raises(ValueError, match="request-layer families"):
+        _read_changed(tmp_path, change)
+
+
 def test_a_light_encoding_drawn_as_the_request_obfuscation_may_refuse_too(tmp_path):
     table = {"translation": ["suffixes"], "encode": ["structural", "neutral_container"]}
     spec = _read_changed(tmp_path, _refuses(table))

@@ -169,6 +169,9 @@ def read_spec(path: Path) -> dict:
             families a request obfuscation is drawn from, each with a list
             of obfuscation-layer families
             (:func:`_check_request_obfuscation_refuses`);
+            ``request_obfuscation_blocked_requests`` is not a list of
+            request-layer families
+            (:func:`_check_request_obfuscation_blocked_requests`);
             ``decode_hint_rate`` is not a number from 0 to 1; or
             ``heavy_encoding_weight`` is not a number above 0 and at most 1.
     """
@@ -193,6 +196,7 @@ def read_spec(path: Path) -> dict:
             f"{heavy!r}; leave it out to deal them as encode's members.")
     _check_families(spec["families"], layers)
     _check_request_obfuscation_refuses(spec)
+    _check_request_obfuscation_blocked_requests(spec)
     for key, rate in spec.get("layer_rates", {}).items():
         if not key.startswith("_") and (
                 key not in [*layers, _REQUEST_OBFUSCATION] or not _is_rate(rate)):
@@ -291,6 +295,24 @@ def _check_request_obfuscation_refuses(spec: dict) -> None:
                 f"obfuscation-layer families of the spec, got {refused!r}; the "
                 "request obfuscation is drawn after every other layer's pick, so "
                 "it can keep out only an obfuscation.")
+
+
+def _check_request_obfuscation_blocked_requests(spec: dict) -> None:
+    """Raise unless the spec's ``request_obfuscation_blocked_requests`` is a
+    list of request-layer families: the frames a request obfuscation may not
+    transform (:func:`redact.jailbreak.rules.request_obfuscation_allowed_after`
+    reads it off the unit's request pick, which is always of the requests
+    layer, so a family of another layer would block nothing)."""
+    blocked = spec.get("request_obfuscation_blocked_requests", [])
+    requests = {name for name, family in spec["families"].items()
+                if family.get("layer") == "requests"}
+    if not isinstance(blocked, list) or any(
+            name not in requests for name in blocked):
+        raise ValueError(
+            f"{_SPEC}: request_obfuscation_blocked_requests must be a list of "
+            f"request-layer families of the spec, got {blocked!r}; the step is "
+            "kept off a unit by its request pick, which is of the requests "
+            "layer.")
 
 
 def _checked_row(row: dict, family: str, generator: dict,
