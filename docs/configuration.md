@@ -586,7 +586,7 @@ favours a family's cheaper techniques). `family_weights` may name only
 families the kind's pool draws. In a budget round the ten heavy full-text
 encodings (`to_base64`, `to_morse` and the others of `encode_weight` heavy
 that encode the whole text) are dealt in a slot of their own beside
-`encode`, at the spec's `heavy_encoding_weight` (0.35) times `encode`'s
+`encode`, at the spec's `heavy_encoding_weight` (0.4) times `encode`'s
 weight, so they are drawn about a quarter as often as a family: the slot is
 not a family, so `family_weights` cannot name it (`"encode:heavy"` raises
 as any name the kind does not draw); weight `encode` to move both. It is a
@@ -959,10 +959,12 @@ copy the packaged adversarial lists into it
   goes undrawn in 2, 0, 0, 0 and 1 of the 15 plans (in ten groups), so
   spec 1.4 set the weight to 0.25: 37 or 38 draws in one group, 38 or 39 in
   three, 40 in ten, the least drawn of the ten 3 times in one and three
-  groups and 1 to 3 in ten. (The spec-1.5 integration retuned the weight
-  again, to 0.35, after its literature-gap families diluted the picks: see
-  the internals note.) The escalation's round 3 draws 36 of them (30 at 0.2) and round 4
-  27 or 28 (24). A plan of 300 inputs in 15 groups of 20 draws 8 to 11 at
+  groups and 1 to 3 in ten. (Spec 1.5 retuned the weight again, to 0.35 and
+  then to 0.4, after its literature-gap families and their refusals diluted
+  the picks: see the internals note.) Measured at the packaged weight on the
+  current pool, the escalation's round 3 draws 33 of them and round 4 27
+  (3,000 units a round, three groups, the same count at each of seeds 42 to
+  46). A plan of 300 inputs in 15 groups of 20 draws 8 to 11 at
   any weight from 0.2 to 0.4: each small group's slot takes its first pick
   early and its next only after more units than the group has. A count round
   (the eval type, the natural kind, escalation rounds 1 and 2) does not read
@@ -1136,7 +1138,7 @@ a run you already have, and what you will see; each point has its note below.
   wrapper and a container out of the unit (which makes the translation the
   unit's only obfuscation); and a budget round deals the ten heavy full-text
   encodings in a slot of their own at the spec's `heavy_encoding_weight`,
-  0.2 (0.35 since the spec-1.5 integration retune, 0.25 at spec 1.4), a quota rather than a floor (about 45
+  0.2 (0.4 since the spec-1.5 retunes, 0.25 at spec 1.4), a quota rather than a floor (27
   draws of the ten in 3,000 units of the escalation's last round, where they
   were about 121; the note on the first eval release, below).
 - **Stricter checks, and what they skip.** An allow list or `family_weights`
@@ -2014,8 +2016,8 @@ offline.
 
 The sixth change is for training only: a budget round deals the ten heavy
 full-text encodings in a slot of their own beside `encode`, at the spec's
-new `heavy_encoding_weight`, 0.2 (0.35 since the spec-1.5 integration
-retune, 0.25 at spec 1.4), times `encode`'s weight
+new `heavy_encoding_weight`, 0.2 (0.4 since the spec-1.5 retunes,
+0.25 at spec 1.4), times `encode`'s weight
 (`HEAVY_ENCODINGS` in `jailbreak/sampling.py`, a name the dealer counts them
 under). Dealt as `encode`'s members, a heavy one fitted only a unit with 3
 points left, and the light members kept the family's count high, so it was
@@ -2036,14 +2038,14 @@ The slot is a quota, not a floor. It deals the ten at the same share of
 `encode` in every budget round, whatever the round's budget, so a round that
 dealt them more as `encode`'s members now gets fewer: that is the size it was
 set for, about 40 draws in 3,000 units. In the escalation (3,000 units a
-round in three groups, the mean of seeds 42 to 46) round 3 (`max_complexity`
-6) goes from 6 draws of the ten to 42, and round 4 (`max_complexity` 9,
-three obfuscations) from about 121 to about 45; rounds 1 and 2 are count
-rounds and do not move. The last round of the escalation therefore draws
-about as many of them as the default attacks do (44 to 50), where its budget
-alone would have made it the round that draws the most, and a kind that wants
-more of them in its late rounds cannot say so: the weight is one number of
-the spec, which a `config_dir` never overlays.
+round in three groups, seeds 42 to 46, at the packaged weight on the current
+pool) round 3 (`max_complexity` 6) draws 33 of the ten and round 4
+(`max_complexity` 9, three obfuscations) 27, the same count at each of those
+seeds, since the slot deals a fixed share of each group; rounds 1 and 2 are
+count rounds and do not read the weight. Round 4 dealt them about 121 times
+as encode's members (spec 1.3), so the late rounds no longer draw the most
+of them, and a kind that wants more of them there cannot say so: the weight
+is one number of the spec, which a `config_dir` never overlays.
 
 The weight was set, at spec 1.3 (spec 1.4 retuned it to 0.25, in its notes
 above), by measurement over seeds 42 to 46 in three groups: 0.3

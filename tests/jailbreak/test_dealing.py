@@ -309,37 +309,39 @@ def test_the_default_attacks_draw_every_technique_of_their_pool(section):
     families (packets A, B and C) share the obfuscation layer's family-first
     picks, so the rarest members (the three heavy ``sensitive_words``
     encodings, complexity 3, which need a marked word and three budget points)
-    need more units to come out under the group budget: the sim is 5,000, and
-    the ``_THIN_UNDER_GROUP`` allowance covers the three if they still miss in
-    a finite sample. The pool grows with each release, so this floor grows
-    with it; it is a coverage floor, not a tuning figure."""
-    units = 5000
+    need more units to come out: the sim is 6,000 (5,000 left one of the three
+    undrawn under the unit budget once the heavy slot's weight rose to 0.4),
+    and the ``_THIN_UNDER_GROUP`` allowance covers the three if they still
+    miss under the group budget, where they are thin at any size. The pool
+    grows with each release, so this floor grows with it; it is a coverage
+    floor, not a tuning figure."""
+    units = 6000
     drawn, pool = simulate.deal_kind(section, units, groups=3, seed=42)
     table = simulate.shares(drawn, pool)
     texts = simulate.inputs(units, groups=3)["prompt"]
     asked = [fn.__name__ for fn in pool if not getattr(fn, "deprecated", None)
              and any(applies(fn, text, "harmful") for text in texts)]
     undrawn = {name for name in asked if table[name]["count"] == 0}
-    # The default (unit) budget draws every technique. Spec 1.5's two exclusive
-    # whole-text obfuscation families share the obfuscation family-first picks
-    # with more families, so under the opt-in group budget the three
-    # complexity-3 heavy sensitive-word encodings no longer all appear in a
-    # finite sample (they do under the unit budget); see
-    # .claude/completion_blockers.md.
+    # The default (unit) budget draws every technique, in 6,000 units. Spec
+    # 1.5's two exclusive whole-text obfuscation families share the
+    # obfuscation family-first picks with more families, so under the opt-in
+    # group budget the three complexity-3 heavy sensitive-word encodings no
+    # longer all appear in a finite sample (they do under the unit budget);
+    # see .claude/completion_blockers.md.
     allowed = _THIN_UNDER_GROUP if section else set()
     assert undrawn <= allowed, undrawn
 
 
 # The ten heavy full-text encodings, dealt in a slot of their own beside encode
 # in a budget draw (sampling.HEAVY_ENCODINGS, at the spec's
-# heavy_encoding_weight, 0.35).
+# heavy_encoding_weight, 0.4).
 _HEAVY = ("to_base64", "to_unicode_escape", "to_ascii_ordinal", "to_morse",
           "to_braille", "to_hex", "to_binary", "to_html_entities", "to_base32",
           "to_base85")
 
 
 def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares):
-    """3,000 units in three groups: ~36 draws of the ten, 3 or 4 each. The
+    """3,000 units in three groups: ~38 draws of the ten, 3 or more each. The
     slot fixes the total, not a count for each encoding. The slot was set at
     `heavy_encoding_weight` 0.2 for about 40 draws (then 44 to 50), fell to
     30 or 31 once spec 1.4's four language-mix families joined the obfuscation
@@ -347,11 +349,14 @@ def test_the_default_attacks_draw_each_heavy_encoding_a_few_times(default_shares
     spec 1.5's literature-gap obfuscation families joined (packet A's
     unicode_smuggling and char_injection, packet B's bijection, packet C's
     semantic_reencoding, translationese and sociolect). The integration retune
-    moved the weight to 0.35, which draws the ten 36 to 40 per 3,000 default
-    attack units over seeds 42 to 46 in one, three or ten groups (36 at the
-    fixture's three groups, seed 42), with none of the ten undrawn in any of
-    those cells: about the ~40 aim again. Dealt as encode's members the ten got
-    12, two of them never; dealt as a family of their own (weight 1), ~200."""
+    moved the weight to 0.35 for ~37, and completing the two exclusive
+    families' refusals of the four packet B and C families diluted the picks
+    once more, so 0.35 drew 31 to 34. The weight is now 0.4, which draws the
+    ten 36 to 40 per 3,000 default attack units over seeds 42 to 46 in one,
+    three or ten groups (38 at the fixture's three groups, seed 42), with none
+    of the ten undrawn in any of those cells: about the ~40 aim again. Dealt
+    as encode's members the ten got 12, two of them never; dealt as a family
+    of their own (weight 1), ~200."""
     counts = [default_shares[name]["count"] for name in _HEAVY]
     assert 34 <= sum(counts) <= 44  # noqa: PLR2004
     assert min(counts) >= 3  # noqa: PLR2004
@@ -611,7 +616,15 @@ _BUDGETS = [
 # frame, and 3 whose candidates lost stego once a frame was picked, so the rng
 # drew another; the one draw that held stego with no frame keeps it). The
 # eval type's pin below does not move: no eval pool draws stego.
-_PINNED_DRAWS = "0a8264b61f6919d329c9946b783bb722476899b249ba998ec502791c2597bfeb"
+# char_injection and unicode_smuggling then came to refuse the obfuscation
+# families packets B and C added after them (bijection, semantic_reencoding,
+# translationese, sociolect; flip_tokens too, which has no technique yet),
+# as they refuse every other obfuscation family. 38 of the 240 dealt units
+# and 16 of the 200 undealt draws held such a pair and none does now; the
+# group's family counts change from the first of them on, so 194 of the 240
+# dealt units and 28 of the 200 undealt draws moved. No eval pool draws
+# either family, so the eval type's pin below does not move.
+_PINNED_DRAWS = "0980d337d0653fc38edcbf1f9226c13cd838864b70517cc9a908be49e8b3653b"
 
 
 

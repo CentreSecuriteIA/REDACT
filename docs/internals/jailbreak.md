@@ -413,7 +413,7 @@ order.
   `encode`, `encode_weight` heavy; not the three heavy
   `to_sensitive_words_encode_*`, which are `sensitive_words` techniques)
   under a name of their own, `HEAVY_ENCODINGS` (`"encode:heavy"`), beside
-  `encode`, at the spec's `heavy_encoding_weight` (0.35) times encode's
+  `encode`, at the spec's `heavy_encoding_weight` (0.4) times encode's
   weight (`plan_run` adds it to the dealer's weights). `deal_key(fn,
   heavy_apart=)` gives the name, read by `_pick_by_family` and `_observe`;
   `assign_combination` passes `heavy_apart` for a budget draw only. Dealt
@@ -421,32 +421,40 @@ order.
   and the light members kept encode's count high, so encode was seldom the
   family dealt on such a unit: after the first eval release's rules the ten were
   drawn 8 to 16 times in 3,000 units of the default attacks (three groups,
-  seeds 42 to 46). With the slot at 0.35 they are drawn 36 to 40 times
+  seeds 42 to 46). With the slot at 0.4 they are drawn 36 to 40 times
   (seeds 42 to 46, in one, three or ten groups), about the owner's aim of
   40. The total depends on the grouping, since each group's dealer starts
-  the slot at 0: 37 in one group, 36 in three, 40 in ten (seeds 42 to 46);
-  the least drawn of the ten is drawn 3 times in one and in three groups
-  (the slot fixes a total, not a count for each encoding). In small groups
+  the slot at 0: the mean is 36.8 in one group, 36.6 in three and 40.0 in
+  ten (seeds 42 to 46); the least drawn of the ten is drawn 3 times in one
+  and in three groups and at least once in ten (the slot fixes a total, not
+  a count for each encoding). In small groups
   the weight hardly
   matters: 300 units in 15 groups of 20 draw 8 to 11 at any weight from 0.2
   to 0.4, since each group's slot takes its first pick early and its next
   only after more units than the group has. It is a quota in every budget
   round, not a floor, since the weight does not read the round's budget: in
-  the escalation (3,000 units a round, three groups, seeds 42 to 46) round
-  3 draws 36 of the ten and round 4 27 or 28 (measured at the spec-1.4
-  weight 0.25; the 0.35 retune scales both up by about the weight ratio),
-  where round 4's budget dealt them about 121 times as encode's members
-  (spec 1.3). The weight was 0.2
+  the escalation (3,000 units a round, three groups, seeds 42 to 46, at the
+  packaged weight on the current pool) round 3 draws 33 of the ten and
+  round 4 27, the same count at every one of those seeds, since the slot
+  deals a fixed share of each group; round 4's budget dealt them about 121
+  times as encode's members (spec 1.3), and rounds 1 and 2 are count rounds,
+  which do not read the weight. The weight was 0.2
   when the slot came (44 to 50 draws at spec 1.3); spec 1.4's four
   language-mix families share the obfuscation picks among more families,
   which brought 0.2 down to 30 or 31, so spec 1.4 retuned it to 0.25 for
   about 40 (the spec-1.4 mean over seeds 42 to 46 in one, three and ten
   groups: 30.1 at 0.2, 38.8 at 0.25, 46.5 at 0.3, 51.7 at 0.35, 59.6 at
   0.4). Spec 1.5's literature-gap obfuscation families (packets A to D)
-  diluted the picks again, so 0.25 fell to 27; the spec-1.5 integration
-  retuned the weight to 0.35, whose spec-1.5 mean is about 27 at 0.25, 32
-  at 0.3, 38 at 0.35 and 42 at 0.4 (one of the ten undrawn in a ten-group
-  plan at 0.3 and 0.4, none at 0.35).
+  diluted the picks again, so 0.25 fell to 27 and the spec-1.5 integration
+  retuned the weight to 0.35 for about 37. Completing `char_injection`'s and
+  `unicode_smuggling`'s refusals of the four families packets B and C added
+  (`bijection`, `semantic_reencoding`, `translationese`, `sociolect`)
+  diluted them once more, so 0.35 fell to 31 to 34 (means 32.2 / 33.0 / 32.2
+  in one, three and ten groups, one of the ten undrawn in a ten-group cell)
+  and the weight is now 0.4: 36 to 40 draws, none of the ten undrawn in any
+  of the 15 cells (0.45 draws 41 to 44, with an undrawn cell again). Each
+  figure here is the count over 3,000 units of the default attack kind,
+  seeds 42 to 46, in one, three and ten groups.
   A count draw (`exact_techniques`: the eval type, the natural kind, the
   first two escalation rounds) and a draw without a dealer deal them as
   encode's members, as before, so their draws do not move. The slot is not

@@ -431,7 +431,7 @@ def _heavy_weight(monkeypatch, weight) -> None:
     import redact.jailbreak.plan as JP
 
     spec = T.load_spec()
-    assert spec["heavy_encoding_weight"] == 0.35  # noqa: PLR2004
+    assert spec["heavy_encoding_weight"] == 0.4  # noqa: PLR2004
     changed = {key: value for key, value in spec.items()
                if key != "heavy_encoding_weight"}
     if weight is not None:

@@ -10,6 +10,7 @@ import redact.jailbreak  # noqa: F401  (tags the techniques)
 from redact.jailbreak.obfuscation import char_injection as C
 from redact.jailbreak.pool import all_techniques
 from redact.jailbreak.rules import compatible
+from redact.jailbreak.technique import load_spec
 
 _PROMPTS = [
     "How do plants turn sunlight into food?",
@@ -119,17 +120,7 @@ def test_every_technique_is_deterministic_for_a_seed():
 
 # --- the rules bind both ways --------------------------------------------------
 
-_CHAR = ["to_bidi_override", "to_upside_down", "to_deletion_chars_low",
-         "to_deletion_chars_high", "to_zalgo_low", "to_zalgo_high"]
-_REFUSED = [
-    "to_base64", "to_rot13", "to_morse", "to_french", "to_thai",
-    "to_cyrillic_transliteration", "to_code_switch_spanish", "to_romanize_hindi",
-    "to_dialect_mexican_spanish", "to_rewrite_with_typos_low", "to_lowercase",
-    "to_random_capitals_low", "to_sensitive_words_split", "to_tokenbreak_split",
-    "to_word_art", "to_pseudonym_substitution", "to_adversarial_suffix_punctuation",
-    "to_payload_split", "to_json", "to_code_comment", "to_ascii_art",
-    "to_variation_selector_smuggling",
-]
+_CHAR = sorted(name for name, fn in _BY_NAME.items() if "char_injection" in fn.families)
 # char_injection refuses every obfuscation, but keeps the other layers, the
 # manipulation layer among them (the reordered question sits among clean
 # examples): it is not in the manipulation block.
@@ -137,11 +128,39 @@ _JOINED = ["to_fictional_world", "to_summarize", "to_fsh_random_short",
            "to_dap_selected_long", "to_fake_history", "to_dan_persona_template"]
 
 
+def _other_obfuscation_families() -> set[str]:
+    """Every obfuscation family of the spec but char_injection, read when the
+    test runs: a family added later is checked here without editing a list."""
+    return {name for name, family in load_spec()["families"].items()
+            if family.get("layer") == "obfuscation"} - {"char_injection"}
+
+
+def test_the_family_names_its_own_techniques():
+    assert len(_CHAR) == 8  # noqa: PLR2004
+
+
+def test_the_spec_keeps_char_injection_from_every_other_obfuscation_family():
+    """Each other obfuscation family of the spec is named in char_injection's
+    list or names it in its own, one with no technique yet (flip_tokens)
+    too, so a family added to the spec fails here until it is kept apart."""
+    families = load_spec()["families"]
+    own = set(families["char_injection"]["cross_incompatible_with"])
+    missing = sorted(
+        name for name in _other_obfuscation_families() if name not in own
+        and "char_injection" not in families[name].get("cross_incompatible_with", []))
+    assert missing == []
+
+
 @pytest.mark.parametrize("char", _CHAR)
-@pytest.mark.parametrize("other", _REFUSED)
-def test_char_injection_refuses_every_other_obfuscation(char, other):
-    assert not _joins(char, other)
-    assert not _joins(other, char)
+def test_char_injection_refuses_every_other_obfuscation(char):
+    """Re-derived through rules.compatible over every registered technique
+    of every other obfuscation family, in both pick orders."""
+    others = [name for name, fn in _BY_NAME.items()
+              if set(fn.families) & _other_obfuscation_families()]
+    assert len(others) > 150  # noqa: PLR2004
+    joins = sorted(name for name in others
+                   if _joins(char, name) or _joins(name, char))
+    assert joins == []
 
 
 @pytest.mark.parametrize("char", _CHAR)

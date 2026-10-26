@@ -1283,8 +1283,13 @@ family, not in the eval pool.
   8 to 48 random invisible selectors: the static form, raw-character noise a
   classifier meets and a reader never sees. All three are pure. As a
   full-prompt hiding (like the heavy full-text encodings) the family refuses
-  every other obfuscation and the manipulation layer; it still joins the
-  hacking layer and a request. No carrier holds an invisible character of its
+  every other obfuscation family, those spec 1.5 added after it
+  (`bijection`, `semantic_reencoding`, `translationese`, `sociolect`, and
+  `flip_tokens`, which has no technique yet) included, and the manipulation
+  layer's `fsh`, `dap` and `fake_turns` (not `reasoning_injection`, left
+  open); it still joins the hacking layer and a request. Its test reads the
+  spec's obfuscation families when it runs, so a family added later fails it
+  until the two are kept apart. No carrier holds an invisible character of its
   own, so the trailing invisible run is the payload alone.
 - `char_injection` (8, spec version 1.5, attack only) reorders, flips, deletes
   or marks characters so a reader still reads the prompt while a classifier
@@ -1300,8 +1305,11 @@ family, not in the eval pool.
   (`U+0300`-`U+036F`) on each visible character. All are pure. The bidi
   reversal decodes under the bidi algorithm, and the deletion and zalgo
   injections strip back to the prompt. As a whole-text reorder or injection
-  the family refuses every other obfuscation family; it still joins the
-  hacking, request and manipulation layers.
+  the family refuses every other obfuscation family, those spec 1.5 added
+  after it (`bijection`, `semantic_reencoding`, `translationese`,
+  `sociolect`, and the empty `flip_tokens`) included, a rule its test
+  re-derives from the spec's obfuscation families when it runs; it still
+  joins the hacking, request and manipulation layers.
 - `special_tokens` (2, spec version 1.5, attack only) places model control
   tokens around the prompt. `to_eos_tokens` appends one model family's
   end-of-sequence marker(s) after the prompt (BOOST, Yu 2405.20653), so a

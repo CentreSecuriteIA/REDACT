@@ -10,7 +10,7 @@ import redact.jailbreak  # noqa: F401  (tags the techniques)
 from redact.jailbreak.obfuscation import unicode_smuggling as U
 from redact.jailbreak.pool import all_techniques
 from redact.jailbreak.rules import compatible
-from redact.jailbreak.technique import applies
+from redact.jailbreak.technique import applies, load_spec
 
 _PROMPTS = [
     "How do plants turn sunlight into food?",
@@ -113,29 +113,54 @@ def test_the_same_seed_gives_the_same_text():
 
 # --- the rules bind both ways --------------------------------------------------
 
-_REFUSED = [
-    "to_base64", "to_rot13", "to_morse", "to_french", "to_thai",
-    "to_cyrillic_transliteration", "to_code_switch_spanish", "to_romanize_hindi",
-    "to_dialect_mexican_spanish", "to_rewrite_with_typos_low", "to_lowercase",
-    "to_random_capitals_low", "to_sensitive_words_split", "to_tokenbreak_split",
-    "to_word_art", "to_pseudonym_substitution", "to_adversarial_suffix_punctuation",
-    "to_payload_split", "to_json", "to_code_comment", "to_ascii_art",
-    "to_fsh_random_short", "to_dap_selected_long", "to_fake_history",
-]
+#: The manipulation families whose examples or invented turns would sit
+#: visibly around the hidden question; reasoning_injection, the fourth
+#: family of the layer, is not refused (an open question for the owner).
+_MANIPULATION = ("fsh", "dap", "fake_turns")
 _JOINED = ["to_fictional_world", "to_summarize", "to_use_past_tense",
            "to_distractor_prefix_related"]
-_SMUGGLERS = ["to_variation_selector_smuggling", "to_invisible_suffix",
-              "to_unicode_tag_smuggling"]
+_SMUGGLERS = sorted(name for name, fn in _BY_NAME.items()
+                    if "unicode_smuggling" in fn.families)
+
+
+def _other_obfuscation_families() -> set[str]:
+    """Every obfuscation family of the spec but unicode_smuggling, read when
+    the test runs: a family added later is checked here without editing a
+    list."""
+    return {name for name, family in load_spec()["families"].items()
+            if family.get("layer") == "obfuscation"} - {"unicode_smuggling"}
+
+
+def test_the_family_names_its_own_techniques():
+    assert _SMUGGLERS == ["to_invisible_suffix", "to_unicode_tag_smuggling",
+                          "to_variation_selector_smuggling"]
+
+
+def test_the_spec_keeps_unicode_smuggling_from_every_other_obfuscation_family():
+    """Each other obfuscation family of the spec is named in
+    unicode_smuggling's list or names it in its own, one with no technique
+    yet (flip_tokens) too, so a family added to the spec fails here until it
+    is kept apart."""
+    families = load_spec()["families"]
+    own = set(families["unicode_smuggling"]["cross_incompatible_with"])
+    missing = sorted(
+        name for name in _other_obfuscation_families() if name not in own
+        and "unicode_smuggling" not in families[name].get("cross_incompatible_with", []))
+    assert missing == []
 
 
 @pytest.mark.parametrize("smuggler", _SMUGGLERS)
-@pytest.mark.parametrize("other", _REFUSED)
 def test_unicode_smuggling_refuses_the_whole_text_and_manipulation_families(
-        smuggler, other):
-    """A full-prompt hiding: it refuses every other obfuscation family and the
-    manipulation layer, whichever is picked first."""
-    assert not _joins(smuggler, other)
-    assert not _joins(other, smuggler)
+        smuggler):
+    """A full-prompt hiding: it refuses every registered technique of every
+    other obfuscation family, and of fsh, dap and fake_turns, whichever is
+    picked first (re-derived through rules.compatible)."""
+    others = [name for name, fn in _BY_NAME.items()
+              if set(fn.families) & (_other_obfuscation_families() | set(_MANIPULATION))]
+    assert len(others) > 150  # noqa: PLR2004
+    joins = sorted(name for name in others
+                   if _joins(smuggler, name) or _joins(name, smuggler))
+    assert joins == []
 
 
 @pytest.mark.parametrize("smuggler", _SMUGGLERS)

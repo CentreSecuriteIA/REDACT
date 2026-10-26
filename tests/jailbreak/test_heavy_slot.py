@@ -46,16 +46,20 @@ def _at_weight(monkeypatch, weight: float) -> None:
 
 # --- the weight in the spec ----------------------------------------------------
 
-def test_the_packaged_weight_is_0_35_and_the_spec_reads_it():
-    """0.35 since the spec-1.5 integration retune. 0.2 was set for about 40,
-    0.25 (spec 1.4) drew ~40 until spec 1.5's literature-gap obfuscation
-    families (packets A to D) diluted the layer's family-first picks and the
-    slot fell to 27 at 0.25; 0.35 draws the ten 36 to 40 per 3,000 default
-    attack units (seeds 42 to 46, in one, three or ten groups), none undrawn,
-    back to the ~40 aim (0.3 drew ~32, 0.4 ~42 with one encoding undrawn in a
-    ten-group cell)."""
-    assert load_spec()["heavy_encoding_weight"] == 0.35  # noqa: PLR2004
-    assert heavy_encoding_weight() == 0.35  # noqa: PLR2004
+def test_the_packaged_weight_is_0_4_and_the_spec_reads_it():
+    """0.4 since the exclusive families' refusals were completed. 0.2 was set
+    for about 40, 0.25 (spec 1.4) drew ~40 until spec 1.5's literature-gap
+    obfuscation families (packets A to D) diluted the layer's family-first
+    picks and the slot fell to 27 at 0.25, and the integration retune set
+    0.35 for ~37. Keeping char_injection and unicode_smuggling from the four
+    families packets B and C added diluted the picks once more (0.35 then
+    drew 31 to 34, mean 32.2 in one group, 33.0 in three, 32.2 in ten, with
+    one of the ten undrawn in a ten-group cell), so the weight is 0.4: 36 to
+    40 draws per 3,000 default attack units (means 36.8 / 36.6 / 40.0 over
+    seeds 42 to 46 in one, three and ten groups), none of the ten undrawn in
+    any of the 15 cells, back to the ~40 aim (0.45 draws 41 to 44)."""
+    assert load_spec()["heavy_encoding_weight"] == 0.4  # noqa: PLR2004
+    assert heavy_encoding_weight() == 0.4  # noqa: PLR2004
 
 
 def _spec_with(tmp_path, **changes):
@@ -121,7 +125,7 @@ def test_a_spec_without_the_weight_has_no_slot(without_the_slot):
 
 
 def test_the_slot_takes_the_spec_s_weight_times_encode_s(monkeypatch):
-    """The plan's dealers weigh the slot at 0.35, or 0.35 times the kind's
+    """The plan's dealers weigh the slot at 0.4, or 0.4 times the kind's
     ``encode`` weight."""
     weights = []
 
@@ -134,7 +138,7 @@ def test_the_slot_takes_the_spec_s_weight_times_encode_s(monkeypatch):
     simulate.plan_rows(simulate.inputs(4), all_techniques())
     simulate.plan_rows(simulate.inputs(4), all_techniques(),
                        family_weights={"encode": 2})
-    assert [w[HEAVY_ENCODINGS] for w in weights] == [0.35, 0.7]
+    assert [w[HEAVY_ENCODINGS] for w in weights] == [0.4, 0.8]
 
 
 def test_family_weights_cannot_name_the_slot():
