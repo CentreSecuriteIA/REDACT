@@ -285,6 +285,77 @@ def test_stego_passes_the_acrostic_and_the_check_reads_the_paragraph():
     assert text == reply and info == "form=acrostic paragraph"
 
 
+def _words(n: int) -> str:
+    return " ".join(f"word{chr(97 + i % 26)}" for i in range(n))
+
+
+@pytest.mark.parametrize("n", [0, 2, 41, 120])
+def test_stego_discards_a_text_outside_its_length_before_any_call(n):
+    """The text the step is given is checked before any model call: outside
+    3 to 40 words it is returned unchanged, discarded with a fixed reason."""
+    fake = _Fake("never asked", "Yes")
+    text, info = drive_sync(
+        _BY["to_stego_paragraph"](_words(n), gen_model="gen", check_model="chk"),
+        fake)
+    assert fake.calls == 0
+    assert text == _words(n)
+    assert info == (f"DISCARDED; reason=acrostic length; form=acrostic paragraph; "
+                    f"words={n}")
+
+
+@pytest.mark.parametrize("n", [3, 40])
+def test_stego_asks_the_model_for_a_text_at_either_end_of_its_length(n):
+    fake = _Fake("Plain prose with no acrostic at all.", "Yes")
+    _text, info = drive_sync(
+        _BY["to_stego_paragraph"](_words(n), gen_model="gen", check_model="chk"),
+        fake)
+    assert fake.calls == 2  # noqa: PLR2004  (two generations, the gate rejecting each)
+    assert "reason=reencode failed" in info
+
+
+@pytest.mark.parametrize("n", [2, 3, 40, 41])
+def test_stego_checks_the_length_its_applicability_reads(n):
+    """The step's own check and the plan's applicability read one helper, so
+    a text the plan would draw stego for is never discarded for its length,
+    and one it would not is."""
+    fake = _Fake("Plain prose.", "Yes")
+    _text, info = drive_sync(
+        _BY["to_stego_paragraph"](_words(n), gen_model="gen", check_model="chk"),
+        fake)
+    assert applies(_BY["to_stego_paragraph"], _words(n), "harmful") == (
+        "reason=acrostic length" not in info)
+
+
+def test_a_kept_plan_pairing_stego_with_a_frame_discards_it_with_no_call():
+    """A plan kept from before the rule replays stego after a frame: the
+    frame lengthens the short input past 40 words, and stego, given that
+    text, discards it before any model call (it used to make two)."""
+    from redact.jailbreak.plan import combination_of
+    from redact.jailbreak.units import unit_gen
+
+    reg = registry(all_techniques())
+    short = _words(30)   # stego applies; a frame of 11 words or more passes 40
+    assert applies(reg["to_stego_paragraph"], short, "harmful")
+
+    def replay(names: list[str]) -> dict:
+        """A unit of a kept plan's row, as the stage builds it."""
+        return {"id": "u1", "iteration": 0, "prompt": short, "seed": 42,
+                "combination": combination_of(names, reg)}
+
+    framed, _ = drive_sync(unit_gen(replay(["to_fictional_world"]), gen_model="gen"),
+                           _Fake("", ""))
+    assert len(sr._acrostic_words(framed)) > sr.MAX_ACROSTIC_WORDS
+
+    fake = _Fake("never asked", "Yes")
+    text, info = drive_sync(unit_gen(
+        replay(["to_fictional_world", "to_stego_paragraph"]),
+        gen_model="gen", check_model="chk"), fake)
+    assert fake.calls == 0
+    assert text == framed
+    assert info.startswith("DISCARDED; technique=to_stego_paragraph; "
+                           "reason=acrostic length")
+
+
 @pytest.mark.parametrize("name", ["to_mathprompt", "to_adversarial_poetry",
                                   "to_stego_paragraph", "to_infoflood"])
 def test_the_check_model_falls_back_to_the_generation_model(name):

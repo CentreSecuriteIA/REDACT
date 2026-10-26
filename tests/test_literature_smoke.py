@@ -46,6 +46,9 @@ def test_accepted_info_is_accepted(script):
     ("DISCARDED; reason=reencode failed; form=math problem; feedback=unchanged",
      "unchanged"),
     ("DISCARDED; reason=reencode failed; form=poem; feedback=empty", "empty"),
+    # stego's own length check, made before any model call (no feedback).
+    ("DISCARDED; reason=acrostic length; form=acrostic paragraph; words=57",
+     "acrostic_length"),
     # translationese: the two legs and the judge.
     ("DISCARDED; language=translationese; pivot=french; piece=1/1; "
      "feedback=forward:length_ratio=2.50", "forward_leg"),

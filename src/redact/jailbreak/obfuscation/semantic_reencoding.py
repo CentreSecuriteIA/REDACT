@@ -14,7 +14,8 @@ the original request (``check`` ``reencode``), a rejection fed back up to
 * :func:`to_stego_paragraph` -- a benign paragraph whose sentences begin, in order,
   with the words of the request, an acrostic (StegoAttack, Geng 2505.16765). Gate:
   the acrostic matches the request's words exactly. The check reads the paragraph
-  for natural, benign prose, not for the request (which is hidden).
+  for natural, benign prose, not for the request (which is hidden). A text of
+  fewer than 3 or more than 40 words is discarded before any model call.
 * :func:`to_infoflood` -- an information-overload restatement (InfoFlood,
   Yadav 2506.12274). Gate: the restatement is substantially longer than the
   original (a length-ratio band).
@@ -123,6 +124,14 @@ def _acrostic_words(text: str) -> list[str]:
     """The words of ``text`` the acrostic hides, one per sentence: its runs of
     letters (apostrophes and hyphens inside a word kept), in order."""
     return _WORD.findall(text)
+
+
+def _acrostic_fits(text: str) -> bool:
+    """Whether ``text`` has :data:`MIN_ACROSTIC_WORDS` to
+    :data:`MAX_ACROSTIC_WORDS` acrostic words: the applicability reads it off
+    the plan's input, and :func:`to_stego_paragraph` again off the text it is
+    given, so the two cannot drift."""
+    return MIN_ACROSTIC_WORDS <= len(_acrostic_words(text)) <= MAX_ACROSTIC_WORDS
 
 
 def _first_word(sentence: str) -> str | None:
@@ -253,15 +262,24 @@ def to_adversarial_poetry(prompt: str, **kwargs) -> TechniqueGen:
         check_model=check_model, check_attempts=check_attempts))
 
 
-@applicable_when(lambda text, entry_type:
-                 MIN_ACROSTIC_WORDS <= len(_acrostic_words(text)) <= MAX_ACROSTIC_WORDS)
+@applicable_when(lambda text, entry_type: _acrostic_fits(text))
 def to_stego_paragraph(prompt: str, **kwargs) -> TechniqueGen:
     """Hide the request as a word-acrostic in a benign paragraph.
 
     The check reads the paragraph for natural, benign prose, not for the
     request (which lives only in the acrostic the code gate verifies), so it
     is shown the hidden words and the paragraph, not the original.
+
+    The applicability reads the plan's input, but the acrostic is built from
+    the text this step is given, which an earlier step may have lengthened (a
+    hacking or rewrite frame: a fresh plan keeps them apart, a kept plan or a
+    manual combination may not). So the text is checked first: outside
+    :data:`MIN_ACROSTIC_WORDS` to :data:`MAX_ACROSTIC_WORDS` words it is
+    discarded (``reason=acrostic length``) before any model call.
     """
+    if not _acrostic_fits(prompt):
+        return prompt, (f"{DISCARDED}; reason=acrostic length; "
+                        f"form=acrostic paragraph; words={len(_acrostic_words(prompt))}")
     gen_model, check_model, check_attempts, prompt_dir = _models(kwargs)
     words = "\n".join(_acrostic_words(prompt))
     gen = build_messages(load_prompt("jailbreak", "stego_paragraph", prompt_dir),

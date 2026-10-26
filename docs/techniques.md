@@ -964,7 +964,11 @@ family, not in the eval pool.
   sentences matches, so the acrostic is exact; it is drawn only for a request
   of 3 to 40 words, one sentence per word, never beside a hacking or rewrite
   frame that would lengthen the text first (its own spec entry refuses them,
-  see the rules above), and its check reads the paragraph
+  see the rules above); it checks the length of the text it is given as
+  well, before any model call, and discards one outside 3 to 40 words with
+  `reason=acrostic length` and no call, which covers a kept plan or a manual
+  combination that still puts a frame before it (the plan's applicability and
+  this check read one helper); and its check reads the paragraph
   for natural, harmless prose rather than for the request, which is hidden),
   and `to_infoflood` restates it with an overload of context and jargon
   (InfoFlood, Yadav 2506.12274; the gate is a length-ratio band, 1.8 to 12
