@@ -9,7 +9,7 @@ Augment the accepted inputs with technique combinations, in two kinds:
 
 | Kind | Writes | Default |
 |---|---|---|
-| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from 285 techniques in 34 families, the 24 translations and the six dialects among them: the 315 active techniques less the 16 of the `rewrite` layer (off by default), the nine `casual_writing` ones and the five natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
+| `adversarial` | `Datasets/jailbreaks.csv`: jailbreak attacks | one round per input, by budget, from 315 techniques in 45 families, the 24 translations and the six dialects among them: the 345 active techniques less the 16 of the `rewrite` layer (off by default), the nine `casual_writing` ones and the five natural-only small talk and benign roles; half the units take a request obfuscation, a light encoding or a translation after the request |
 | `natural` | `Datasets/variations.csv`: natural variations | one technique per input, from the natural allow lists, which the spec's `kinds` narrow to 96 techniques (126 with `"translation": true`, which adds the 24 translations and the six dialects) ([techniques.md](../techniques.md#the-natural-pool)) |
 
 These are the packaged defaults, which a `training` run takes: both kinds

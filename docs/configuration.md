@@ -1715,13 +1715,16 @@ is made again with the verdict, and one rejected twice is discarded, so each
 application costs 2 to 4 calls; a distractor costs 1 to 3 (a reply with no
 text is asked for again), and no check reads it. They add no model role.
 
-The layer is off, so a run that does not allow it changes nowhere: the
-default attack pool is still 285 techniques in 34 families, the natural pool
-the 96 (every rewrite technique says `["adversarial"]`), and the `eval`
-type's pool and draws are unchanged (36 techniques; its allow lists name no rewrite
+The layer is off, so a run that does not allow it changes nowhere: at spec
+1.3 the default attack pool stayed 285 techniques in 34 families (315 in 45
+today, as the releases since added families), the natural pool the 96 (every
+rewrite technique says `["adversarial"]`), and the `eval`
+type's pool and draws are unchanged (36 techniques then, 126 since eval pool
+v2; its allow lists name no rewrite
 family, so allowing the layer there adds nothing to its pool or its rounds
 until the families are allowed too). A kind that allows the layer draws them: the packaged
-adversarial kind's pool is then 301 techniques in 37 families, its rounds say
+adversarial kind's pool was then 301 techniques in 37 families (331 in 48
+today), its rounds say
 `include_rewrite: true` (an adversarial plan kept from a section that allowed
 the layer before its pool held a technique raises on resume naming `rounds`), a
 budget round deals the layer at `layer_rates.rewrite` (the spec's 0, with a
