@@ -122,7 +122,9 @@ def strip_zalgo(text: str) -> str:
     return "".join(char for char in text if not 0x0300 <= ord(char) <= 0x036F)  # noqa: PLR2004
 
 
-def to_bidi_override(prompt: str, *, rng: random.Random | None = None) -> tuple[str, str]:
+def to_bidi_override(
+    prompt: str, *, rng: random.Random | None = None,
+) -> tuple[str, str]:
     """Store the prompt reversed inside a right-to-left override, so it renders
     in order while the raw code points are reversed."""
     return _RLO + prompt[::-1] + _PDF, ""

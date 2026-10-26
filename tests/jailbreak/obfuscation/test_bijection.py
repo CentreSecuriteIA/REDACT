@@ -129,7 +129,8 @@ def _shown_key(written: str) -> dict[str, str]:
     ...``) as a reader would: image to letter."""
     import re
 
-    line = next(l for l in written.splitlines() if re.match(r"^a = \S+", l))
+    line = next(row for row in written.splitlines()
+                if re.match(r"^a = \S+", row))
     pairs = re.findall(r"\b([a-z]) = (\S+)", line)
     assert len(pairs) == 26  # noqa: PLR2004
     images = {image for _letter, image in pairs}
@@ -219,7 +220,8 @@ def test_a_text_holding_all_but_a_few_symbols_is_discarded_under_the_scheme():
             assert written == crowded
         else:
             assert not info.startswith("DISCARDED")
-            assert _decode_with(written, _ciphertext(written, crowded)) == _canon(crowded)
+            assert (_decode_with(written, _ciphertext(written, crowded))
+                    == _canon(crowded))
     assert schemes == set(_SCHEMES)
 
 

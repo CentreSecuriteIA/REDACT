@@ -61,7 +61,7 @@ def test_invisible_suffix_leaves_the_prompt_and_strips_back(prompt):
         assert text.startswith(prompt)
         assert U.strip_trailing_selectors(text) == prompt
         appended = len(text) - len(prompt)
-        assert 8 <= appended <= 48
+        assert 8 <= appended <= 48  # noqa: PLR2004
 
 
 def test_taggable_tells_printable_ascii_from_the_rest():
@@ -78,7 +78,7 @@ def test_tag_smuggling_decodes_to_the_exact_prompt(prompt):
         assert U.decode_tags(text) == prompt
         assert info.startswith("carrier=")
         # Every tag character is an invisible format character.
-        tags = [c for c in text if 0xE0020 <= ord(c) <= 0xE007E]
+        tags = [c for c in text if 0xE0020 <= ord(c) <= 0xE007E]  # noqa: PLR2004
         assert tags and all(unicodedata.category(c) == "Cf" for c in tags)
 
 
@@ -99,9 +99,9 @@ def test_no_carrier_holds_an_invisible_character():
         for variant in variants:
             for ch in variant["template"]:
                 point = ord(ch)
-                assert not (0xFE00 <= point <= 0xFE0F)
-                assert not (0xE0100 <= point <= 0xE01EF)
-                assert not (0xE0000 <= point <= 0xE007F)
+                assert not (0xFE00 <= point <= 0xFE0F)  # noqa: PLR2004
+                assert not (0xE0100 <= point <= 0xE01EF)  # noqa: PLR2004
+                assert not (0xE0000 <= point <= 0xE007F)  # noqa: PLR2004
 
 
 def test_the_same_seed_gives_the_same_text():
@@ -144,8 +144,9 @@ def test_the_spec_keeps_unicode_smuggling_from_every_other_obfuscation_family():
     families = load_spec()["families"]
     own = set(families["unicode_smuggling"]["cross_incompatible_with"])
     missing = sorted(
-        name for name in _other_obfuscation_families() if name not in own
-        and "unicode_smuggling" not in families[name].get("cross_incompatible_with", []))
+        name for name in _other_obfuscation_families()
+        if name not in own and "unicode_smuggling" not in families[name].get(
+            "cross_incompatible_with", []))
     assert missing == []
 
 
@@ -155,8 +156,9 @@ def test_unicode_smuggling_refuses_the_whole_text_and_manipulation_families(
     """A full-prompt hiding: it refuses every registered technique of every
     other obfuscation family, and of fsh, dap and fake_turns, whichever is
     picked first (re-derived through rules.compatible)."""
+    wanted = _other_obfuscation_families() | set(_MANIPULATION)
     others = [name for name, fn in _BY_NAME.items()
-              if set(fn.families) & (_other_obfuscation_families() | set(_MANIPULATION))]
+              if set(fn.families) & wanted]
     assert len(others) > 150  # noqa: PLR2004
     joins = sorted(name for name in others
                    if _joins(smuggler, name) or _joins(name, smuggler))

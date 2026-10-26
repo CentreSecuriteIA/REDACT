@@ -33,7 +33,7 @@ class TestAnswerRegistry:
         random.seed(42)
         for fn in get_answer_functions():
             result = fn(SAMPLE)
-            assert isinstance(result, tuple) and len(result) == 2
+            assert isinstance(result, tuple) and len(result) == 2  # noqa: PLR2004
 
     def test_prompt_preserved(self):
         random.seed(42)

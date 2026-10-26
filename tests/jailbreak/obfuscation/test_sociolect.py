@@ -4,11 +4,11 @@ a fake client. One technique per English variety."""
 import pytest
 
 import redact.jailbreak  # noqa: F401  (tags the techniques)
+from redact.jailbreak.augmentation import resolve
 from redact.jailbreak.obfuscation import sociolect as so
 from redact.jailbreak.obfuscation.sociolect import get_sociolect_functions
 from redact.jailbreak.pool import all_techniques, registry, technique_pool
 from redact.jailbreak.rules import compatible
-from redact.jailbreak.augmentation import resolve
 from redact.llm_pipeline.drive import drive_sync
 
 _BY = {fn.__name__: fn for fn in get_sociolect_functions()}
@@ -32,8 +32,8 @@ def test_the_gate_rejects_empty_unchanged_and_out_of_band():
     assert so._sociolect_gate(_ORIGINAL, _ORIGINAL) == "unchanged"
     assert so._sociolect_gate("x", _ORIGINAL).startswith("length_ratio=")
     assert so._sociolect_gate("y" * 400, _ORIGINAL).startswith("length_ratio=")
-    assert so._sociolect_gate("Gie us a ring when ye get hame the night, an lock the door.",
-                              _ORIGINAL) == ""
+    changed = "Gie us a ring when ye get hame the night, an lock the door."
+    assert so._sociolect_gate(changed, _ORIGINAL) == ""
 
 
 def test_sociolect_is_adversarial_only_and_not_translation_gated():

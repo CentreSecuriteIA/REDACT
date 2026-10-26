@@ -7,10 +7,10 @@ import random
 import pytest
 
 import redact.jailbreak  # noqa: F401  (tags the techniques)
+from redact.jailbreak.augmentation import resolve
 from redact.jailbreak.obfuscation import translationese as te
 from redact.jailbreak.obfuscation.translationese import get_translationese_functions
 from redact.jailbreak.pool import (
-    TRANSLATIONESE,
     all_techniques,
     registry,
     technique_pool,
@@ -18,7 +18,6 @@ from redact.jailbreak.pool import (
     uses_translation,
 )
 from redact.jailbreak.rules import compatible
-from redact.jailbreak.augmentation import resolve
 from redact.llm_pipeline.drive import drive_sync
 
 _ORIGINAL = "Please explain how to bake sourdough bread at home, step by step."
@@ -50,7 +49,8 @@ def test_translationese_runs_on_the_translation_model_and_the_switch_gates_it():
     on = technique_pool(resolve(None, "adversarial"))
     assert "to_translationese" in {fn.__name__ for fn in on}
     # Switch off: removed, like translation and dialect.
-    off = technique_pool(resolve({"adversarial": {"translation": False}}, "adversarial"))
+    off = technique_pool(
+        resolve({"adversarial": {"translation": False}}, "adversarial"))
     assert "to_translationese" not in {fn.__name__ for fn in off}
     # It is adversarial only, never in the natural pool.
     assert "to_translationese" not in {
@@ -147,4 +147,5 @@ def test_an_unchanged_round_trip_is_discarded(_mt_env):
         registry(all_techniques())["to_translationese"](
             _ORIGINAL, translate_model="mt", gen_model="judge"),
         fake)
-    assert info.startswith("DISCARDED") and "translationese" in info and "unchanged" in info
+    assert info.startswith("DISCARDED")
+    assert "translationese" in info and "unchanged" in info

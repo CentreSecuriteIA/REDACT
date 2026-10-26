@@ -73,7 +73,8 @@ def test_the_poetry_gate_thresholds_at_their_boundaries():
 def test_the_stego_gate_checks_the_acrostic_exactly():
     original = "Name three plants here"
     assert sr._acrostic_words(original) == ["Name", "three", "plants", "here"]
-    good = "Name tags were shared. Three friends came. Plants lined the sill. Here we sat."
+    good = ("Name tags were shared. Three friends came. Plants lined the sill. "
+            "Here we sat.")
     assert sr._stego_gate(good, original) == ""
     # wrong first word
     bad = "Hello there, everyone. Three friends came. Plants grew. Here we sat."
@@ -303,7 +304,8 @@ def test_the_check_rejecting_feeds_back_and_then_discards():
 
 def test_stego_passes_the_acrostic_and_the_check_reads_the_paragraph():
     original = "Name three plants"   # -> Name, three, plants
-    reply = "Name tags were shared at the door. Three friends found seats. Plants lined the sill."
+    reply = ("Name tags were shared at the door. Three friends found seats. "
+             "Plants lined the sill.")
     fake = _Fake(reply, "Yes, natural prose.")
     text, info = drive_sync(
         _BY["to_stego_paragraph"](original, gen_model="gen", check_model="chk"), fake)
@@ -388,7 +390,8 @@ def test_the_check_model_falls_back_to_the_generation_model(name):
     every request goes to ``gen``."""
     good = {
         "to_mathprompt": "Let S = {x_1}; f: I -> L; solve for S.",
-        "to_adversarial_poetry": "one small line\ntwo small line\nthree line\nfour line",
+        "to_adversarial_poetry":
+            "one small line\ntwo small line\nthree line\nfour line",
         "to_stego_paragraph": "Explain this now. How about that. To the end.",
         "to_infoflood": "Within the broad literature, " + "context " * 20 + "please.",
     }[name]

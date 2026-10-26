@@ -278,8 +278,9 @@ def to_stego_paragraph(prompt: str, **kwargs) -> TechniqueGen:
     discarded (``reason=acrostic length``) before any model call.
     """
     if not _acrostic_fits(prompt):
+        words = len(_acrostic_words(prompt))
         return prompt, (f"{DISCARDED}; reason=acrostic length; "
-                        f"form=acrostic paragraph; words={len(_acrostic_words(prompt))}")
+                        f"form=acrostic paragraph; words={words}")
     gen_model, check_model, check_attempts, prompt_dir = _models(kwargs)
     words = "\n".join(_acrostic_words(prompt))
     gen = build_messages(load_prompt("jailbreak", "stego_paragraph", prompt_dir),

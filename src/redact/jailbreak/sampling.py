@@ -269,7 +269,8 @@ def sample_combination(
     if include_obfuscation:
         obfusc_count = 0
         while obfusc_count < obfuscation_slots:
-            candidates = [f for f in current_pool if getattr(f, "layer", None) == "obfuscation"]
+            candidates = [f for f in current_pool
+                          if getattr(f, "layer", None) == "obfuscation"]
             if not candidates:
                 break
             pick = _pick_by_family(rng, candidates, dealer, heavy_apart=True)
@@ -310,7 +311,8 @@ def sample_exact_combination(
 
     Unlike :func:`sample_combination`, the **count is the only knob** — there is no
     complexity or obfuscation budget. Each pick is still validated through
-    :func:`redact.jailbreak.rules.compatible` (with ``remaining_complexity=None``, so complexity
+    :func:`redact.jailbreak.rules.compatible` (with
+    ``remaining_complexity=None``, so complexity
     never filters anything) to enforce layer caps (1 rewrite / 1 hacking /
     1 manipulation / 1 request) and cross-incompatibilities. The obfuscation
     layer has no per-layer pick cap, so e.g. ``n=2`` may yield two

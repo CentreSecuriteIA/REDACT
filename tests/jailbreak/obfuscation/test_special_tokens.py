@@ -35,13 +35,14 @@ def test_the_prompt_is_carried_whole_and_the_variant_is_named(name, prompt):
 
 def test_the_pools_each_hold_at_least_eight_variants():
     pools = read_pools("obfuscation/special_tokens_templates.json")
-    assert len(pools["eos_style"]) >= 8
-    assert len(pools["chat_template"]) >= 8
+    assert len(pools["eos_style"]) >= 8  # noqa: PLR2004
+    assert len(pools["chat_template"]) >= 8  # noqa: PLR2004
 
 
 def test_each_technique_is_deterministic_for_a_seed():
     for fn in S.get_special_tokens_functions():
-        assert fn("a prompt", rng=random.Random(4)) == fn("a prompt", rng=random.Random(4))
+        assert (fn("a prompt", rng=random.Random(4))
+                == fn("a prompt", rng=random.Random(4)))
 
 
 # --- the rules bind both ways --------------------------------------------------
