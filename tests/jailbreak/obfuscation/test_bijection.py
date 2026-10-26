@@ -96,8 +96,8 @@ def test_a_whole_technique_draw_decodes_to_the_prompt(monkeypatch):
     captured = {}
     real_mapping = BJ._mapping
 
-    def spy(scheme, rng):
-        m = real_mapping(scheme, rng)
+    def spy(scheme, rng, text=""):
+        m = real_mapping(scheme, rng, text)
         captured["mapping"] = m
         return m
 
@@ -109,6 +109,134 @@ def test_a_whole_technique_draw_decodes_to_the_prompt(monkeypatch):
     ciphertext = _encode(prompt, captured["mapping"])
     assert ciphertext in written
     assert _decode(ciphertext, captured["mapping"]) == _canon(prompt)
+
+
+# --- the symbol scheme's collisions --------------------------------------------
+
+#: Texts that hold characters the cipher passes through and the symbol scheme
+#: could otherwise draw as an image (Greek letters and shapes of the pool), and
+#: one that holds the space mark.
+_GREEK = "mix 5 μg of α and β compound"
+_SHAPES = "heat the ★ and ♠ sample"
+_WITH_MARK = "a text with ␣ inside"
+
+
+def _shown_key(written: str) -> dict[str, str]:
+    """The cipher the output shows, read off its key line (``a = x  b = y
+    ...``) as a reader would: image to letter."""
+    import re
+
+    line = next(l for l in written.splitlines() if re.match(r"^a = \S+", l))
+    pairs = re.findall(r"\b([a-z]) = (\S+)", line)
+    assert len(pairs) == 26  # noqa: PLR2004
+    images = {image for _letter, image in pairs}
+    assert len(images) == 26  # noqa: PLR2004
+    return {image: letter for letter, image in pairs}
+
+
+def _decode_with(written: str, encoded: str) -> str:
+    """``encoded`` decoded with the key the output shows, not with the
+    module's own mapping."""
+    inverse = _shown_key(written)
+    return "".join(inverse.get(token, " " if token == BJ._SPACE_MARK else token)
+                   for token in encoded.split(" "))
+
+
+def _ciphertext(written: str, prompt: str) -> str:
+    """The enciphered prompt inside ``written``: the line that is not part of
+    the key or a worked example, found by decoding each line with the shown
+    key and keeping the one that gives the prompt's normalised form."""
+    for line in written.splitlines():
+        if line and not line.startswith("a = ") and \
+                _decode_with(written, line) == _canon(prompt):
+            return line
+    raise AssertionError("the prompt's ciphertext is not in the output")
+
+
+@pytest.mark.parametrize("text", [_GREEK, _SHAPES])
+def test_the_symbol_key_never_draws_a_symbol_the_text_holds(text):
+    """A symbol in the text passes through the cipher, so drawing it as an
+    image would make the shown key ambiguous. Over 40 seeds, every symbol
+    draw leaves the text's own symbols out, and the prompt decodes back with
+    the key the output shows."""
+    drawn = 0
+    for seed in range(40):
+        written, info = to_bijection_learning(text, rng=random.Random(seed))
+        assert not info.startswith("DISCARDED"), info
+        if info.split("scheme=")[1].split(";")[0] != "symbol":
+            continue
+        drawn += 1
+        images = set(_shown_key(written))
+        assert not images & set(text), sorted(images & set(text))
+        assert _decode_with(written, _ciphertext(written, text)) == _canon(text)
+    assert drawn >= 5  # noqa: PLR2004  (the scheme is one of three)
+
+
+@pytest.mark.parametrize("text", [_GREEK, _SHAPES, "plain ascii request"])
+def test_every_scheme_decodes_the_prompt_with_the_shown_key(text):
+    """Whatever the scheme, a reader with the key the output shows recovers
+    the prompt (this is what collided before: a Greek letter or a shape in
+    the text read back as a letter)."""
+    seen = set()
+    for seed in range(40):
+        written, info = to_bijection_learning(text, rng=random.Random(seed))
+        assert not info.startswith("DISCARDED"), info
+        seen.add(info.split("scheme=")[1].split(";")[0])
+        assert _decode_with(written, _ciphertext(written, text)) == _canon(text)
+    assert seen == set(_SCHEMES)
+
+
+def test_a_text_holding_the_space_mark_is_discarded_in_every_scheme():
+    """The mark stands for a space under every scheme, so such a text cannot
+    be deciphered unambiguously; it is discarded, unrendered."""
+    for seed in range(12):
+        written, info = to_bijection_learning(_WITH_MARK, rng=random.Random(seed))
+        assert written == _WITH_MARK
+        assert info.startswith("DISCARDED; reason=space mark in the text; scheme=")
+
+
+def test_a_text_holding_all_but_a_few_symbols_is_discarded_under_the_scheme():
+    """With fewer than 26 free symbols no unambiguous key is left: the symbol
+    scheme discards, and the two other schemes, which have no collision,
+    still encipher it."""
+    crowded = "text " + "".join(BJ._SYMBOLS[:9])
+    assert len(BJ._free_symbols(crowded)) == 25  # noqa: PLR2004
+    assert BJ._collision_reason("symbol", crowded) == "too few free symbols"
+    assert BJ._collision_reason("letter", crowded) == ""
+    assert BJ._collision_reason("digit", crowded) == ""
+    with pytest.raises(ValueError, match="free symbols"):
+        BJ._mapping("symbol", random.Random(0), crowded)
+    schemes = set()
+    for seed in range(40):
+        written, info = to_bijection_learning(crowded, rng=random.Random(seed))
+        scheme = info.split("scheme=")[1].split(";")[0]
+        schemes.add(scheme)
+        if scheme == "symbol":
+            assert info.startswith("DISCARDED; reason=too few free symbols")
+            assert written == crowded
+        else:
+            assert not info.startswith("DISCARDED")
+            assert _decode_with(written, _ciphertext(written, crowded)) == _canon(crowded)
+    assert schemes == set(_SCHEMES)
+
+
+def test_a_text_without_a_pool_symbol_draws_what_it_drew_before():
+    """The free-symbol draw is the whole pool for such a text, so no digest
+    moves: ``rng.sample`` over the pool, as before."""
+    for seed in range(8):
+        a = BJ._mapping("symbol", random.Random(seed), "plain ascii text")
+        b = dict(zip(BJ._LETTERS,
+                     random.Random(seed).sample(BJ._SYMBOLS, 26), strict=True))
+        assert a == b
+
+
+def test_the_teaching_sentences_hold_no_symbol_or_mark():
+    """The worked examples are enciphered with the same key, so a sentence
+    holding a pool symbol or the mark would be ambiguous too."""
+    joined = "".join(BJ._SENTENCES)
+    assert not set(joined) & set(BJ._SYMBOLS)
+    assert BJ._SPACE_MARK not in joined
+    assert joined.isascii()
 
 
 # --- shape, info and applicability ---------------------------------------------

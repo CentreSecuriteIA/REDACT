@@ -1333,7 +1333,15 @@ family, not in the eval pool.
   (`bijection_learning_templates.json`, floor 8). The letters are normalised to
   lower case (the cipher is over 26 symbols), every non-letter passes through,
   and the encoding is emitted as space-separated tokens, so a reader (and the
-  test) decodes it unambiguously back to the lower-cased request. It is drawn
+  test) decodes it unambiguously back to the lower-cased request. Because a
+  non-letter passes through, the symbol scheme draws its 26 images from the
+  symbols the prompt does not hold (the pool has 34), so a Greek letter or a
+  shape in the request is never also a letter's image; a prompt holding the
+  space mark, or more than eight of the pool's symbols, cannot be deciphered
+  unambiguously and is discarded before anything is rendered
+  (`DISCARDED; reason=space mark in the text` or `reason=too few free
+  symbols`). The tests read the key off the output and decode with that, on
+  symbol-bearing prompts as well as plain ones. It is drawn
   only for a text with a Latin letter (an applicability). As a heavy full-text
   cipher it refuses exactly what the heavy encodings refuse — `ascii_art`,
   `translation` and the other whole-text language rewrites (`dialect`,
