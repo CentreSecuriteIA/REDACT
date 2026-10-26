@@ -167,15 +167,69 @@ def _by_name() -> dict:
     return {fn.__name__: fn for fn in all_techniques()}
 
 
-def test_it_refuses_what_the_heavy_encodings_refuse_both_ways():
+#: The ten heavy full-text encodings, whose refusals bijection's must match
+#: (``encode`` members at ``encode_weight`` heavy, read from the registry so a
+#: heavy encoding added later joins the comparison).
+def _heavy_encodings() -> list:
+    return [fn for fn in all_techniques()
+            if "encode" in fn.families and getattr(fn, "encode_weight", None) == "heavy"
+            and "sensitive_words" not in fn.families]
+
+
+def _refused_by(fn) -> set[str]:
+    """The names every registered technique ``fn`` may not sit with, in either
+    pick order (re-derived through ``rules.compatible``), ``fn`` left out."""
+    return {other.__name__ for other in all_techniques() if other is not fn
+            and (other not in compatible([fn], [other])
+                 or fn not in compatible([other], [fn]))}
+
+
+def _heavy_refusals() -> set[str]:
+    """What a heavy full-text encoding refuses: the refusals they all share,
+    plus the ten themselves (each is refused beside the others by the one
+    technique per family rule, so none is in the shared part)."""
+    heavy = _heavy_encodings()
+    assert len(heavy) == 10  # noqa: PLR2004
+    return set.intersection(*(_refused_by(fn) for fn in heavy)) | {
+        fn.__name__ for fn in heavy}
+
+
+def test_the_heavy_encodings_all_refuse_the_same_techniques():
+    """The set bijection is compared with is one set: the ten differ only in
+    that none refuses itself."""
+    heavy = _heavy_encodings()
+    names = {fn.__name__ for fn in heavy}
+    assert {frozenset(_refused_by(fn) | {fn.__name__}) for fn in heavy} == {
+        frozenset(_heavy_refusals())}
+    assert names <= _heavy_refusals()
+
+
+def test_it_refuses_exactly_what_the_heavy_encodings_refuse_both_ways():
+    """Derived from the heavy encodings when the test runs, technique by
+    technique and in both pick orders, not from a list written here: a family
+    added later that a heavy encoding refuses fails this until bijection
+    refuses it too (and the other way round)."""
     bij = to_bijection_learning
+    refused = _refused_by(bij) | {bij.__name__}
+    heavy = _heavy_refusals()
+    assert sorted(heavy - refused) == []
+    assert sorted(refused - heavy) == []
+
+
+def test_the_refusals_cover_the_families_the_claim_names():
+    """A reader's check on the derived set: every family of the whole-text
+    rewrites, the ciphers, the wrappers' two exceptions and the manipulation
+    layer is in it, and the word-level and surface families are not."""
     by_name = _by_name()
-    for name in ("to_ascii_art", "to_french", "to_base64", "to_morse",
-                 "to_payload_split", "to_word_art", "to_fsh_random_short",
-                 "to_dap_random_short", "to_fake_system_turn"):
-        other = by_name[name]
-        assert other not in compatible([bij], [other]), name
-        assert bij not in compatible([other], [bij]), name
+    refused = _refused_by(to_bijection_learning)
+    families = {family for name in refused for family in by_name[name].families}
+    assert {"ascii_art", "translation", "dialect", "code_switching", "romanization",
+            "transliteration", "semantic_reencoding", "translationese", "sociolect",
+            "encode", "payload_split", "word_art", "unicode_smuggling",
+            "char_injection", "fsh", "dap", "fake_turns",
+            "reasoning_injection"} <= families
+    assert not {"typos", "casual_writing", "noise", "structural",
+                "neutral_container", "tokenbreak"} & families
 
 
 def test_it_combines_with_the_surface_and_wrapper_families_both_ways():

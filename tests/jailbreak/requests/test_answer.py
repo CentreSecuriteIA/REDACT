@@ -147,7 +147,8 @@ class TestTheSpec13AnswerFormats:
         """The persona templates' mechanics ask for a dual answer and a
         tagged opening already; an answer in an encoding is kept from an
         encoded prompt (the ten sensitive-word encodings are encode members
-        too, so they are kept from it as well)."""
+        too, so they are kept from it as well) and from an enciphered one
+        (``bijection``, which refuses what the heavy encodings refuse)."""
         assert to_dual_answer.cross_incompatible_with == ["persona_template"]
         assert to_tagged_prefix.cross_incompatible_with == ["persona_template"]
-        assert to_answer_in_encoding.cross_incompatible_with == ["encode"]
+        assert to_answer_in_encoding.cross_incompatible_with == ["encode", "bijection"]

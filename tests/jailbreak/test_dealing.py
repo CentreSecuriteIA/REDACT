@@ -624,7 +624,15 @@ _BUDGETS = [
 # group's family counts change from the first of them on, so 194 of the 240
 # dealt units and 28 of the 200 undealt draws moved. No eval pool draws
 # either family, so the eval type's pin below does not move.
-_PINNED_DRAWS = "0980d337d0653fc38edcbf1f9226c13cd838864b70517cc9a908be49e8b3653b"
+# bijection then came to refuse exactly what the heavy full-text encodings
+# refuse, as its spec comment always claimed: the whole-text language
+# rewrites (transliteration, romanization, code_switching, dialect,
+# translationese, sociolect), semantic_reencoding, reasoning_injection and
+# to_answer_in_encoding (which names bijection in its own entry). 29 of the
+# 240 dealt units and 18 of the 200 undealt draws held such a pair and none
+# does now, which moved 125 dealt units and 23 undealt draws. No eval pool
+# draws bijection either.
+_PINNED_DRAWS = "c2953048c114ae263230a1a1ba00d99c3f26c0af4ef80474499d45d11a069c1b"
 
 
 

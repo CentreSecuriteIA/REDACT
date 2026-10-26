@@ -8,10 +8,14 @@ examples (benign sentences from ``obfuscation/bijection_sentences.json``, each
 with its encoding) before the encoded prompt. It is a pure transform (no model
 call).
 
-The cipher is a full-text, character-level encoding, so it refuses what the
-heavy full-text encodings refuse (see the spec family ``_comment``): a
-translation, ``ascii_art``, the ``encode`` family, ``payload_split``,
-``word_art`` and the manipulation families. Letters are normalised to lower
+The cipher is a full-text, character-level encoding, so it refuses exactly what
+the heavy full-text encodings refuse (see the spec family ``_comment``): a
+translation and the other whole-text language rewrites, the meaning
+re-encodings, ``ascii_art``, the ``encode`` family, ``payload_split``,
+``word_art``, the whole-prompt hidings and reorderings, the manipulation
+families and ``to_answer_in_encoding``. A test re-derives that set from the ten
+heavy encodings when it runs and requires this family's to match it exactly, so
+neither side can gain a refusal the other lacks. Letters are normalised to lower
 case before mapping (the cipher is over 26 symbols), so decoding recovers the
 request in lower case; every non-letter passes through, and the encoding is
 emitted as space-separated tokens so a reader (and the test) can decode it

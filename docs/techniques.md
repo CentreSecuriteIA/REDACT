@@ -381,10 +381,10 @@ technique is picked first. A technique may not join a combination when:
   `to_refusal_then_comply`, `to_prefix_injection`, `to_dual_answer` and
   `to_tagged_prefix` from `persona_template`, whose mechanics already ask
   for a dual answer or a set opening, and `to_answer_in_encoding` from
-  `encode`: an answer asked for in an encoding is not put on an encoded
-  prompt. The ten `to_sensitive_words_encode_*` are `encode` members, so
-  they are kept from it too; the sensitive-word steps that encode no word
-  are not. It keeps `to_stego_paragraph` from the seven hacking and rewrite
+  `encode` and `bijection`: an answer asked for in an encoding is not put on
+  an encoded or enciphered prompt. The ten `to_sensitive_words_encode_*` are
+  `encode` members, so they are kept from it too; the sensitive-word steps
+  that encode no word are not. It keeps `to_stego_paragraph` from the seven hacking and rewrite
   families whose frame lengthens the text before the acrostic is built
   (`framing`, `persona`, `cognitive`, `persona_template`, `policy_framing`,
   `persuasion`, `model_distractors`): its applicability reads the plan's
@@ -1335,10 +1335,20 @@ family, not in the eval pool.
   and the encoding is emitted as space-separated tokens, so a reader (and the
   test) decodes it unambiguously back to the lower-cased request. It is drawn
   only for a text with a Latin letter (an applicability). As a heavy full-text
-  cipher it refuses what the heavy encodings refuse — `ascii_art`,
-  `translation`, the `encode` family, `payload_split`, `word_art` and the
-  manipulation families — bound from its own `cross_incompatible_with` (the
-  heavy encode members and the manipulation block do not name it). Its
+  cipher it refuses exactly what the heavy encodings refuse — `ascii_art`,
+  `translation` and the other whole-text language rewrites (`dialect`,
+  `code_switching`, `romanization`, `transliteration`, `translationese`,
+  `sociolect`), `semantic_reencoding`, the `encode` family, `payload_split`,
+  `word_art`, the whole-prompt hidings and reorderings (`unicode_smuggling`,
+  `char_injection`), the manipulation families (`fsh`, `dap`, `fake_turns`,
+  `reasoning_injection`) and `to_answer_in_encoding` — bound from its own
+  `cross_incompatible_with`, those two families' lists and that technique's
+  own (the heavy encode members and the manipulation block do not name it).
+  A test re-derives the heavy encodings' refusals technique by technique and
+  requires bijection's to match them exactly, in both pick orders, so a
+  family one side refuses and the other does not fails the suite. Nine of
+  the families on the list were added when a control pass measured the
+  claim: it had held for `translation` and the manipulation layer alone. Its
   dimension is `encoding`, its `within_layer_order` 72 (just after `encode`),
   its complexity 3. The info is `scheme=<letter|digit|symbol>;variant=<name>`.
   Attack only; a new family, not in the eval pool.
