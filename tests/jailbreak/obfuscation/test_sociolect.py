@@ -76,6 +76,24 @@ def test_a_rewrite_the_check_accepts_returns_the_text_and_variety():
     assert text == reply and info == "variety=Scottish English"
 
 
+def test_the_check_reads_the_rewrite_against_the_original():
+    """A meaning check must see both texts: the check request carries the
+    original prompt and the rewrite."""
+    reply = "Gie us a ring when ye get hame the night, an lock the door, aye?"
+    seen = []
+
+    def call(request):
+        if request.model == "chk":
+            seen.append("\n".join(m["content"] for m in request.messages))
+            return "Yes, same meaning."
+        return reply
+
+    drive_sync(_BY["to_sociolect_scottish_english"](
+        _ORIGINAL, gen_model="gen", check_model="chk"), call)
+    assert len(seen) == 1
+    assert _ORIGINAL in seen[0] and reply in seen[0]
+
+
 def test_the_gate_rejecting_discards_before_a_check_call():
     fake = _Fake(_ORIGINAL, "Yes")   # unchanged -> gate rejects
     text, info = drive_sync(

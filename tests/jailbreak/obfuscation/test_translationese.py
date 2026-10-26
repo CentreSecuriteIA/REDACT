@@ -71,6 +71,24 @@ def test_an_allow_list_naming_translationese_with_the_switch_off_is_dropped(capl
     assert not uses_translation(pool)
 
 
+def test_a_techniques_allow_list_naming_translationese_with_the_switch_off(caplog):
+    """The technique named by itself, not only its family, is taken out of
+    the allow list and named in the WARNING; an allow list of it alone
+    raises, as one of translations alone does."""
+    import logging
+    with caplog.at_level(logging.WARNING, logger="redact.jailbreak.augmentation"):
+        resolved = resolve({"adversarial": {
+            "translation": False,
+            "techniques": {"allow": ["to_translationese", "to_base64"]}}},
+            "adversarial")
+    assert resolved["techniques"]["allow"] == ["to_base64"]
+    assert "to_translationese" in caplog.text
+    with pytest.raises(ValueError, match="allows only translation"):
+        resolve({"adversarial": {"translation": False,
+                                 "techniques": {"allow": ["to_translationese"]}}},
+                "adversarial")
+
+
 # --- the rules (both ways) -------------------------------------------------
 
 @pytest.mark.parametrize("partner", ["to_base64", "to_rewrite_with_typos_low",

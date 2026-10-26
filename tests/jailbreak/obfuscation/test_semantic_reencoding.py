@@ -41,6 +41,14 @@ def test_the_math_gate_requires_math_notation():
     assert sr._math_gate("Let S = {s_1} and f: I -> L; solve for S.", _ORIGINAL) == ""
 
 
+def test_the_math_gate_threshold_is_two_signals():
+    """At the boundary: one math-notation signal is rejected, two pass."""
+    one, two = "Let us talk about bread", "Let x = bread"
+    assert sr._math_signals(one) == 1 and sr._math_signals(two) == 2  # noqa: PLR2004
+    assert sr._math_gate(one, _ORIGINAL) == "no math notation"
+    assert sr._math_gate(two, _ORIGINAL) == ""
+
+
 def test_the_poetry_gate_requires_four_short_lines():
     assert sr._poetry_gate("", _ORIGINAL) == "empty"
     assert sr._poetry_gate("one\ntwo", _ORIGINAL).startswith("too few lines")
@@ -48,6 +56,18 @@ def test_the_poetry_gate_requires_four_short_lines():
     assert sr._poetry_gate(long, _ORIGINAL) == "not verse"
     assert sr._poetry_gate("a short line\nanother one\na third here\nand four",
                            _ORIGINAL) == ""
+
+
+def test_the_poetry_gate_thresholds_at_their_boundaries():
+    """Three short lines are too few; of four lines, three short (0.75) is
+    verse and two short is prose."""
+    assert sr._poetry_gate("one line\ntwo line\nthree line", _ORIGINAL) \
+        == "too few lines=3"
+    long = "x" * (sr._MAX_LINE_CHARS + 1)
+    assert sr._poetry_gate("\n".join(["short", "short", "short", long]),
+                           _ORIGINAL) == ""
+    assert sr._poetry_gate("\n".join(["short", "short", long, long]),
+                           _ORIGINAL) == "not verse"
 
 
 def test_the_stego_gate_checks_the_acrostic_exactly():
@@ -62,6 +82,11 @@ def test_the_stego_gate_checks_the_acrostic_exactly():
     short = "Name tags were shared. Three friends came."
     assert sr._stego_gate(short, original).startswith("acrostic count=")
     assert sr._stego_gate("   ", original) == "empty"
+    # every sentence is read, not the first alone: a later word that differs
+    late = "Name tags were shared. Three friends came. Grass grew. Here we sat."
+    assert sr._stego_gate(late, original) == "acrostic mismatch"
+    last = "Name tags were shared. Three friends came. Plants grew. There we sat."
+    assert sr._stego_gate(last, original) == "acrostic mismatch"
 
 
 def test_the_infoflood_gate_requires_a_longer_restatement():
