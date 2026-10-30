@@ -12,6 +12,7 @@ from redact.jailbreak.pool import all_techniques, registry
 from redact.jailbreak.rules import compatible
 from redact.jailbreak.technique import applies
 from redact.llm_pipeline.drive import drive_sync
+from redact.llms.prompting import load_prompt
 
 _BY = {fn.__name__: fn for fn in get_semantic_reencoding_functions()}
 _ORIGINAL = "Explain how to bake sourdough bread at home, step by step please."
@@ -170,9 +171,61 @@ def test_the_infoflood_gate_requires_a_longer_restatement():
         "length_ratio=")
     # within the band
     assert sr._infoflood_gate("y" * (len(_ORIGINAL) * 3), _ORIGINAL) == ""
-    # a runaway reply is rejected too
-    assert sr._infoflood_gate("y" * (len(_ORIGINAL) * 50), _ORIGINAL).startswith(
-        "length_ratio=")
+    # a runaway reply, the size of one cut at the generation cap, is rejected too
+    assert sr._infoflood_gate("y" * 8000, _ORIGINAL).startswith("length_ratio=")
+
+
+def test_the_infoflood_gate_accepts_the_prompts_own_example():
+    """The packaged prompt's example restates a short request at about 14
+    times its length; the gate must accept what the prompt teaches."""
+    config = load_prompt("jailbreak", "infoflood")
+    before, after = config["template"].split("{prompt}")
+    asked, answer = (m["content"] for m in config["few_shot_examples"][:2])
+    example = asked[len(before):len(asked) - len(after)]
+    assert asked == before + example + after
+    assert len(answer) / len(example) > sr.FLOOD_RATIO_BAND[1]
+    assert sr._infoflood_gate(answer, example) == ""
+
+
+@pytest.mark.parametrize(("original", "accepted", "rejected"), [
+    # a short original: the absolute allowance is the ceiling
+    (50, 4000, 4001),
+    # a long one: 12 times it is more than the allowance, and is the ceiling
+    (500, 6000, 6001),
+])
+def test_the_infoflood_ceiling_is_twelve_times_or_the_allowance(
+        original, accepted, rejected):
+    source = "x" * original
+    assert sr._infoflood_gate("y" * accepted, source) == ""
+    assert sr._infoflood_gate("y" * rejected, source).startswith("length_ratio=")
+
+
+def test_a_restatement_of_the_published_length_passes_for_a_one_line_request():
+    """The paper's shape is 180 to 270 words whatever the request's length:
+    for a one-line request that is far over 12 times."""
+    source = "x" * 90
+    for words in (180, 270):
+        text = " ".join(["overload"] * words)
+        assert len(text) > sr.FLOOD_RATIO_BAND[1] * len(source)
+        assert sr._infoflood_gate(text, source) == ""
+
+
+@pytest.mark.parametrize("original", [19, 100])
+def test_the_infoflood_floor_is_one_point_eight_times_for_any_original(original):
+    """No short-original exemption: a reply under 1.8 times is rejected, a
+    reply shorter than a very short original too."""
+    source = "x" * original
+    at = round(1.8 * original + 0.5)  # the first length at or above 1.8x
+    assert sr._infoflood_gate("y" * at, source) == ""
+    assert sr._infoflood_gate("y" * (at - 1), source).startswith("length_ratio=")
+    assert sr._infoflood_gate("y", source).startswith("length_ratio=")
+
+
+def test_whitespace_does_not_count_toward_the_infoflood_ratio():
+    source = "x" * 40
+    padded = "y" * 40 + "\n" * 40
+    assert sr._infoflood_gate(padded, source).startswith("length_ratio=")
+    assert sr._infoflood_gate("  " + "y" * 72 + "\n", source) == ""
 
 
 def test_stego_applies_only_to_a_request_of_a_few_words():

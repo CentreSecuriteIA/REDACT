@@ -17,8 +17,9 @@ the original request (``check`` ``reencode``), a rejection fed back up to
   for natural, benign prose, not for the request (which is hidden). A text of
   fewer than 3 or more than 40 words is discarded before any model call.
 * :func:`to_infoflood` -- an information-overload restatement (InfoFlood,
-  Yadav 2506.12274). Gate: the restatement is substantially longer than the
-  original (a length-ratio band).
+  Yadav 2506.12274). Gate: the restatement is at least 1.8 times the
+  original's length, and at most 12 times it or 4,000 characters, whichever
+  is more (the paper's own length is absolute: at least 180 words).
 
 ``info`` is ``form=<name>``; ``DISCARDED; reason=...; form=<name>; feedback=...``
 on rejection. The quality of the verse and the overload is not verifiable here
@@ -198,27 +199,33 @@ def _stego_gate(text: str, original: str) -> str:
 
 # --- infoflood ------------------------------------------------------------
 
-#: An information-overload restatement is between these multiples of the
-#: original's length: long enough to be an overload, not a runaway reply.
+#: An information-overload restatement is at least the first multiple of the
+#: original's length (an overload), and at most the second or
+#: :data:`FLOOD_MAX_CHARS`, whichever is more (not a runaway reply).
 FLOOD_RATIO_BAND = (1.8, 12.0)
-#: Below this many characters a ratio says little (a short request).
-MIN_FLOOD_CHARS = 20
+#: The ceiling for a short original. The paper sets an absolute length, not a
+#: ratio ("at least 180 words"; successes at about 190 to 270 words), so a
+#: one-line request restated at that length is 14 to 42 times as long. 4,000
+#: characters is twice the top of that range at the packaged example's 7.1
+#: characters a word: the published shape always fits, and a reply cut at
+#: :data:`GEN_MAX_TOKENS` (about 8,000 characters) still does not.
+FLOOD_MAX_CHARS = 4000
 
 
 def _infoflood_gate(text: str, original: str) -> str:
     """Why an information-overload restatement of ``original`` is rejected, or
-    ``""``: empty, a copy, or a length ratio outside
-    :data:`FLOOD_RATIO_BAND` (for an original of at least
-    :data:`MIN_FLOOD_CHARS` characters)."""
-    if not text.strip():
+    ``""``: empty, a copy, shorter than ``FLOOD_RATIO_BAND[0]`` times the
+    original, or longer than both ``FLOOD_RATIO_BAND[1]`` times it and
+    :data:`FLOOD_MAX_CHARS`. Lengths are measured stripped."""
+    body, source = text.strip(), original.strip()
+    if not body:
         return "empty"
-    if text.strip() == original.strip():
+    if body == source:
         return "unchanged"
-    if len(original) >= MIN_FLOOD_CHARS:
-        ratio = len(text) / len(original)
-        low, high = FLOOD_RATIO_BAND
-        if not low <= ratio <= high:
-            return f"length_ratio={ratio:.2f}"
+    ratio = len(body) / max(1, len(source))
+    low, high = FLOOD_RATIO_BAND
+    if ratio < low or len(body) > max(high * len(source), FLOOD_MAX_CHARS):
+        return f"length_ratio={ratio:.2f}"
     return ""
 
 
