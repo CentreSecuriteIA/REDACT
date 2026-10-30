@@ -1,15 +1,20 @@
 {
-  "_comment": "Languages a romanization technique writes the prompt in, spelled in the Latin alphabet (Hinglish, Arabizi and the like), one row per technique (the romanization generator of combination_spec.json makes to_romanize_{slug}). name: the language as the prompt and info write it. slug: the end of the technique name. romanized_label: the GlotLID v3 label of that language written in Latin script, used by the gate to confirm the output is the romanized language and not plain English (jailbreak/obfuscation/romanization.py); every language here has one (GlotLID v3 has romanized labels for these South Asian languages and for Arabic; it has none for romanized Russian, Japanese, Chinese, Greek or Korean, which are therefore not built: nothing here could tell their output from plain English). GlotLID's romanized labels were trained on few sentences (hundreds to ~1000), so the gate also accepts a Latin-script output that is not English as a fallback. Read from the package only.",
+  "_comment": "Languages a romanization technique writes the prompt in, spelled in the Latin alphabet (Hinglish, Arabizi and the like), one row per technique, to_romanize_{slug} (jailbreak/obfuscation/romanization.py builds every row's function). name: the language as the prompt and info write it. slug: the end of the technique name. romanized_label: the GlotLID v3 label of that language written in Latin script, which confirms the output is the romanized language and not plain English; GlotLID's romanized labels were trained on few sentences (hundreds to ~1000), so the gate also accepts a Latin-script output GlotLID reads as any language but English. It is null for Russian, Japanese, Chinese, Greek and Korean (spec 1.5): GlotLID v3 has no Latin-script label for any of them, so nothing reads their language in code. Their gate is weaker, by the owner's decision with the risk understood: a Latin share, the length band, a count of distinctively English words in place of the label (romanization.ENGLISH_MARKERS), GlotLID's eng_Latn reading when it is installed, and the check model's reading of meaning and language, the only check that tells their language; plain English, or another language, is more likely to pass for them than for the other ten. natural: whether the natural kind draws the row's technique too. The romanization generator of combination_spec.json makes the rows where it is true (they take the family's kinds, adversarial and natural); a row where it is false is written out among the spec's techniques with kinds [\"adversarial\"], since a data row's own kinds are not read (jailbreak/technique.py, _ROW_KEYS). Read from the package only.",
   "rows": [
-    {"name": "Hindi", "slug": "hindi", "romanized_label": "hin_Latn", "since": "1.4"},
-    {"name": "Urdu", "slug": "urdu", "romanized_label": "urd_Latn", "since": "1.4"},
-    {"name": "Bengali", "slug": "bengali", "romanized_label": "ben_Latn", "since": "1.4"},
-    {"name": "Marathi", "slug": "marathi", "romanized_label": "mar_Latn", "since": "1.4"},
-    {"name": "Tamil", "slug": "tamil", "romanized_label": "tam_Latn", "since": "1.4"},
-    {"name": "Telugu", "slug": "telugu", "romanized_label": "tel_Latn", "since": "1.4"},
-    {"name": "Gujarati", "slug": "gujarati", "romanized_label": "guj_Latn", "since": "1.4"},
-    {"name": "Punjabi", "slug": "punjabi", "romanized_label": "pan_Latn", "since": "1.4"},
-    {"name": "Nepali", "slug": "nepali", "romanized_label": "npi_Latn", "since": "1.4"},
-    {"name": "Arabic", "slug": "arabic", "romanized_label": "arb_Latn", "since": "1.4"}
+    {"name": "Hindi", "slug": "hindi", "romanized_label": "hin_Latn", "natural": true, "since": "1.4"},
+    {"name": "Urdu", "slug": "urdu", "romanized_label": "urd_Latn", "natural": true, "since": "1.4"},
+    {"name": "Bengali", "slug": "bengali", "romanized_label": "ben_Latn", "natural": true, "since": "1.4"},
+    {"name": "Marathi", "slug": "marathi", "romanized_label": "mar_Latn", "natural": true, "since": "1.4"},
+    {"name": "Tamil", "slug": "tamil", "romanized_label": "tam_Latn", "natural": true, "since": "1.4"},
+    {"name": "Telugu", "slug": "telugu", "romanized_label": "tel_Latn", "natural": true, "since": "1.4"},
+    {"name": "Gujarati", "slug": "gujarati", "romanized_label": "guj_Latn", "natural": true, "since": "1.4"},
+    {"name": "Punjabi", "slug": "punjabi", "romanized_label": "pan_Latn", "natural": true, "since": "1.4"},
+    {"name": "Nepali", "slug": "nepali", "romanized_label": "npi_Latn", "natural": true, "since": "1.4"},
+    {"name": "Arabic", "slug": "arabic", "romanized_label": "arb_Latn", "natural": true, "since": "1.4"},
+    {"name": "Russian", "slug": "russian", "romanized_label": null, "natural": false, "since": "1.5"},
+    {"name": "Japanese", "slug": "japanese", "romanized_label": null, "natural": false, "since": "1.5"},
+    {"name": "Chinese", "slug": "chinese", "romanized_label": null, "natural": false, "since": "1.5"},
+    {"name": "Greek", "slug": "greek", "romanized_label": null, "natural": false, "since": "1.5"},
+    {"name": "Korean", "slug": "korean", "romanized_label": null, "natural": false, "since": "1.5"}
   ]
 }

@@ -133,6 +133,12 @@ _MILD_NOISE = [f"to_{noise}_{density}" for noise in (
     "random_capitals", "scrambled_letters", "keyboard_typos", "emoji_sprinkle")
     for density in ("low", "medium")]
 
+#: The five romanizations of spec 1.5, whose languages GlotLID has no
+#: romanized label for: attack only, written out in the spec with kinds
+#: ["adversarial"] though their family is natural too.
+_ATTACK_ONLY_ROMANIZATIONS = [f"to_romanize_{slug}" for slug in (
+    "russian", "japanese", "chinese", "greek", "korean")]
+
 
 def test_the_default_variation_pool_is_the_96_pinned_natural_techniques():
     """A technique added to a family the spec marks natural takes its
@@ -143,7 +149,9 @@ def test_the_default_variation_pool_is_the_96_pinned_natural_techniques():
     ``to_ask_with_urgency``. Spec 1.4's language-mix step admitted the four
     transliterations, the ten code-switching techniques and the ten
     romanizations to the natural kind (dialect too, but only under the
-    translation switch, which the natural kind has off by default)."""
+    translation switch, which the natural kind has off by default). Spec
+    1.5's five romanizations without a GlotLID label are attack only, so
+    the pool did not move."""
     pool = technique_pool(resolve(None, "natural"))
     assert sorted(fn.__name__ for fn in pool) == NATURAL_POOL
     assert len(pool) == 96      # noqa: PLR2004
@@ -155,8 +163,9 @@ def test_the_default_variation_pool_is_the_96_pinned_natural_techniques():
         "to_rewrite_with_typos_low", "to_rewrite_with_typos_medium",
         *_family("casual_writing", "neutral_container", "answer_language",
                  "indirect", "smalltalk_prefix", "smalltalk_suffix",
-                 "benign_role", "transliteration", "code_switching",
-                 "romanization"),
+                 "benign_role", "transliteration", "code_switching"),
+        *(name for name in _family("romanization")
+          if name not in _ATTACK_ONLY_ROMANIZATIONS),
         *_family("asking"),
         "to_answer_in_markdown", "to_answer_as_tutorial", "to_answer_as_code",
         "to_answer_as_structured_data", *_MILD_NOISE,
@@ -170,7 +179,7 @@ def test_the_default_variation_pool_is_the_96_pinned_natural_techniques():
         "suffixes", "transliteration", "code_switching", "romanization"}
 
 
-def test_the_default_attack_pool_is_315_techniques_in_45_families():
+def test_the_default_attack_pool_is_320_techniques_in_45_families():
     """Every active technique but casual writing and the natural-only
     families: the 24 translations included, now the packaged adversarial
     kind has its translation switch on (the four spec 1.3 ones are Hmong,
@@ -192,23 +201,25 @@ def test_the_default_attack_pool_is_315_techniques_in_45_families():
     reasoning-injection technique, two code-framing frames and one
     bijection-learning cipher (packet B), and the four semantic-reencoding
     techniques, translationese (its translation switch on) and the five
-    sociolects (packet C). Small talk and the benign roles leave it as it
-    was."""
+    sociolects (packet C), and the five romanizations without a GlotLID
+    label (Russian, Japanese, Chinese, Greek, Korean). Small talk and the
+    benign roles leave it as it was."""
     pool = technique_pool(resolve(None, "adversarial"))
-    assert len(pool) == 315     # noqa: PLR2004
+    assert len(pool) == 320     # noqa: PLR2004
+    assert set(_ATTACK_ONLY_ROMANIZATIONS) <= {fn.__name__ for fn in pool}
     assert len({fn.families[0] for fn in pool}) == 45     # noqa: PLR2004
 
 
 def test_the_rewrite_layer_is_off_by_default_and_layers_allow_adds_its_16_techniques():
     """The spec has the layer off by default, so the default attack pool is
-    the 315 and no other pool holds a rewrite technique; a section that allows
+    the 320 and no other pool holds a rewrite technique; a section that allows
     the layer gains the 16 of its three families, and nothing else leaves or
     joins."""
     default = technique_pool(resolve(None, "adversarial"))
     allowed = technique_pool(resolve(
         {"adversarial": {"layers": {"allow": ["rewrite"]}}}, "adversarial"))
     gained = [fn for fn in allowed if fn not in default]
-    assert (len(default), len(allowed), len(gained)) == (315, 331, 16)   # noqa: PLR2004
+    assert (len(default), len(allowed), len(gained)) == (320, 336, 16)   # noqa: PLR2004
     assert gained == _rewrites(all_techniques())
     assert {fn.families[0] for fn in gained} == {
         "persuasion", "tense_rewrite", "model_distractors"}
