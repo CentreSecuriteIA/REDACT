@@ -12,6 +12,7 @@ from redact.jailbreak.pool import all_techniques, registry
 from redact.jailbreak.rules import compatible
 from redact.jailbreak.technique import applies
 from redact.llm_pipeline.drive import drive_sync
+from redact.llms.prompting import load_prompt
 
 _BY = {fn.__name__: fn for fn in get_semantic_reencoding_functions()}
 _ORIGINAL = "Explain how to bake sourdough bread at home, step by step please."
@@ -90,6 +91,78 @@ def test_the_stego_gate_checks_the_acrostic_exactly():
     assert sr._stego_gate(last, original) == "acrostic mismatch"
 
 
+# --- where a sentence ends: ordinary punctuation is not an extra sentence ---
+
+_STEGO_ORIGINAL = "Explain how rainbows form"
+_S1 = "Explain the plan to the children before the walk."
+_S2 = "How lovely the morning light looks over the hills."
+_S3 = "Rainbows sometimes appear after the rain on these slopes."
+_S4 = "Form a line, the teacher says, and everyone laughs."
+
+
+@pytest.mark.parametrize("paragraph", [
+    # a title's full stop inside a sentence
+    f"Explain the plan to Mr. Brown before the walk. {_S2} {_S3} {_S4}",
+    f"Explain the plan to the children before Dr. Lee arrives. {_S2} {_S3} {_S4}",
+    # an abbreviation inside a sentence, a lowercase word after it
+    f"Explain the plan before 9 a.m. on the day of the walk. {_S2} {_S3} {_S4}",
+    f"Explain the snacks, the maps, etc. to the children. {_S2} {_S3} {_S4}",
+    # a sentence ending in a closing quote, then the next sentence
+    f'{_S1} How lovely the light looks, she said, "over the hills." {_S3} {_S4}',
+    f'{_S1} How lovely, someone asks, "is the light here?" {_S3} {_S4}',
+    # a sentence ending in an ellipsis character or a closing bracket
+    f"{_S1} How lovely the morning light looks over the hills… {_S3} {_S4}",
+    f"{_S1} How lovely the light looks (it is early.) {_S3} {_S4}",
+    # the next sentence opens with a digit, or with its own opening quote
+    f"{_S1} How lovely the hills, the lake, etc. 3 rainbows appeared. {_S4}",
+    f'{_S1} How lovely, she said, "the hills." "Rainbows came," he adds. {_S4}',
+], ids=["title-mr", "title-dr", "abbrev-pm", "abbrev-etc", "quote-full-stop",
+        "quote-question", "ellipsis", "bracket", "digit-after-etc",
+        "quote-after-quote"])
+def test_the_stego_gate_accepts_a_correct_acrostic_with_ordinary_punctuation(
+        paragraph):
+    """The first word of each sentence is its word, in order: the acrostic is
+    exact, and the punctuation must not read as an extra or a missing
+    sentence (each of these was rejected as ``acrostic count`` before)."""
+    assert sr._stego_gate(paragraph, _STEGO_ORIGINAL) == ""
+
+
+def test_an_abbreviation_that_ends_a_sentence_still_ends_it():
+    """Before a capital, the full stop of ``etc.`` ends the sentence, so the
+    next hidden word starts a sentence of its own."""
+    paragraph = f"Explain the snacks, the maps, the route, etc. {_S2} {_S3} {_S4}"
+    assert sr._stego_gate(paragraph, _STEGO_ORIGINAL) == ""
+
+
+def test_quoted_speech_the_sentence_goes_on_after_is_one_sentence():
+    """A closing quote then a lowercase word does not end the sentence."""
+    paragraph = (f'Explain the plan, the teacher said, "and stay close!" she added. '
+                 f"{_S2} {_S3} {_S4}")
+    assert sr._stego_gate(paragraph, _STEGO_ORIGINAL) == ""
+
+
+@pytest.mark.parametrize("paragraph", [
+    # an extra sentence after a closing quote, and after "etc."
+    f'{_S1} How lovely, she said, "the hills." It was early. {_S3} {_S4}',
+    f"Explain the snacks, the maps, etc. Then we left. {_S2} {_S3} {_S4}",
+    # an extra sentence after a sentence that ends in an ellipsis
+    f"{_S1} {_S2} It was early… {_S3} {_S4}",
+    # a closing sentence the request does not hold
+    f"{_S1} {_S2} {_S3} {_S4} It was a perfect day.",
+    # one sentence per line without a full stop is a list, one sentence
+    "\n".join(s.rstrip(".") for s in (_S1, _S2, _S3, _S4)),
+], ids=["after-quote", "after-etc", "after-ellipsis", "closing", "lines"])
+def test_the_stego_gate_still_counts_every_real_sentence(paragraph):
+    assert sr._stego_gate(paragraph, _STEGO_ORIGINAL).startswith("acrostic count=")
+
+
+@pytest.mark.parametrize("first", ["Describe", "Explaining", "Explains"])
+def test_the_stego_gate_still_wants_the_exact_word(first):
+    """A synonym or an inflected form is another word: not the acrostic."""
+    paragraph = f"{first} the plan to Mr. Brown before the walk. {_S2} {_S3} {_S4}"
+    assert sr._stego_gate(paragraph, _STEGO_ORIGINAL) == "acrostic mismatch"
+
+
 def test_the_infoflood_gate_requires_a_longer_restatement():
     assert sr._infoflood_gate("", _ORIGINAL) == "empty"
     assert sr._infoflood_gate(_ORIGINAL, _ORIGINAL) == "unchanged"
@@ -98,9 +171,61 @@ def test_the_infoflood_gate_requires_a_longer_restatement():
         "length_ratio=")
     # within the band
     assert sr._infoflood_gate("y" * (len(_ORIGINAL) * 3), _ORIGINAL) == ""
-    # a runaway reply is rejected too
-    assert sr._infoflood_gate("y" * (len(_ORIGINAL) * 50), _ORIGINAL).startswith(
-        "length_ratio=")
+    # a runaway reply, the size of one cut at the generation cap, is rejected too
+    assert sr._infoflood_gate("y" * 8000, _ORIGINAL).startswith("length_ratio=")
+
+
+def test_the_infoflood_gate_accepts_the_prompts_own_example():
+    """The packaged prompt's example restates a short request at about 14
+    times its length; the gate must accept what the prompt teaches."""
+    config = load_prompt("jailbreak", "infoflood")
+    before, after = config["template"].split("{prompt}")
+    asked, answer = (m["content"] for m in config["few_shot_examples"][:2])
+    example = asked[len(before):len(asked) - len(after)]
+    assert asked == before + example + after
+    assert len(answer) / len(example) > sr.FLOOD_RATIO_BAND[1]
+    assert sr._infoflood_gate(answer, example) == ""
+
+
+@pytest.mark.parametrize(("original", "accepted", "rejected"), [
+    # a short original: the absolute allowance is the ceiling
+    (50, 4000, 4001),
+    # a long one: 12 times it is more than the allowance, and is the ceiling
+    (500, 6000, 6001),
+])
+def test_the_infoflood_ceiling_is_twelve_times_or_the_allowance(
+        original, accepted, rejected):
+    source = "x" * original
+    assert sr._infoflood_gate("y" * accepted, source) == ""
+    assert sr._infoflood_gate("y" * rejected, source).startswith("length_ratio=")
+
+
+def test_a_restatement_of_the_published_length_passes_for_a_one_line_request():
+    """The paper's shape is 180 to 270 words whatever the request's length:
+    for a one-line request that is far over 12 times."""
+    source = "x" * 90
+    for words in (180, 270):
+        text = " ".join(["overload"] * words)
+        assert len(text) > sr.FLOOD_RATIO_BAND[1] * len(source)
+        assert sr._infoflood_gate(text, source) == ""
+
+
+@pytest.mark.parametrize("original", [19, 100])
+def test_the_infoflood_floor_is_one_point_eight_times_for_any_original(original):
+    """No short-original exemption: a reply under 1.8 times is rejected, a
+    reply shorter than a very short original too."""
+    source = "x" * original
+    at = round(1.8 * original + 0.5)  # the first length at or above 1.8x
+    assert sr._infoflood_gate("y" * at, source) == ""
+    assert sr._infoflood_gate("y" * (at - 1), source).startswith("length_ratio=")
+    assert sr._infoflood_gate("y", source).startswith("length_ratio=")
+
+
+def test_whitespace_does_not_count_toward_the_infoflood_ratio():
+    source = "x" * 40
+    padded = "y" * 40 + "\n" * 40
+    assert sr._infoflood_gate(padded, source).startswith("length_ratio=")
+    assert sr._infoflood_gate("  " + "y" * 72 + "\n", source) == ""
 
 
 def test_stego_applies_only_to_a_request_of_a_few_words():

@@ -17,8 +17,9 @@ the original request (``check`` ``reencode``), a rejection fed back up to
   for natural, benign prose, not for the request (which is hidden). A text of
   fewer than 3 or more than 40 words is discarded before any model call.
 * :func:`to_infoflood` -- an information-overload restatement (InfoFlood,
-  Yadav 2506.12274). Gate: the restatement is substantially longer than the
-  original (a length-ratio band).
+  Yadav 2506.12274). Gate: the restatement is at least 1.8 times the
+  original's length, and at most 12 times it or 4,000 characters, whichever
+  is more (the paper's own length is absolute: at least 180 words).
 
 ``info`` is ``form=<name>``; ``DISCARDED; reason=...; form=<name>; feedback=...``
 on rejection. The quality of the verse and the overload is not verifiable here
@@ -117,7 +118,19 @@ MAX_ACROSTIC_WORDS = 40
 MIN_ACROSTIC_WORDS = 3
 
 _WORD = re.compile(r"[A-Za-z][A-Za-z'-]*")
-_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+#: Where a sentence may end: a run of ``.``, ``!``, ``?`` or ``…``, any closing
+#: quotes or brackets after it (the group), then whitespace.
+_SENTENCE_END = re.compile(r"[.!?\u2026]+([\"'\u201d\u2019)\]]*)\s+")
+#: Titles written before a name: the full stop after one never ends a sentence.
+_TITLES = frozenset({
+    "mr", "mrs", "ms", "mx", "dr", "prof", "st", "mt", "rev", "fr", "capt",
+    "lt", "sgt", "col", "gen", "gov", "sen", "rep", "hon",
+})
+#: Abbreviations that end in a full stop inside a sentence as often as at its
+#: end: the full stop after one ends a sentence only before a capital or digit.
+_ABBREVIATIONS = frozenset({"etc", "e.g", "i.e", "a.m", "p.m", "vs", "approx", "cf"})
+#: What may open a sentence before its first letter.
+_OPENERS = "\"'\u201c\u2018(["
 
 
 def _acrostic_words(text: str) -> list[str]:
@@ -134,21 +147,47 @@ def _acrostic_fits(text: str) -> bool:
     return MIN_ACROSTIC_WORDS <= len(_acrostic_words(text)) <= MAX_ACROSTIC_WORDS
 
 
+def _sentences(text: str) -> list[str]:
+    """The sentences of ``text``: split at each :data:`_SENTENCE_END`, except
+    after a title (``Mr.``, :data:`_TITLES`), and except, when the next word
+    starts with neither a capital nor a digit, after an abbreviation
+    (``etc.``, ``p.m.``, :data:`_ABBREVIATIONS`) or a closing quote or bracket
+    (quoted speech the sentence goes on after). A sentence that ends in a
+    closing quote, a bracket or ``…`` before the next one is still a sentence.
+    The acrostic is unchanged by this: each sentence must still begin with its
+    word; only where a sentence ends is read more carefully."""
+    sentences, start = [], 0
+    for match in _SENTENCE_END.finditer(text):
+        before = text[start:match.start()].split()
+        token = before[-1].lstrip(_OPENERS).lower() if before else ""
+        if token in _TITLES:
+            continue
+        rest = text[match.end():].lstrip(_OPENERS)
+        capital = bool(rest) and (rest[0].isupper() or rest[0].isdigit())
+        if (match.group(1) or token in _ABBREVIATIONS) and not capital:
+            continue
+        sentences.append(text[start:match.end()])
+        start = match.end()
+    sentences.append(text[start:])
+    return [s.strip() for s in sentences if s.strip()]
+
+
 def _first_word(sentence: str) -> str | None:
-    """The first word of ``sentence`` (letters only), or ``None`` for a
-    sentence that starts with no letter."""
+    """The first word of ``sentence`` (its first run of letters, so a leading
+    quote, bracket or digit is passed over), or ``None`` for a sentence with no
+    letter."""
     match = _WORD.search(sentence)
     return match.group(0) if match else None
 
 
 def _stego_gate(text: str, original: str) -> str:
     """Why an acrostic paragraph for ``original`` is rejected, or ``""``: empty,
-    or the first words of its sentences are not, in order and case-folded, the
-    words of the request (the exact acrostic)."""
+    or the first words of its sentences (:func:`_sentences`) are not, in order
+    and case-folded, the words of the request (the exact acrostic)."""
     if not text.strip():
         return "empty"
     words = _acrostic_words(original)
-    sentences = [s for s in _SENTENCE_SPLIT.split(text.strip()) if s.strip()]
+    sentences = _sentences(text.strip())
     leads = [_first_word(s) for s in sentences]
     if len(leads) != len(words):
         return f"acrostic count={len(leads)} want={len(words)}"
@@ -160,27 +199,33 @@ def _stego_gate(text: str, original: str) -> str:
 
 # --- infoflood ------------------------------------------------------------
 
-#: An information-overload restatement is between these multiples of the
-#: original's length: long enough to be an overload, not a runaway reply.
+#: An information-overload restatement is at least the first multiple of the
+#: original's length (an overload), and at most the second or
+#: :data:`FLOOD_MAX_CHARS`, whichever is more (not a runaway reply).
 FLOOD_RATIO_BAND = (1.8, 12.0)
-#: Below this many characters a ratio says little (a short request).
-MIN_FLOOD_CHARS = 20
+#: The ceiling for a short original. The paper sets an absolute length, not a
+#: ratio ("at least 180 words"; successes at about 190 to 270 words), so a
+#: one-line request restated at that length is 14 to 42 times as long. 4,000
+#: characters is twice the top of that range at the packaged example's 7.1
+#: characters a word: the published shape always fits, and a reply cut at
+#: :data:`GEN_MAX_TOKENS` (about 8,000 characters) still does not.
+FLOOD_MAX_CHARS = 4000
 
 
 def _infoflood_gate(text: str, original: str) -> str:
     """Why an information-overload restatement of ``original`` is rejected, or
-    ``""``: empty, a copy, or a length ratio outside
-    :data:`FLOOD_RATIO_BAND` (for an original of at least
-    :data:`MIN_FLOOD_CHARS` characters)."""
-    if not text.strip():
+    ``""``: empty, a copy, shorter than ``FLOOD_RATIO_BAND[0]`` times the
+    original, or longer than both ``FLOOD_RATIO_BAND[1]`` times it and
+    :data:`FLOOD_MAX_CHARS`. Lengths are measured stripped."""
+    body, source = text.strip(), original.strip()
+    if not body:
         return "empty"
-    if text.strip() == original.strip():
+    if body == source:
         return "unchanged"
-    if len(original) >= MIN_FLOOD_CHARS:
-        ratio = len(text) / len(original)
-        low, high = FLOOD_RATIO_BAND
-        if not low <= ratio <= high:
-            return f"length_ratio={ratio:.2f}"
+    ratio = len(body) / max(1, len(source))
+    low, high = FLOOD_RATIO_BAND
+    if ratio < low or len(body) > max(high * len(source), FLOOD_MAX_CHARS):
+        return f"length_ratio={ratio:.2f}"
     return ""
 
 
