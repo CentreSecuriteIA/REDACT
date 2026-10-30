@@ -643,7 +643,14 @@ _BUDGETS = [
 # 240 dealt units and 18 of the 200 undealt draws held such a pair and none
 # does now, which moved 125 dealt units and 23 undealt draws. No eval pool
 # draws bijection either.
-_PINNED_DRAWS = "c2953048c114ae263230a1a1ba00d99c3f26c0af4ef80474499d45d11a069c1b"
+# Spec 1.5's five romanizations of languages GlotLID has no romanized label
+# for (Russian, Japanese, Chinese, Greek, Korean; attack only) join an
+# existing family, so the family-first picks are unchanged (15 dealt units
+# hold a romanization before and after) and only the member drawn within the
+# family, then the rng and the group's counts after it, move: 19 of the 240
+# dealt units (6 of them holding one of the five) and 1 of the 200 undealt
+# draws (which holds one). No eval pool draws romanization.
+_PINNED_DRAWS = "735396faf6a4c8b64339c1a789e7b495d86cec1eab00a94fff4091ac6907ee3c"
 
 
 

@@ -635,11 +635,14 @@ SPEC_1_4_ADDED = {"persona_template": 12, "suffixes": 24, "translation": 1,
 #: reasoning-injection, two code-framing and one bijection-learning technique;
 #: packet C's four semantic-reencoding techniques, translationese (one, on the
 #: translation model under the switch, which the default attacks have on) and
-#: the five English sociolects. Thirty in all.
+#: the five English sociolects; and the five romanizations of languages
+#: GlotLID has no romanized label for (Russian, Japanese, Chinese, Greek,
+#: Korean; attack only). Thirty-five in all.
 SPEC_1_5_ADDED = {"unicode_smuggling": 3, "char_injection": 8, "special_tokens": 2,
                   "fallacy": 1, "policy_framing": 2, "reasoning_injection": 1,
                   "code_framing": 2, "bijection": 1,
-                  "semantic_reencoding": 4, "translationese": 1, "sociolect": 5}
+                  "semantic_reencoding": 4, "translationese": 1, "sociolect": 5,
+                  "romanization": 5}
 
 
 def _by_family(names: list[str]) -> dict[str, int]:
@@ -655,9 +658,9 @@ def _growth_since_1_2(key: str, pool: list) -> tuple[list[str], list[str]] | Non
 
 
 def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
-    """The attack pool of a plan made at 1.2 differs from today's by 137
+    """The attack pool of a plan made at 1.2 differs from today's by 142
     names, none retired: 36 dated 1.3 (the four translations switched on
-    among them), the 71 dated 1.4 (:data:`SPEC_1_4_ADDED`) and the 30 dated
+    among them), the 71 dated 1.4 (:data:`SPEC_1_4_ADDED`) and the 35 dated
     1.5 (:data:`SPEC_1_5_ADDED`). The library added them after the plan, so
     the plan is kept and the run warns."""
     added, retired = _growth_since_1_2(
@@ -668,7 +671,7 @@ def test_an_attack_plan_of_spec_1_2_finds_what_later_specs_added_as_growth():
         for version in {by_name[name].since for name in added}}
     assert retired == []
     assert {version: len(names) for version, names in by_version.items()} == {
-        "1.3": 36, "1.4": 71, "1.5": 30}
+        "1.3": 36, "1.4": 71, "1.5": 35}
     assert set(_FOUR_TRANSLATIONS) <= set(by_version["1.3"])
     assert _by_family(by_version["1.4"]) == SPEC_1_4_ADDED
     assert _by_family(by_version["1.5"]) == SPEC_1_5_ADDED
@@ -706,7 +709,7 @@ def test_an_attack_plan_of_spec_1_3_finds_what_spec_1_4_and_1_5_added_as_growth(
     """Spec 1.4 switched Yoruba's translation on and added twelve persona
     templates, the 24 published suffixes, the letter spacing, three
     guardrail-address techniques and the language-mix families; spec 1.5 added
-    the thirty literature-gap techniques (:data:`SPEC_1_5_ADDED`). A plan kept
+    the thirty-five literature-gap techniques (:data:`SPEC_1_5_ADDED`). A plan kept
     from 1.3 finds all of them as the library's growth, retiring nothing, so
     the plan is kept and the run warns."""
     added, retired = _growth_since_1_3(

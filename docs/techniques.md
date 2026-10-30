@@ -1,6 +1,6 @@
 # Jailbreak techniques
 
-The jailbreak stage draws from 345 active techniques in 5 layers and 52
+The jailbreak stage draws from 350 active techniques in 5 layers and 52
 families; the first layer, `rewrite`, holds 16 and is off by default
 ([below](#layers)).
 `configs/jailbreak/combination_spec.json` gives each technique (the
@@ -79,10 +79,10 @@ on. (`to_rewrite`, despite its name, is an `indirect` request technique.)
 |---|---|---|---|
 | `rewrite` | 3 | 16 | at most 1 |
 | `hacking` | 5 | 49 | at most 1 |
-| `obfuscation` | 25 | 190 | no cap |
+| `obfuscation` | 25 | 195 | no cap |
 | `requests` | 15 | 74 | at most 1 |
 | `manipulation` | 4 | 16 | at most 1 |
-| all | 52 | 345 | |
+| all | 52 | 350 | |
 <!-- END layers -->
 
 ## Families and techniques
@@ -110,7 +110,7 @@ that call a model call the generation model.
 | obfuscation | `dialect` | `language` | 11 | 6 | yes | no | `to_dialect_brazilian_portuguese`, `to_dialect_mexican_spanish`, `to_dialect_canadian_french`, `to_dialect_egyptian_arabic`, `to_dialect_german_switzerland`, `to_dialect_traditional_chinese` |
 | obfuscation | `code_switching` | `language` | 12 | 10 | yes | no | `to_code_switch_spanish`, `to_code_switch_french`, `to_code_switch_german`, `to_code_switch_portuguese`, `to_code_switch_swahili`, `to_code_switch_russian`, `to_code_switch_arabic`, `to_code_switch_hindi`, `to_code_switch_chinese`, `to_code_switch_japanese` |
 | obfuscation | `transliteration` | `encoding` | 13 | 4 | no | no | `to_cyrillic_transliteration`, `to_greek_transliteration`, `to_devanagari_transliteration`, `to_arabic_transliteration` |
-| obfuscation | `romanization` | `language` | 14 | 10 | yes | no | `to_romanize_hindi`, `to_romanize_urdu`, `to_romanize_bengali`, `to_romanize_marathi`, `to_romanize_tamil`, `to_romanize_telugu`, `to_romanize_gujarati`, `to_romanize_punjabi`, `to_romanize_nepali`, `to_romanize_arabic` |
+| obfuscation | `romanization` | `language` | 14 | 15 | yes | no | `to_romanize_russian`, `to_romanize_japanese`, `to_romanize_chinese`, `to_romanize_greek`, `to_romanize_korean`, `to_romanize_hindi`, `to_romanize_urdu`, `to_romanize_bengali`, `to_romanize_marathi`, `to_romanize_tamil`, `to_romanize_telugu`, `to_romanize_gujarati`, `to_romanize_punjabi`, `to_romanize_nepali`, `to_romanize_arabic` |
 | obfuscation | `semantic_reencoding` | `semantic_form` | 15 | 4 | yes | no | `to_mathprompt`, `to_adversarial_poetry`, `to_stego_paragraph`, `to_infoflood` |
 | obfuscation | `translationese` | `language` | 16 | 1 | yes | no | `to_translationese` |
 | obfuscation | `sociolect` | `language` | 17 | 5 | yes | no | `to_sociolect_african_american_english`, `to_sociolect_singlish`, `to_sociolect_indian_english`, `to_sociolect_jamaican_english`, `to_sociolect_scottish_english` |
@@ -566,7 +566,7 @@ their own. The natural kind draws only what is marked natural: by default
 | `typos` | `to_rewrite_with_typos_low`, `to_rewrite_with_typos_medium` |
 | `transliteration` | all four (since spec 1.4) |
 | `code_switching` | all ten (since spec 1.4) |
-| `romanization` | all ten (since spec 1.4) |
+| `romanization` | the ten of spec 1.4 (not the five of spec 1.5, attack only) |
 | `casual_writing` | all nine |
 | `noise` | the low and medium densities of `to_random_capitals_*`, `to_scrambled_letters_*`, `to_keyboard_typos_*` and `to_emoji_sprinkle_*` (eight, since spec 1.2) |
 | `neutral_container` | all six (since spec 1.2) |
@@ -937,10 +937,11 @@ family, not in the eval pool.
   Latin letter. No reader of those scripts has checked the tables. Being
   pure, it is the one language-mix family the eval type draws (since eval
   pool v2).
-- `romanization` (10, `to_romanize_<slug>`) has the generation model rewrite
+- `romanization` (15, `to_romanize_<slug>`) has the generation model rewrite
   the prompt in a non-Latin language spelled in the Latin alphabet (Hinglish,
   Arabizi and the like): Hindi, Urdu, Bengali, Marathi, Tamil, Telugu,
-  Gujarati, Punjabi, Nepali or Arabic, one technique per row of
+  Gujarati, Punjabi, Nepali or Arabic, and since spec 1.5 Russian, Japanese,
+  Chinese, Greek or Korean, one technique per row of
   `romanization_languages.json`. A code gate checks that the reply is
   mostly Latin and that GlotLID does not read it as plain English (its
   romanized label confirms it; GlotLID has little data for them, so any
@@ -949,6 +950,31 @@ family, not in the eval pool.
   `jailbreak/romanize_check`), with the same retry as code switching. Spec
   `check` `meaning`, 2 to 4 calls. None of the four families is checked by
   a native speaker: the gates and the check model are the whole check.
+
+  **The five languages of spec 1.5 are gated more weakly than the other
+  ten.** GlotLID v3 has no Latin-script label for Russian, Japanese,
+  Chinese, Greek or Korean, so nothing in code can read their language; the
+  owner asked for them with that risk understood. Their gate is the Latin
+  share (at least 0.8 of the letters), the length band, GlotLID's
+  `eng_Latn` reading when it is installed, and, in place of the missing
+  label, a count of distinctively English words (`romanization.ENGLISH_MARKERS`:
+  English function words that are not common words of pinyin, Hepburn,
+  Revised Romanization, Greeklish or Russian transliteration). A reply in
+  which they reach one word in ten (`MAX_ENGLISH_SHARE`, 0.1), quotations,
+  brackets, code and URLs left out, is rejected as `english`, with or without
+  GlotLID. The check model's verdict, which is asked whether the rewrite is
+  in the named language, is the only check of the language itself. So for
+  these five, more than for the other ten: a short English reply with few
+  of those words can pass the code gate (on thirty English prompts the
+  count caught 23), a reply in the wrong language (romanized Korean for
+  Japanese) passes it always, and both are left to the check model. The
+  threshold was set from thirty English prompts and forty hand-written
+  romanized sentences, not from model output; their acceptance on a real
+  model is unmeasured (a pod run of `scripts/langmix_smoke.py` would
+  measure it, as it did for the other ten). They are attack only: the
+  family is natural too, but these five rows are written out in the spec
+  with `kinds` `["adversarial"]` (a data row's own `kinds` are not read),
+  so the natural pool is unchanged.
 - `semantic_reencoding` (4, spec 1.5) has the generation model re-express the
   request's meaning in another symbolic or literary form, each with a code
   gate for its form and then the check model reading the re-encoding against
@@ -1557,7 +1583,7 @@ model or its judge), and "accepted" one it did not.
 | `code_switching` (10), benign sentences of 5 to 40 words | 179 accepted (59.7%) | 300 | 2026-10-25 | Of 30 each: Russian 29, Portuguese 22, Hindi 21, Chinese 21, German 20, Arabic 18, French 15, Spanish 14, **Japanese 12, Swahili 7**. Of the 121 discards the code gate made 86 (no English left 44, length ratio 25, no second language 10, fully switched 7) and the check model 35. |
 | `code_switching`, inputs of 1 to 4 words | 18 accepted (22.5%) | 80 | 2026-10-25 | A 400-unit test: 1 word 0 of 100 (`too short to mix`), 2 words 8%, 3 words 20%, 4 words 30%, mostly check-model rejections. |
 | `code_switching`, training defaults | 30 of 48 draws discarded (64%) | 48 | 2026-10-25 | 999 inputs of all four entry types. In the natural kind 28 of 61 discarded (46%). |
-| `romanization` (10), benign sentences | 270 accepted (90%) | 300 | 2026-10-25 | GlotLID cannot tell the romanized Indic languages apart: Gujarati 4 of 29 outputs labelled `guj_Latn` (14 `hin_Latn`, 6 `urd_Latn`). The gate accepts any non-English Latin label. |
+| `romanization` (10), benign sentences | 270 accepted (90%) | 300 | 2026-10-25 | GlotLID cannot tell the romanized Indic languages apart: Gujarati 4 of 29 outputs labelled `guj_Latn` (14 `hin_Latn`, 6 `urd_Latn`). The gate accepts any non-English Latin label. The five of spec 1.5 (Russian, Japanese, Chinese, Greek, Korean) came after this run: not measured. |
 | `dialect` (6), benign sentences | 171 accepted (95%) | 180 | 2026-10-25 | Egyptian Arabic: 6 rejected for the label `ars_Arab`, and of 24 accepted only 5 are `arz_Arab` (16 `arb_Arab`). German (Switzerland): 3 of 30 rejected for a sharp s. The region asked for is not checked by anything. |
 | `transliteration` (4), benign sentences | 120 accepted | 120 | 2026-10-25 | Pure: no model. |
 | `persona` (14) and `cognitive` (5), benign sentences | 567 accepted of 760 (the scenario check failed 193, 25.4%) | 760 | 2026-10-25 | Under 50%: radical politician 4 of 40, cult leader 3, cartel leader 15, deformed scientist 16, artist 18. The five `cognitive` techniques 200 of 200. |
